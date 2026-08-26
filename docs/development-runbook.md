@@ -1,0 +1,99 @@
+# Local development runbook
+
+This runbook records the source versions and commands verified on Windows on 2026-08-25.
+It intentionally does not contain tokens or reusable passwords.
+
+## 1. Build SuperSonic
+
+From `D:\project\ai-coding\supersonic-stable`:
+
+```powershell
+mvn -pl launchers/standalone -am -DskipTests package
+```
+
+Verified result: all 17 reactor modules built successfully and produced
+`launchers/standalone/target/launchers-standalone-0.8.6-SNAPSHOT-bin.tar.gz`.
+
+The distribution can be extracted to a temporary runtime directory and started with:
+
+```powershell
+java -cp "conf;lib/*" com.tencent.supersonic.StandaloneLauncher
+```
+
+The local profile listens on port `9080` and uses an in-memory H2 demo database. Never expose
+this profile outside a developer workstation: upstream demo seed data contains predictable
+credentials and its authentication token secret falls back to an unsafe default unless overridden.
+
+## 2. Start AgentBI Orchestrator
+
+Obtain a short-lived SuperSonic token through its login endpoint, then set:
+
+```powershell
+$env:AGENTBI_API_KEY = '<32+ random characters>'
+$env:SUPERSONIC_BASE_URL = 'http://127.0.0.1:9080'
+$env:SUPERSONIC_TOKEN = 'Bearer <short-lived-token>'
+$env:PYTHONPATH = 'src'
+python -m uvicorn agentbi.main:app --host 127.0.0.1 --port 8090
+```
+
+Do not put the token or API key in a checked-in script.
+
+## 3. Optional SuperSonic frontend
+
+From `D:\project\ai-coding\supersonic-stable\webapp` build the chat SDK first:
+
+```powershell
+pnpm --filter supersonic-chat-sdk run build-es
+```
+
+Then start the frontend from `packages\supersonic-fe`:
+
+```powershell
+$env:NODE_OPTIONS = '--openssl-legacy-provider'
+pnpm run start:osdev
+```
+
+Open `http://127.0.0.1:9000/webapp/chat?agentId=1`. The first Webpack compilation can take
+several minutes; subsequent rebuilds are incremental. In the integrated Superset development
+stack, port `9000` is already used by Superset's Webpack server, so do not start both frontends
+on that port. The AgentBI demo only requires the SuperSonic backend on `9080`.
+
+On Windows, the chat SDK Rollup configuration must use a regular-expression include for
+TypeScript (`/\.tsx?$/`). The plugin's default glob did not match drive-letter paths and caused
+the SDK to be consumed without processed CSS Modules. Runtime bundling currently uses
+`check: false` and `declaration: false` because the upstream snapshot contains pre-existing type
+errors; strict type cleanup remains a separate task.
+
+## 4. Verified smoke path
+
+The following path has been verified against the real SuperSonic process:
+
+```text
+POST /api/v1/analyze
+  -> SuperSonic POST /api/chat/query/parse
+  -> select first governed semantic parse
+  -> SuperSonic POST /api/chat/query/execute
+  -> validate and bound rows
+  -> return answer + steps + evidence
+```
+
+Question `alice 停留时长` with time range `最近7天` returned six demo rows and a SQL fingerprint.
+No external LLM was required because SuperSonic's rule parser resolved the sample metric.
+
+The inspected upstream build can route newly persisted chats to WEB_PAGE plugins even for
+metric questions. The adapter rejects those candidates, keeps tenant-bound recent history in
+AgentBI, and serializes calls through SuperSonic's stateless governed-query context. This is a
+compatibility boundary for the demo; production should use a reviewed upstream fix and shared
+tenant-aware state for multi-replica deployment.
+
+## 5. Known upstream findings
+
+- The root POM declares `langchain4j-hugging-face` twice.
+- Spring Boot 2.5.1 and several transitive libraries require vulnerability review.
+- Druid logs `validationQuery not set` while `testWhileIdle` is enabled.
+- First startup generates missing HanLP binary caches from source dictionaries.
+- The development LLM endpoints point to `127.0.0.1:9092` and require separate configuration
+  for questions that cannot be handled by rule-based semantic parsing.
+
+These findings do not block the verified rule-based semantic query path, but should be tracked
+before the competition stability and security review.

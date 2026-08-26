@@ -1,0 +1,162 @@
+"""Narrow, timeout-bound adapter for SuperSonic's semantic query API."""
+
+from __future__ import annotations
+
+import asyncio
+import secrets
+from collections import deque
+from typing import Any
+
+import httpx
+
+from agentbi.config import Settings
+from agentbi.models import AnalyzeRequest
+
+
+class UpstreamError(RuntimeError):
+    """A sanitized SuperSonic integration failure."""
+
+
+class SuperSonicClient:
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        self._settings = settings
+        headers = {"Accept": "application/json"}
+        if settings.supersonic_token:
+            headers["Authorization"] = settings.supersonic_token
+        self._client = httpx.AsyncClient(
+            base_url=settings.supersonic_base_url,
+            headers=headers,
+            timeout=httpx.Timeout(settings.request_timeout_seconds),
+            transport=transport,
+        )
+        # The inspected SuperSonic build resolves governed metric candidates reliably
+        # through its stateless chat (id 0), while newly persisted chats can be captured
+        # by WEB_PAGE plugins. AgentBI therefore owns tenant-bound conversation history
+        # and serializes access to that upstream stateless context.
+        self._query_lock = asyncio.Lock()
+        self._history_lock = asyncio.Lock()
+        self._histories: dict[tuple[str, int], deque[str]] = {}
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def query(self, request: AnalyzeRequest) -> dict[str, Any]:
+        """Parse the question, select the best semantic parse, then execute it."""
+
+        conversation_id, history = await self._conversation(request)
+        parse_payload = {
+            "queryText": self._contextual_question(request, history),
+            "chatId": 0,
+            "viewId": request.context.semantic_model_id,
+            "agentId": request.agent_id,
+            "saveAnswer": True,
+        }
+        async with self._query_lock:
+            parsed = await self._post("/api/chat/query/parse", parse_payload)
+            candidates = (parsed.get("selectedParses") or []) + (
+                parsed.get("candidateParses") or []
+            )
+            if parsed.get("state") == "FAILED" or not candidates:
+                raise UpstreamError("SuperSonic could not resolve the semantic question")
+            parse_info = self._select_governed_query(candidates)
+
+            execute_payload = {
+                "queryText": parse_payload["queryText"],
+                "chatId": 0,
+                "agentId": request.agent_id,
+                "queryId": parsed.get("queryId"),
+                "parseId": parse_info["id"],
+                "saveAnswer": True,
+            }
+            result = await self._post("/api/chat/query/execute", execute_payload)
+        # SuperSonic's UI also restores queryId from the parse response because some
+        # execution modes omit it. Preserve that identifier for evidence and audit.
+        if result.get("queryId") is None and parsed.get("queryId") is not None:
+            result["queryId"] = parsed["queryId"]
+        result["chatId"] = conversation_id
+        async with self._history_lock:
+            self._histories[(request.actor.subject, conversation_id)].append(request.question)
+        return result
+
+    async def _conversation(self, request: AnalyzeRequest) -> tuple[int, list[str]]:
+        """Resolve an unguessable conversation id bound to the authenticated actor."""
+
+        async with self._history_lock:
+            if request.chat_id:
+                key = (request.actor.subject, request.chat_id)
+                history = self._histories.get(key)
+                if history is None:
+                    raise UpstreamError("AgentBI conversation is unavailable")
+                return request.chat_id, list(history)
+
+            used_ids = {conversation_id for _, conversation_id in self._histories}
+            conversation_id = secrets.randbelow(2_000_000_000) + 1
+            while conversation_id in used_ids:
+                conversation_id = secrets.randbelow(2_000_000_000) + 1
+            self._histories[(request.actor.subject, conversation_id)] = deque(maxlen=4)
+            return conversation_id, []
+
+    @staticmethod
+    def _select_governed_query(candidates: list[Any]) -> dict[str, Any]:
+        """Select an executable semantic query and reject plugin/URL candidates.
+
+        SuperSonic can rank WEB_PAGE plugins ahead of metric parses. AgentBI must never
+        execute those candidates because they can redirect the workflow to an external
+        URL. A populated querySQL proves the candidate passed SuperSonic's governed SQL
+        generation path; raw SQL is still never exposed to the browser.
+        """
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or candidate.get("id") is None:
+                continue
+            sql_info = candidate.get("sqlInfo")
+            if (
+                isinstance(sql_info, dict)
+                and isinstance(sql_info.get("querySQL"), str)
+                and sql_info["querySQL"].strip()
+            ):
+                return candidate
+        raise UpstreamError("SuperSonic returned no governed semantic query")
+
+    async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Call a ResultData-wrapped SuperSonic endpoint and validate its envelope."""
+
+        data = await self._request_data("POST", path, payload=payload)
+        if not isinstance(data, dict):
+            raise UpstreamError("SuperSonic returned an unexpected response")
+        return data
+
+    async def _request_data(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        try:
+            response = await self._client.request(method, path, json=payload, params=params)
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise UpstreamError("SuperSonic semantic query failed") from exc
+        if not isinstance(body, dict):
+            raise UpstreamError("SuperSonic returned an unexpected response")
+        if body.get("code") != 200 or "data" not in body:
+            raise UpstreamError("SuperSonic rejected the semantic query")
+        return body["data"]
+
+    @staticmethod
+    def _contextual_question(request: AnalyzeRequest, history: list[str] | None = None) -> str:
+        """Render dashboard state as data context, not as executable model instructions."""
+
+        parts = [request.question, f"时间范围：{request.context.time_range}"]
+        for item in request.context.filters:
+            parts.append(f"筛选条件：{item.field} {item.operator.value} {item.value}")
+        if request.context.selected:
+            parts.append(
+                f"当前选中：{request.context.selected.label}={request.context.selected.value}"
+            )
+        for previous in (history or [])[-2:]:
+            parts.append(f"同一用户的历史问题：{' '.join(previous.split())[:300]}")
+        return "；".join(parts)

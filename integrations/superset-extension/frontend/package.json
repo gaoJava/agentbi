@@ -1,0 +1,27 @@
+{
+  "name": "@agentbi/insight-pilot",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "webpack --stats-error-details --mode production",
+    "start": "webpack serve --mode development",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@apache-superset/core": "*",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "@apache-superset/core": "0.1.0-rc3",
+    "@types/react": "^17.0.0",
+    "@types/react-dom": "^17.0.0",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.2",
+    "webpack": "^5.98.0",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.0"
+  }
+}
+

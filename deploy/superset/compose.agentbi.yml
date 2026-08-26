@@ -1,0 +1,15 @@
+services:
+  superset:
+    # The development image already contains Python dependencies. Bypass the stock
+    # bootstrap script here to avoid rebuilding the editable wheel on every restart.
+    command: ["/usr/bin/run-server.sh"]
+    environment:
+      AGENTBI_ORCHESTRATOR_URL: http://host.docker.internal:8090
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY:?AGENTBI_API_KEY must be set}
+    volumes:
+      - "D:/project/ai-coding/agentbi/integrations/superset-extension:/app/extensions/agentbi-insight-pilot:ro"
+      - "D:/project/ai-coding/agentbi/deploy/superset/superset_config_docker.py:/app/docker/pythonpath_dev/superset_config_docker.py:ro"
+  superset-init:
+    volumes:
+      - "D:/project/ai-coding/agentbi/integrations/superset-extension:/app/extensions/agentbi-insight-pilot:ro"
+      - "D:/project/ai-coding/agentbi/deploy/superset/superset_config_docker.py:/app/docker/pythonpath_dev/superset_config_docker.py:ro"

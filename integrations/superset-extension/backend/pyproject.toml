@@ -1,0 +1,11 @@
+[project]
+name = "agentbi-insight_pilot"
+version = "0.1.0"
+description = "Superset backend bridge for InsightPilot"
+requires-python = ">=3.10"
+dependencies = ["apache-superset-core"]
+
+[tool.apache_superset_extensions.build]
+include = ["src/agentbi/insight_pilot/**/*.py"]
+exclude = []
+

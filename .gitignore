@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.env
+.idea/
+*.log
+.runtime/
+data/*.db
+data/*.db-*
+node_modules/
+dist/
+deploy/docker-anonymous/

@@ -1,0 +1,2 @@
+"""InsightPilot Superset extension."""
+

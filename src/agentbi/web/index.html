@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InsightPilot AgentBI</title>
+  <link rel="stylesheet" href="/app/assets/app.css">
+  <link rel="stylesheet" href="/app/assets/prototype.css">
+</head>
+<body>
+  <main id="login-view" class="login-layout">
+    <section class="brand-stage" aria-label="产品介绍">
+      <div class="brand"><span>◆</span> InsightPilot</div>
+      <div class="brand-copy">
+        <span class="eyebrow">ENTERPRISE AGENTBI</span>
+        <h1>让每一次分析<br>都有语义与证据</h1>
+        <p>融合 Superset 可视分析与 SuperSonic 语义查询，让业务问题能够追问、下钻和审计。</p>
+        <ul class="feature-list">
+          <li><span>⌗</span><div><strong>屏幕感知</strong><small>理解当前仪表盘、筛选条件和数据选点</small></div></li>
+          <li><span>♢</span><div><strong>权限隔离</strong><small>角色、菜单与数据范围均由服务端控制</small></div></li>
+          <li><span>✦</span><div><strong>可信问答</strong><small>每个结论都携带可追溯的证据路径</small></div></li>
+        </ul>
+      </div>
+      <div class="security-pill">◇ 企业级权限与数据隔离</div>
+    </section>
+    <section class="login-stage">
+      <form id="login-form" class="login-card">
+        <div class="mobile-brand">◆ InsightPilot</div>
+        <h2>欢迎登录</h2><p>登录 InsightPilot 分析工作台</p>
+        <div class="role-tabs" role="tablist" aria-label="演示身份">
+          <button type="button" class="role-tab active" data-account="user">普通用户</button>
+          <button type="button" class="role-tab" data-account="admin">管理员</button>
+        </div>
+        <label>用户名<input id="username" autocomplete="username" value="user" required></label>
+        <label>密码<input id="password" type="password" autocomplete="current-password" required></label>
+        <div class="login-options"><label><input type="checkbox" checked> 记住我</label><button type="button">忘记密码</button></div>
+        <div id="login-error" class="form-error" role="alert" hidden></div>
+        <button id="login-button" class="primary-button" type="submit">登录分析工作台</button>
+        <div class="demo-hint">演示账号：user / user　admin / admin</div>
+        <div class="secure-note">◇ 企业级权限与数据隔离</div>
+      </form>
+    </section>
+  </main>
+
+  <main id="workbench-view" class="workbench" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span class="product-logo" aria-hidden="true"><svg viewBox="0 0 32 32"><defs><linearGradient id="brand-a" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2ed0ff"/><stop offset="1" stop-color="#1768ff"/></linearGradient><linearGradient id="brand-b" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4287ff"/><stop offset="1" stop-color="#6948ee"/></linearGradient></defs><path fill="url(#brand-a)" d="M15 2 3 9v14l12-7z"/><path fill="url(#brand-b)" d="m17 2 12 7-12 7z"/><path fill="#1677f2" d="m17 18 12-7v12l-12 7z"/><path fill="#39a8ff" d="M15 18 3 25l12 5z"/></svg></span><strong>InsightPilot</strong></div>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="dashboard" data-permission="workspace:view"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></svg>分析工作台</button>
+        <button class="nav-item" data-permission="dashboard:view"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14m8-14v14M4 11h16"/></svg>我的仪表盘</button>
+        <button class="nav-item" data-view="drilldown" data-permission="drilldown:use"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v9m-4-4 4 4 4-4"/></svg>下钻分析</button>
+        <button class="nav-item" data-permission="report:view"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM9 10h6m-6 4h6m-6 4h4"/></svg>分析报告</button>
+        <div class="nav-divider admin-only">系统治理</div>
+        <button class="nav-item admin-only" data-permission="dashboard:manage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8m-8 4h8m-8 4h5"/></svg>仪表盘管理</button>
+        <button class="nav-item admin-only" data-permission="semantic_model:manage"><svg viewBox="0 0 24 24"><path d="m12 3 8 5-8 5-8-5zm-8 9 8 5 8-5m-16 4 8 5 8-5"/></svg>语义模型</button>
+        <button class="nav-item admin-only" data-permission="datasource:manage"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>数据源</button>
+        <button class="nav-item admin-only" data-permission="user:manage"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 2-6 6-6s6 2 6 6m7-14a3 3 0 0 1 0 6m1 2c3 .5 4 2.5 4 6"/></svg>用户与角色</button>
+        <button class="nav-item admin-only" data-permission="audit:view"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/></svg>审计与安全</button>
+      </nav>
+      <div class="sidebar-user">
+        <span class="avatar" id="avatar">张</span>
+        <button id="account-menu-button" class="user-summary" type="button" aria-haspopup="menu" aria-expanded="false"><span><strong id="user-name">张晓</strong><small id="user-role">数据分析师</small></span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></button>
+        <div id="account-menu" class="account-menu" role="menu" hidden>
+          <div class="account-meta"><small>当前账号</small><strong id="account-username">user</strong></div>
+          <button id="switch-account-button" type="button" role="menuitem"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5m0 5 7-7"/></svg>切换账号</button>
+          <button id="logout-button" type="button" role="menuitem"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5m5-4 4-4-4-4m4 4H9"/></svg>退出登录</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="canvas-shell">
+      <header class="topbar dashboard-section">
+        <div><h1 id="dashboard-title">华东销售经营分析</h1><p id="dashboard-subtitle">实时洞察关键指标与业务变化</p></div>
+        <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button>最近 30 天⌄</button><button class="edit-button" data-permission="dashboard:manage">编辑仪表盘</button></div>
+      </header>
+      <section class="canvas-toolbar dashboard-section"><div><button class="active">经营总览</button><button>探索分析</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button>⟳ 刷新</button></div></section>
+      <section class="dashboard-grid dashboard-section" id="sales-dashboard">
+        <article class="metric-card"><div><span>销售收入</span><strong>¥ 28,764.36万</strong><small class="up">↑ 18.6% 较上月</small></div><div class="sparkline"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
+        <article class="metric-card"><div><span>毛利润</span><strong>¥ 7,362.85万</strong><small class="up">↑ 14.2% 较上月</small></div><div class="sparkline purple"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
+        <article class="metric-card"><div><span>毛利率</span><strong>25.58%</strong><small class="down">↓ 1.3pp 较上月</small></div><div class="ring">26%</div></article>
+        <article class="chart-card revenue-chart" data-drill-chart="revenue"><header><div><strong>季度销售收入趋势</strong><small>点击数据点可进入下钻分析</small><span class="drill-ready-badge" hidden>当前下钻起点</span></div><div class="chart-actions"><button class="chart-menu-trigger" data-drill-chart="revenue" type="button" aria-label="季度销售收入趋势操作" aria-expanded="false">···</button><div class="chart-menu" data-chart-menu="revenue" role="menu" hidden><button type="button" role="menuitem" data-drill-action="select" data-drill-chart="revenue">◎ 设为下钻起点</button><button type="button" role="menuitem" data-drill-action="enter" data-drill-chart="revenue">↓ 进入下钻分析</button></div></div></header><div class="column-chart"><div style="--h:36%"><b>620</b><i></i><span>2023 Q1</span></div><div style="--h:46%"><b>680</b><i></i><span>Q2</span></div><div style="--h:58%"><b>745</b><i></i><span>Q3</span></div><div style="--h:66%"><b>820</b><i></i><span>Q4</span></div><div style="--h:55%"><b>780</b><i></i><span>2024 Q1</span></div><div style="--h:74%"><b>860</b><i></i><span>Q2</span></div><div style="--h:82%"><b>920</b><i></i><span>Q3</span></div><div class="selected drill-trigger" role="button" tabindex="0" style="--h:96%"><b>1,020</b><i></i><span>Q4</span></div></div></article>
+        <article class="chart-card structure-chart" data-drill-chart="structure"><header><div><strong>销售结构</strong><small>按产品大类</small><span class="drill-ready-badge" hidden>当前下钻起点</span></div><div class="chart-actions"><button class="chart-menu-trigger" data-drill-chart="structure" type="button" aria-label="销售结构操作" aria-expanded="false">···</button><div class="chart-menu" data-chart-menu="structure" role="menu" hidden><button type="button" role="menuitem" data-drill-action="select" data-drill-chart="structure">◎ 设为下钻起点</button><button type="button" role="menuitem" data-drill-action="enter" data-drill-chart="structure">↓ 进入下钻分析</button></div></div></header><div class="donut-wrap"><div class="donut"><div><strong>28,764</strong><span>万元</span></div></div><ul><li><i class="blue"></i>消费电子 <b>42%</b></li><li><i class="cyan"></i>家电 <b>30%</b></li><li><i class="violet"></i>数码配件 <b>18%</b></li><li><i class="gray"></i>其他 <b>10%</b></li></ul></div></article>
+      </section>
+
+      <section id="admin-overview" class="admin-overview dashboard-section" hidden>
+        <div class="admin-overview-grid">
+          <article class="chart-card health-panel"><header><strong>数据源健康状况</strong></header><div class="health-cards"><div><small>数据源连接</small><strong>12</strong><span>正常 ●</span></div><div><small>数据同步任务</small><strong>18</strong><span>正常 ●</span></div><div class="warn"><small>延迟任务</small><strong>3</strong><span>告警 ▲</span></div><div class="danger"><small>异常数据源</small><strong>1</strong><span>异常 ×</span></div></div></article>
+          <article class="chart-card role-panel"><header><strong>权限分布（按角色）</strong></header><div class="role-summary"><div class="role-donut"><span>总用户数<b>256</b></span></div><ul><li><i class="blue"></i>系统管理员 <b>6</b></li><li><i class="cyan"></i>数据管理员 <b>12</b></li><li><i class="violet"></i>分析师 <b>68</b></li><li><i class="orange"></i>业务用户 <b>120</b></li></ul></div></article>
+          <article class="chart-card model-panel"><header><strong>语义模型状态</strong><button>查看全部模型 →</button></header><table><thead><tr><th>模型名称</th><th>主题域</th><th>状态</th><th>最近更新</th></tr></thead><tbody><tr><td>销售主题模型</td><td>销售域</td><td><em>● 正常</em></td><td>08-26 10:15</td></tr><tr><td>客户主题模型</td><td>客户域</td><td><em>● 正常</em></td><td>08-25 16:40</td></tr><tr><td>供应链主题模型</td><td>供应链域</td><td><em>● 正常</em></td><td>08-25 11:20</td></tr><tr><td>财务主题模型</td><td>财务域</td><td><em class="warn-text">● 告警</em></td><td>08-24 09:35</td></tr></tbody></table></article>
+          <article class="chart-card audit-panel"><header><strong>最近审计事件</strong><button>查看全部 →</button></header><ul><li><span class="audit-dot green">✓</span><div><b>用户登录成功</b><small>系统管理员 · 10:21:32</small></div></li><li><span class="audit-dot blue-bg">♙</span><div><b>角色权限更新</b><small>销售分析师 · 09:58:11</small></div></li><li><span class="audit-dot violet-bg">◉</span><div><b>数据源配置变更</b><small>CRM_Prod · 09:41:07</small></div></li><li><span class="audit-dot orange-bg">▦</span><div><b>仪表盘发布</b><small>全域经营看板 · 09:15:44</small></div></li></ul></article>
+        </div>
+      </section>
+
+      <section id="permission-card" class="permission-card dashboard-section">
+        <header><span class="permission-shield" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.7-2.8 8-7 10-4.2-2-7-5.3-7-10V6z"/><path d="M9.5 12.2 11.3 14l3.7-4"/></svg></span><strong>我的权限</strong></header>
+        <div id="user-permissions" class="permission-items"><div><b class="permission-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></b><span>可查看授权仪表盘</span></div><div><b class="permission-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v9m-4-4 4 4 4-4"/></svg></b><span>可进行下钻分析</span></div><div><b class="permission-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v12H9l-5 4z"/><path d="M8 9h8m-8 4h5"/></svg></b><span>可向 AgentBI 提问</span></div><div class="disabled"><b class="permission-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M6 20c0-4 2-6 6-6s6 2 6 6M5 5l14 14"/></svg></b><span>不可管理数据源与用户</span></div></div>
+        <div id="admin-permissions" class="permission-items" hidden><div><b class="permission-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></b><span>全量数据访问</span></div><div><b class="permission-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 4v6m10 4H4m13-3v6M4 21h16M9 18v6"/></svg></b><span>配置语义与下钻路径</span></div><div><b class="permission-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 2-6 6-6s6 2 6 6m8-9v6m-3-3h6"/></svg></b><span>管理用户角色</span></div><div><b class="permission-icon"><svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.7-2.8 8-7 10-4.2-2-7-5.3-7-10V6z"/><path d="m9 12 2 2 4-5"/></svg></b><span>查看安全审计</span></div></div>
+      </section>
+
+      <section id="drilldown-view" class="drilldown-view" hidden>
+        <header class="drill-header"><div><h1 id="drill-page-title">销售收入下钻分析</h1><nav id="drill-breadcrumb">销售总览　›　<span>2024 Q4</span>　›　华东　›　产品线</nav></div><div><button>▣ 2024全年</button><button>▽ 筛选</button><button>···</button></div></header>
+        <div class="drill-scroll">
+          <article class="drill-level"><header><div><span>第 0 层 · 原始图</span><strong id="drill-source-title">季度销售收入趋势</strong></div><button>✦ 让 Agent 分析此层</button></header><div id="drill-source-revenue" class="drill-columns"><div style="--h:42%"><b>620</b><i></i><span>2023 Q1</span></div><div style="--h:48%"><b>680</b><i></i><span>2023 Q2</span></div><div style="--h:58%"><b>745</b><i></i><span>2023 Q3</span></div><div style="--h:66%"><b>820</b><i></i><span>2023 Q4</span></div><div style="--h:55%"><b>780</b><i></i><span>2024 Q1</span></div><div style="--h:73%"><b>860</b><i></i><span>2024 Q2</span></div><div style="--h:82%"><b>920</b><i></i><span>2024 Q3</span></div><div class="selected" style="--h:94%"><b>1,020</b><i></i><span>2024 Q4</span></div></div><div id="drill-source-structure" class="drill-source-donut" hidden><div class="donut"><div><strong>28,764</strong><span>万元</span></div></div><ul><li><i class="blue"></i>消费电子 <b>42%</b></li><li><i class="cyan"></i>家电 <b>30%</b></li><li><i class="violet"></i>数码配件 <b>18%</b></li><li><i class="gray"></i>其他 <b>10%</b></li></ul></div></article>
+          <div class="drill-connector"><i>↓</i><span id="drill-connector-one">点击 2024 Q4，下钻维度：区域</span></div>
+          <article class="drill-level"><header><div><span id="drill-level-one-label">第 1 层 · 区域</span><strong id="drill-level-one-title">2024 Q4 各区域销售收入</strong></div><button>✦ 让 Agent 分析此层</button></header><div id="drill-level-one-bars" class="drill-region-bars"></div></article>
+          <div class="drill-connector"><i>↓</i><span id="drill-connector-two">点击 华东，下钻维度：产品线</span></div>
+          <article class="drill-level product-level"><header><div><span id="drill-level-two-label">第 2 层 · 产品线</span><strong id="drill-level-two-title">华东产品线贡献</strong></div><button>✦ 让 Agent 分析此层</button></header><div class="product-content"><div class="product-donut"><span><b id="drill-total">420</b>亿元</span></div><table><thead><tr><th id="drill-table-dimension">产品线</th><th>销售收入（亿元）</th><th>占比</th></tr></thead><tbody id="drill-table-body"></tbody></table><div class="drill-actions"><button>← 返回上一层</button><button class="continue">↓ 继续下钻</button></div></div></article>
+        </div>
+      </section>
+    </section>
+
+    <aside class="agent-panel">
+      <header><div><span class="agent-icon">✦</span><div><strong>AgentBI 分析助手</strong><small>可验证的经营分析 Agent</small></div></div><span class="online">● 已连接</span></header>
+      <section id="dashboard-agent"><section class="context-box"><div><strong>屏幕上下文</strong><button>设置</button></div><p>已识别当前经营分析仪表盘</p><div><span id="agent-dashboard-name">华东销售经营分析</span><span id="agent-scope">华东区域</span><span>最近30天</span></div></section><section class="agent-welcome"><span>✦</span><h3>你好，我是你的分析助手</h3><p>我已经理解当前屏幕内容，可以帮你发现异常、下钻原因并生成报告。</p></section><section class="suggestions"><strong>推荐问题</strong><button>华东增长主要来自哪里？ <span>→</span></button><button>哪个产品线拖累毛利？ <span>→</span></button><button>最近 30 天有什么异常？ <span>→</span></button></section></section>
+      <section id="drill-agent" class="drill-agent" hidden><div class="drill-context"><span>▱ 当前上下文：</span><strong id="drill-agent-context">第 2 层 · 华东产品线贡献</strong></div><section class="suggestions"><strong>💡 推荐问题</strong><button id="drill-question-one">华东增长来自哪里？ <span>›</span></button><button id="drill-question-two">哪个产品线拖累毛利？ <span>›</span></button></section><div class="ai-insight"><strong>✦ AI 洞察</strong><p id="drill-insight">消费电子贡献 <b>42%</b>，但毛利率环比下降 <b>3.2</b> 个百分点。</p><small id="drill-insight-source">洞察来源：与 2024 Q3 环比对比</small></div><div class="evidence-path"><strong>🔗 证据路径</strong><p id="drill-evidence">销售总览 → 2024 Q4 → 华东 → 产品线</p></div><button class="report-cta">▤ 生成分析报告</button></section>
+      <div class="agent-input"><textarea aria-label="向 AgentBI 提问" placeholder="针对当前仪表盘提问…"></textarea><button>开始分析</button><small>回答将遵循当前用户的数据权限</small></div>
+    </aside>
+  </main>
+  <script src="/app/assets/drilldown-registry.js" defer></script>
+  <script src="/app/assets/app.js" defer></script>
+</body>
+</html>
