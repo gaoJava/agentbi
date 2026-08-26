@@ -5,48 +5,11 @@ const loginError = document.querySelector('#login-error');
 const loginButton = document.querySelector('#login-button');
 let currentUser;
 
-const drillConfigurations = window.AGENTBI_DRILLDOWN_REGISTRY?.charts || {
-  revenue: {
-    pageTitle: '销售收入下钻分析',
-    sourceTitle: '季度销售收入趋势',
-    breadcrumb: '销售总览 › 2024 Q4 › 华东 › 产品线',
-    sourceType: 'revenue',
-    connectorOne: '点击 2024 Q4，下钻维度：区域',
-    levelOneLabel: '第 1 层 · 区域',
-    levelOneTitle: '2024 Q4 各区域销售收入',
-    bars: [['华东', 88, '420'], ['华南', 60, '280'], ['华北', 40, '190'], ['西南', 28, '130']],
-    connectorTwo: '点击 华东，下钻维度：产品线',
-    levelTwoLabel: '第 2 层 · 产品线',
-    levelTwoTitle: '华东产品线贡献',
-    tableDimension: '产品线', total: '420',
-    rows: [['消费电子', '176', '42%'], ['家电', '126', '30%'], ['数码配件', '76', '18%'], ['其他', '42', '10%']],
-    context: '第 2 层 · 华东产品线贡献',
-    questions: ['华东增长来自哪里？', '哪个产品线拖累毛利？'],
-    insight: '消费电子贡献 42%，但毛利率环比下降 3.2 个百分点。',
-    insightSource: '洞察来源：与 2024 Q3 环比对比',
-    evidence: '销售总览 → 2024 Q4 → 华东 → 产品线',
-  },
-  structure: {
-    pageTitle: '销售结构下钻分析',
-    sourceTitle: '销售结构（按产品大类）',
-    breadcrumb: '销售总览 › 销售结构 › 消费电子 › 华东 › 渠道',
-    sourceType: 'structure',
-    connectorOne: '点击 消费电子，下钻维度：区域',
-    levelOneLabel: '第 1 层 · 区域',
-    levelOneTitle: '消费电子各区域销售收入',
-    bars: [['华东', 88, '76'], ['华南', 63, '54'], ['华北', 41, '31'], ['西南', 24, '15']],
-    connectorTwo: '点击 华东，下钻维度：渠道',
-    levelTwoLabel: '第 2 层 · 渠道',
-    levelTwoTitle: '华东消费电子渠道贡献',
-    tableDimension: '渠道', total: '76',
-    rows: [['直营门店', '31', '41%'], ['电商平台', '25', '33%'], ['经销商', '14', '18%'], ['其他', '6', '8%']],
-    context: '第 2 层 · 华东消费电子渠道贡献',
-    questions: ['消费电子主要由哪个区域贡献？', '哪个渠道增长最快？'],
-    insight: '华东贡献消费电子收入的 43%，其中直营门店占华东渠道收入的 41%。',
-    insightSource: '洞察来源：销售结构与渠道贡献交叉分析',
-    evidence: '销售总览 → 销售结构 → 消费电子 → 华东 → 渠道',
-  },
-};
+const drillRegistry = window.AGENTBI_DRILLDOWN_REGISTRY;
+if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
+  throw new Error('AgentBI 下钻注册中心未加载或版本不兼容');
+}
+const drillConfigurations = drillRegistry.charts;
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
 if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = 'revenue';
 
@@ -166,7 +129,8 @@ function renderDrilldown(chartId) {
   document.querySelectorAll('[data-drill-chart]').forEach(card => {
     if (!card.classList.contains('chart-card')) return;
     card.classList.toggle('drill-source-selected', card.dataset.drillChart === chartId);
-    card.querySelector('.drill-ready-badge').hidden = card.dataset.drillChart !== chartId;
+    const badge = card.querySelector('.drill-ready-badge');
+    if (badge) badge.hidden = card.dataset.drillChart !== chartId;
   });
 }
 
@@ -222,6 +186,14 @@ function initializeDrillableCharts() {
       return;
     }
     card.dataset.drillStatus = 'ready';
+    const titleGroup = card.querySelector('header>div:first-child');
+    if (titleGroup && !card.querySelector('.drill-ready-badge')) {
+      const badge = document.createElement('span');
+      badge.className = 'drill-ready-badge';
+      badge.textContent = '当前下钻起点';
+      badge.hidden = chartId !== selectedDrillChart;
+      titleGroup.append(badge);
+    }
     if (card.querySelector('.chart-actions')) return;
     const header = card.querySelector('header');
     if (!header) return;
