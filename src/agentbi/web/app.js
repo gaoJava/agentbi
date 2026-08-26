@@ -67,21 +67,60 @@ function showWorkbench(user) {
 
 function switchView(view) {
   const drilldown = view === 'drilldown';
-  document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = drilldown; });
+  const registry = view === 'drill-registry';
+  document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = drilldown || registry; });
   document.querySelector('#drilldown-view').hidden = !drilldown;
+  document.querySelector('#drill-registry-view').hidden = !registry;
   document.querySelector('#dashboard-agent').hidden = drilldown;
   document.querySelector('#drill-agent').hidden = !drilldown;
   document.querySelector('.agent-input').hidden = drilldown;
   document.querySelectorAll('[data-view]').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
   });
-  if (!drilldown && currentUser) {
+  if (!drilldown && !registry && currentUser) {
     const admin = currentUser.role === 'admin';
     document.querySelector('#sales-dashboard').hidden = admin;
     document.querySelector('#admin-overview').hidden = !admin;
     document.querySelector('#user-permissions').hidden = admin;
     document.querySelector('#admin-permissions').hidden = !admin;
   }
+  if (registry) renderRegistryCenter();
+}
+
+function renderRegistryCenter() {
+  const entries = Object.entries(drillConfigurations);
+  const validEntries = entries.filter(([, config]) => isValidDrillConfiguration(config));
+  const models = new Set(entries.map(([, config]) => config.semanticModel).filter(Boolean));
+  document.querySelector('#registry-count').textContent = `${entries.length} 个已注册图表`;
+  document.querySelector('#registry-chart-total').textContent = String(entries.length);
+  document.querySelector('#registry-model-total').textContent = String(models.size);
+  document.querySelector('#registry-ready-total').textContent = String(validEntries.length);
+  document.querySelector('#registry-invalid-total').textContent = String(entries.length - validEntries.length);
+  const typeLabels = { revenue: '趋势图', structure: '结构图', table: '指标表格' };
+  const body = document.querySelector('#registry-table-body');
+  body.replaceChildren(...entries.map(([chartId, config]) => {
+    const row = document.createElement('tr');
+    const chart = document.createElement('td');
+    const title = document.createElement('strong'); title.textContent = config.sourceTitle || chartId;
+    const metric = document.createElement('small'); metric.textContent = `Chart ID：${chartId} · 指标：${config.metric || '未配置'}`;
+    chart.append(title, metric);
+    const model = document.createElement('td'); model.textContent = config.semanticModel || '未配置';
+    const type = document.createElement('td'); type.textContent = typeLabels[config.sourceType] || '未知类型';
+    const path = document.createElement('td'); path.textContent = config.evidence || config.breadcrumb || '未配置';
+    const status = document.createElement('td');
+    const badge = document.createElement('span');
+    const valid = isValidDrillConfiguration(config);
+    badge.className = valid ? 'registry-status ready' : 'registry-status invalid';
+    badge.textContent = valid ? '● 可用' : '● 待完善';
+    status.append(badge);
+    const action = document.createElement('td');
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = '查看下钻'; button.disabled = !valid;
+    button.addEventListener('click', () => selectDrillChart(chartId, true));
+    action.append(button);
+    row.append(chart, model, type, path, status, action);
+    return row;
+  }));
 }
 
 function renderDrilldown(chartId) {
@@ -238,6 +277,8 @@ document.querySelectorAll('[data-view]').forEach(item => item.addEventListener('
   if (item.dataset.view === 'drilldown') renderDrilldown(selectedDrillChart);
   switchView(item.dataset.view);
 }));
+
+document.querySelector('#registry-refresh').addEventListener('click', renderRegistryCenter);
 
 document.querySelectorAll('.drill-trigger').forEach(item => {
   item.addEventListener('click', () => selectDrillChart('revenue', true));

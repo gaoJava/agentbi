@@ -75,3 +75,18 @@
 .drill-source-table table{width:100%;border-collapse:collapse;font-size:10px}
 .drill-source-table th,.drill-source-table td{padding:7px 10px;border-bottom:1px solid #e8edf4;text-align:left}
 .drill-source-table th{color:#68778b;background:#f7f9fc}
+
+/* Administrator-facing drilldown registry. */
+.registry-view{height:100%;overflow:auto;background:#f4f6fa}
+.registry-header{display:flex;align-items:center;justify-content:space-between;padding:20px 26px;background:#fff;border-bottom:1px solid #e2e7ef}
+.registry-header h1{margin:0;font-size:23px}.registry-header p{margin:5px 0 0;color:#8490a2;font-size:11px}
+.registry-header>div:last-child{display:flex;align-items:center;gap:9px}.registry-header button{border:1px solid #dbe2ec;border-radius:8px;background:#fff;padding:8px 12px;color:#43536a}
+.registry-content{padding:18px 22px;display:grid;gap:14px}
+.registry-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.registry-summary article{padding:16px 18px;border:1px solid #e1e6ee;border-radius:11px;background:#fff;box-shadow:0 2px 7px rgba(30,54,93,.04)}
+.registry-summary span,.registry-summary strong,.registry-summary small{display:block}.registry-summary span{font-size:11px;color:#768397}.registry-summary strong{margin:8px 0 5px;font-size:25px;color:#1769e8}.registry-summary small{font-size:9px;color:#8a95a6}
+.registry-table-card{overflow:visible;border:1px solid #e1e6ee;border-radius:12px;background:#fff;box-shadow:0 2px 7px rgba(30,54,93,.04)}
+.registry-table-card>header{display:flex;align-items:center;justify-content:space-between;padding:15px 17px;border-bottom:1px solid #e8ecf2}.registry-table-card header strong,.registry-table-card header small{display:block}.registry-table-card header small{margin-top:4px;color:#8490a2;font-size:9px}.registry-version{padding:5px 9px;border-radius:11px;background:#edf4ff;color:#1764da;font-size:10px}
+.registry-table-card table{width:100%;border-collapse:collapse;font-size:10px}.registry-table-card th,.registry-table-card td{padding:13px 14px;border-bottom:1px solid #edf0f5;text-align:left;vertical-align:middle}.registry-table-card th{color:#778497;background:#fafbfc;font-weight:600}.registry-table-card td:first-child strong,.registry-table-card td:first-child small{display:block}.registry-table-card td:first-child small{margin-top:5px;color:#8995a6}.registry-table-card td:nth-child(4){max-width:270px;color:#596a81}.registry-table-card td button{border:1px solid #b9d1fa;border-radius:7px;background:#f5f9ff;padding:7px 10px;color:#1764d9}.registry-table-card td button:disabled{border-color:#dfe4eb;background:#f7f8fa;color:#9aa5b4}
+.registry-status{display:inline-block;padding:5px 8px;border-radius:10px}.registry-status.ready{background:#eaf8f2;color:#139565}.registry-status.invalid{background:#fff4e7;color:#d77a12}
+.registry-note{padding:14px 17px;border:1px solid #c9d9fa;border-radius:11px;background:linear-gradient(90deg,#f5f9ff,#f7f4ff)}.registry-note strong{font-size:12px}.registry-note p{margin:7px 0;color:#65748a;font-size:10px;line-height:1.6}.registry-note code{display:inline-block;padding:5px 8px;border-radius:6px;background:#e9f1ff;color:#175fc9;font-size:10px}
