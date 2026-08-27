@@ -154,6 +154,12 @@ class SessionManager:
     def list_users(self) -> list[dict[str, object]]:
         return self.repository.list_users()
 
+    def create_user(self, **values: object) -> dict[str, object]:
+        return self.repository.create_user(**values)
+
+    def list_roles(self) -> list[dict[str, object]]:
+        return self.repository.list_roles()
+
     def update_user(self, **values: object) -> dict[str, object]:
         return self.repository.update_user(**values)
 

@@ -249,17 +249,25 @@ async function loadModuleView(view) {
         'data-sources',
       )));
     } else if (view === 'user-roles') {
-      loadedUsers = (await request('/api/v1/admin/users')).users || [];
+      const [userBody, roleBody] = await Promise.all([
+        request('/api/v1/admin/users'), request('/api/v1/admin/roles'),
+      ]);
+      loadedUsers = userBody.users || [];
       renderModuleRows('user-role-table-body', loadedUsers, user => [
         user.display_name, user.username, user.role === 'admin' ? '系统管理员' : '数据分析师',
         user.data_scope, user.is_active ? '● 正常' : '● 已停用', formatTimestamp(user.last_login_at),
       ], user => actionButton('编辑权限', 'module-action', () => openUserEditor(user)));
+      replaceTableRows('role-table-body', (roleBody.roles || []).map(role => [
+        role.name, role.code, role.user_count, role.permissions.length,
+        role.builtin ? '内置角色' : '自定义角色',
+      ]));
     } else if (view === 'audit-security') {
       const events = (await request('/api/v1/admin/audit-events')).events || [];
       const eventLabels = {
         login: '用户登录', logout: '用户退出', chart_created: '创建图表', chart_updated: '修改图表',
         chart_published: '上线图表', chart_offlined: '下线图表', chart_deleted: '删除图表',
-        report_created: '生成报告', report_deleted: '删除报告', user_updated: '修改用户权限',
+        report_created: '生成报告', report_deleted: '删除报告', user_created: '新增用户',
+        user_updated: '修改用户权限',
         semantic_model_checked: '检查语义模型', data_source_tested: '测试数据源',
       };
       replaceTableRows('audit-event-table-body', events.map(event => [
@@ -757,22 +765,33 @@ document.querySelector('#confirm-delete-chart').addEventListener('click', async 
 const userEditor = document.querySelector('#user-editor');
 const userEditorForm = document.querySelector('#user-editor-form');
 
-function openUserEditor(user) {
-  document.querySelector('#edit-user-name').value = user.username;
-  document.querySelector('#edit-user-role').value = user.role;
-  document.querySelector('#edit-user-scope').value = user.data_scope;
-  document.querySelector('#edit-user-active').checked = user.is_active;
+function openUserEditor(user = null) {
+  const creating = !user;
+  document.querySelector('#user-editor-title').textContent = creating ? '新增用户' : '编辑用户权限';
+  const username = document.querySelector('#edit-user-name');
+  username.disabled = !creating; username.value = user?.username || '';
+  document.querySelectorAll('.create-user-field').forEach(field => { field.hidden = !creating; });
+  const displayName = document.querySelector('#edit-user-display-name');
+  const password = document.querySelector('#edit-user-password');
+  displayName.required = creating; password.required = creating;
+  displayName.value = ''; password.value = '';
+  document.querySelector('#edit-user-role').value = user?.role || 'user';
+  document.querySelector('#edit-user-scope').value = user?.data_scope || '全部区域';
+  document.querySelector('#edit-user-active').checked = user?.is_active ?? true;
+  userEditorForm.querySelector('button[type="submit"]').textContent = creating ? '创建用户' : '保存权限';
   document.querySelector('#user-editor-error').hidden = true;
   userEditor.hidden = false;
-  document.querySelector('#edit-user-role').focus();
+  (creating ? username : document.querySelector('#edit-user-role')).focus();
 }
 
 function closeUserEditor() {
   userEditor.hidden = true;
   userEditorForm.reset();
+  document.querySelector('#edit-user-name').disabled = true;
   document.querySelector('#user-editor-error').hidden = true;
 }
 
+document.querySelector('#create-user').addEventListener('click', () => openUserEditor());
 document.querySelector('#close-user-editor').addEventListener('click', closeUserEditor);
 document.querySelector('#cancel-user-editor').addEventListener('click', closeUserEditor);
 userEditor.addEventListener('click', event => { if (event.target === userEditor) closeUserEditor(); });
@@ -782,23 +801,30 @@ userEditorForm.addEventListener('submit', async event => {
   const button = userEditorForm.querySelector('button[type="submit"]');
   errorBox.hidden = true; button.disabled = true; button.textContent = '正在保存…';
   const username = document.querySelector('#edit-user-name').value;
+  const creating = !document.querySelector('#edit-user-name').disabled;
   try {
-    await request(`/api/v1/admin/users/${encodeURIComponent(username)}`, {
-      method: 'PUT',
+    const payload = {
+      role: document.querySelector('#edit-user-role').value,
+      data_scope: document.querySelector('#edit-user-scope').value.trim(),
+      is_active: document.querySelector('#edit-user-active').checked,
+    };
+    if (creating) {
+      payload.username = username.trim();
+      payload.password = document.querySelector('#edit-user-password').value;
+      payload.display_name = document.querySelector('#edit-user-display-name').value.trim();
+    }
+    await request(creating ? '/api/v1/admin/users' : `/api/v1/admin/users/${encodeURIComponent(username)}`, {
+      method: creating ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
-      body: JSON.stringify({
-        role: document.querySelector('#edit-user-role').value,
-        data_scope: document.querySelector('#edit-user-scope').value.trim(),
-        is_active: document.querySelector('#edit-user-active').checked,
-      }),
+      body: JSON.stringify(payload),
     });
     closeUserEditor();
     await loadModuleView('user-roles');
-    showManagementFeedback(`${username} 的权限已更新`);
+    showManagementFeedback(creating ? `${username} 已创建` : `${username} 的权限已更新`);
   } catch (error) {
     errorBox.textContent = error.message; errorBox.hidden = false;
   } finally {
-    button.disabled = false; button.textContent = '保存权限';
+    button.disabled = false; button.textContent = creating ? '创建用户' : '保存权限';
   }
 });
 

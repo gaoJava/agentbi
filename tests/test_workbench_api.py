@@ -205,6 +205,9 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         admin = admin_login.json()["user"]
         assert len(client.get("/api/v1/dashboards").json()["dashboards"]) == 2
         assert len(client.get("/api/v1/admin/users").json()["users"]) == 2
+        roles = client.get("/api/v1/admin/roles")
+        assert roles.status_code == 200
+        assert {role["code"] for role in roles.json()["roles"]} == {"user", "admin"}
         assert client.get("/api/v1/admin/semantic-models").json()["models"][0]["name"] == "sales_model"
         assert client.get("/api/v1/admin/data-sources").json()["sources"][0]["name"] == "sales_orders"
         events = client.get("/api/v1/admin/audit-events")
@@ -224,6 +227,30 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         )
         assert updated.status_code == 200
         assert updated.json()["user"]["data_scope"] == "华南区域"
+
+        new_user = {
+            "username": "analyst2",
+            "password": "safe-password",
+            "display_name": "分析师二号",
+            "role": "user",
+            "data_scope": "华北区域",
+            "is_active": True,
+        }
+        assert client.post("/api/v1/admin/users", json=new_user).status_code == 403
+        user_created = client.post(
+            "/api/v1/admin/users",
+            json=new_user,
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert user_created.status_code == 201
+        assert user_created.json()["user"]["data_scope"] == "华北区域"
+        assert len(client.get("/api/v1/admin/users").json()["users"]) == 3
+        duplicate_user = client.post(
+            "/api/v1/admin/users",
+            json=new_user,
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert duplicate_user.status_code == 409
 
         self_lockout = client.put(
             "/api/v1/admin/users/admin",

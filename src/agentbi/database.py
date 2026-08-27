@@ -28,6 +28,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     delete,
+    func,
     select,
 )
 from sqlalchemy.engine import make_url
@@ -355,6 +356,72 @@ class IdentityRepository:
                     "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
                 }
                 for user in users
+            ]
+
+    def create_user(
+        self,
+        *,
+        username: str,
+        password: str,
+        display_name: str,
+        role: str,
+        data_scope: str,
+        is_active: bool,
+    ) -> dict[str, object]:
+        normalized = username.strip().lower()
+        with Session(self.engine) as db, db.begin():
+            if db.scalar(select(User).where(User.username == normalized)) is not None:
+                raise ValueError("username already exists")
+            if db.get(Role, role) is None:
+                raise KeyError("role not found")
+            user = User(
+                id=str(uuid.uuid4()),
+                username=normalized,
+                password_hash=hash_password(password),
+                display_name=display_name.strip(),
+                primary_role_code=role,
+                data_scope=data_scope.strip(),
+                is_active=is_active,
+            )
+            db.add(user)
+            db.flush()
+            db.add(UserRole(user_id=user.id, role_code=role))
+            return {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.display_name,
+                "role": user.primary_role_code,
+                "data_scope": user.data_scope,
+                "is_active": user.is_active,
+                "last_login_at": None,
+            }
+
+    def list_roles(self) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            roles = db.scalars(select(Role).order_by(Role.code)).all()
+            return [
+                {
+                    "code": role.code,
+                    "name": role.name,
+                    "description": role.description,
+                    "permissions": list(
+                        db.scalars(
+                            select(RolePermission.permission_code)
+                            .where(RolePermission.role_code == role.code)
+                            .order_by(RolePermission.permission_code)
+                        ).all()
+                    ),
+                    "user_count": int(
+                        db.scalar(
+                            select(func.count())
+                            .select_from(UserRole)
+                            .where(UserRole.role_code == role.code)
+                        )
+                        or 0
+                    ),
+                    "builtin": role.code in {"user", "admin"},
+                }
+                for role in roles
             ]
 
     def list_audit_events(self, *, limit: int = 100) -> list[dict[str, object]]:

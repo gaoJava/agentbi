@@ -92,6 +92,19 @@ class UserUpdatePayload(BaseModel):
     is_active: bool
 
 
+class UserCreatePayload(BaseModel):
+    """Administrator-created local account for the competition workbench."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=128, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
+    password: str = Field(min_length=8, max_length=256)
+    display_name: str = Field(min_length=2, max_length=128)
+    role: Literal["user", "admin"]
+    data_scope: str = Field(min_length=2, max_length=256)
+    is_active: bool = True
+
+
 def validated_dimensions(items: list[str]) -> list[str]:
     """Normalize and reject ambiguous drill paths before they reach storage."""
 
@@ -255,6 +268,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/admin/users")
     async def list_users(_: SessionIdentity = admin_session) -> dict[str, object]:
         return {"users": sessions.list_users()}
+
+    @app.post("/api/v1/admin/users", status_code=status.HTTP_201_CREATED)
+    async def create_user(
+        payload: UserCreatePayload,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            user = sessions.create_user(
+                username=payload.username,
+                password=payload.password,
+                display_name=payload.display_name,
+                role=payload.role,
+                data_scope=payload.data_scope,
+                is_active=payload.is_active,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="登录账号已存在") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色不存在") from exc
+        sessions.audit(
+            "user_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.username.lower(),
+        )
+        return {"user": user}
+
+    @app.get("/api/v1/admin/roles")
+    async def list_roles(_: SessionIdentity = admin_session) -> dict[str, object]:
+        return {"roles": sessions.list_roles()}
 
     @app.put("/api/v1/admin/users/{username}")
     async def update_user(
