@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import uuid
@@ -111,6 +112,36 @@ class AuditEvent(Base):
     source_ip: Mapped[str] = mapped_column(String(64), default="")
     detail: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class DashboardChart(Base):
+    __tablename__ = "dashboard_charts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chart_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    metric: Mapped[str] = mapped_column(String(128))
+    dataset_name: Mapped[str] = mapped_column(String(200))
+    visualization_type: Mapped[str] = mapped_column(String(32))
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DrilldownDefinition(Base):
+    __tablename__ = "drilldown_definitions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chart_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("dashboard_charts.id"), unique=True, index=True
+    )
+    semantic_model: Mapped[str] = mapped_column(String(128))
+    dimensions_json: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="published")
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +340,71 @@ class IdentityRepository:
                 }
                 for user in users
             ]
+
+    def create_chart_with_drilldown(
+        self,
+        *,
+        chart_key: str,
+        title: str,
+        metric: str,
+        dataset_name: str,
+        visualization_type: str,
+        semantic_model: str,
+        dimensions: list[str],
+        actor_user_id: str,
+    ) -> dict[str, object]:
+        normalized_key = chart_key.strip().lower()
+        with Session(self.engine) as db, db.begin():
+            if db.scalar(select(DashboardChart).where(DashboardChart.chart_key == normalized_key)):
+                raise ValueError("chart key already exists")
+            chart = DashboardChart(
+                id=str(uuid.uuid4()),
+                chart_key=normalized_key,
+                title=title.strip(),
+                metric=metric.strip(),
+                dataset_name=dataset_name.strip(),
+                visualization_type=visualization_type,
+                created_by=actor_user_id,
+            )
+            db.add(chart)
+            db.flush()
+            drilldown = DrilldownDefinition(
+                id=str(uuid.uuid4()),
+                chart_id=chart.id,
+                semantic_model=semantic_model.strip(),
+                dimensions_json=json.dumps(dimensions, ensure_ascii=False),
+                created_by=actor_user_id,
+            )
+            db.add(drilldown)
+            db.flush()
+            return self._chart_payload(chart, drilldown)
+
+    def list_charts(self) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            rows = db.execute(
+                select(DashboardChart, DrilldownDefinition)
+                .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
+                .where(DashboardChart.is_published.is_(True))
+                .order_by(DashboardChart.created_at)
+            ).all()
+            return [self._chart_payload(chart, drilldown) for chart, drilldown in rows]
+
+    @staticmethod
+    def _chart_payload(
+        chart: DashboardChart, drilldown: DrilldownDefinition
+    ) -> dict[str, object]:
+        return {
+            "id": chart.id,
+            "chart_key": chart.chart_key,
+            "title": chart.title,
+            "metric": chart.metric,
+            "dataset_name": chart.dataset_name,
+            "visualization_type": chart.visualization_type,
+            "semantic_model": drilldown.semantic_model,
+            "dimensions": json.loads(drilldown.dimensions_json),
+            "status": drilldown.status,
+            "created_at": chart.created_at.isoformat(),
+        }
 
     def audit(
         self,

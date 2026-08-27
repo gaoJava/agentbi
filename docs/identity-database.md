@@ -16,7 +16,8 @@ SQLite 文件、PostgreSQL 密码和连接串均不得提交到仓库。
 users ──< user_roles >── roles ──< role_permissions >── permissions
   │
   ├──< auth_sessions
-  └──< audit_events
+  ├──< audit_events
+  └──< dashboard_charts ── drilldown_definitions
 ```
 
 ## 核心表
@@ -30,6 +31,8 @@ users ──< user_roles >── roles ──< role_permissions >── permissi
 | `role_permissions` | 角色—权限多对多 | `(role_code, permission_code)` 联合主键 |
 | `auth_sessions` | 服务端会话 | UUID；用户；CSRF 摘要；过期时间；撤销时间 |
 | `audit_events` | 身份安全审计 | 登录、退出、拒绝等事件；结果、来源地址和有界详情 |
+| `dashboard_charts` | 图表定义 | Chart ID、名称、数据集、指标、可视化类型、发布状态和创建人 |
+| `drilldown_definitions` | 下钻配置 | 图表一对一配置；语义模型、维度路径、发布状态和创建人 |
 
 ## 安全规则
 

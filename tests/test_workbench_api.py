@@ -62,3 +62,63 @@ def test_login_rejects_wrong_password() -> None:
         )
         assert response.status_code == 401
         assert response.json()["detail"] == "用户名或密码错误"
+
+
+def test_admin_creates_governed_chart_and_drilldown() -> None:
+    with TestClient(create_app(settings())) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin-password"},
+        )
+        csrf_token = login.json()["user"]["csrf_token"]
+        payload = {
+            "chart_key": "customer_growth",
+            "title": "新增客户趋势",
+            "metric": "新增客户数",
+            "dataset_name": "customer_sales",
+            "visualization_type": "bar",
+            "semantic_model": "customer_model",
+            "dimensions": ["区域", "渠道", "销售人员"],
+        }
+
+        assert client.post("/api/v1/admin/charts", json=payload).status_code == 403
+        created = client.post(
+            "/api/v1/admin/charts",
+            json=payload,
+            headers={"X-AgentBI-CSRF": csrf_token},
+        )
+        assert created.status_code == 201
+        assert created.json()["chart"]["dimensions"] == ["区域", "渠道", "销售人员"]
+
+        charts = client.get("/api/v1/charts")
+        assert charts.status_code == 200
+        assert charts.json()["charts"][0]["chart_key"] == "customer_growth"
+
+        duplicate = client.post(
+            "/api/v1/admin/charts",
+            json=payload,
+            headers={"X-AgentBI-CSRF": csrf_token},
+        )
+        assert duplicate.status_code == 409
+
+
+def test_normal_user_cannot_create_chart() -> None:
+    with TestClient(create_app(settings())) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "user", "password": "user-password"},
+        )
+        response = client.post(
+            "/api/v1/admin/charts",
+            headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
+            json={
+                "chart_key": "forbidden_chart",
+                "title": "越权图表",
+                "metric": "销售收入",
+                "dataset_name": "sales",
+                "visualization_type": "table",
+                "semantic_model": "sales_model",
+                "dimensions": ["区域", "门店"],
+            },
+        )
+        assert response.status_code == 403

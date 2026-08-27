@@ -154,6 +154,32 @@ class SessionManager:
     def list_users(self) -> list[dict[str, object]]:
         return self.repository.list_users()
 
+    def list_charts(self) -> list[dict[str, object]]:
+        return self.repository.list_charts()
+
+    def create_chart_with_drilldown(
+        self,
+        *,
+        chart_key: str,
+        title: str,
+        metric: str,
+        dataset_name: str,
+        visualization_type: str,
+        semantic_model: str,
+        dimensions: list[str],
+        actor_user_id: str,
+    ) -> dict[str, object]:
+        return self.repository.create_chart_with_drilldown(
+            chart_key=chart_key,
+            title=title,
+            metric=metric,
+            dataset_name=dataset_name,
+            visualization_type=visualization_type,
+            semantic_model=semantic_model,
+            dimensions=dimensions,
+            actor_user_id=actor_user_id,
+        )
+
     def audit(
         self,
         event_type: str,

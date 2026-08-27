@@ -10,6 +10,7 @@ if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
   throw new Error('AgentBI 下钻注册中心未加载或版本不兼容');
 }
 const drillConfigurations = drillRegistry.charts;
+let managedCharts = [];
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
 if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = 'revenue';
 
@@ -63,21 +64,24 @@ function showWorkbench(user) {
   loginView.hidden = true;
   workbenchView.hidden = false;
   switchView('dashboard');
+  loadManagedCharts();
 }
 
 function switchView(view) {
   const drilldown = view === 'drilldown';
   const registry = view === 'drill-registry';
-  document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = drilldown || registry; });
+  const chartManagement = view === 'chart-management';
+  document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = drilldown || registry || chartManagement; });
   document.querySelector('#drilldown-view').hidden = !drilldown;
   document.querySelector('#drill-registry-view').hidden = !registry;
+  document.querySelector('#chart-management-view').hidden = !chartManagement;
   document.querySelector('#dashboard-agent').hidden = drilldown;
   document.querySelector('#drill-agent').hidden = !drilldown;
   document.querySelector('.agent-input').hidden = drilldown;
   document.querySelectorAll('[data-view]').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
   });
-  if (!drilldown && !registry && currentUser) {
+  if (!drilldown && !registry && !chartManagement && currentUser) {
     const admin = currentUser.role === 'admin';
     document.querySelector('#sales-dashboard').hidden = admin;
     document.querySelector('#admin-overview').hidden = !admin;
@@ -85,6 +89,112 @@ function switchView(view) {
     document.querySelector('#admin-permissions').hidden = !admin;
   }
   if (registry) renderRegistryCenter();
+  if (chartManagement) renderChartManagement();
+}
+
+async function loadManagedCharts() {
+  if (!currentUser) return;
+  try {
+    const body = await request('/api/v1/charts');
+    managedCharts = body.charts || [];
+    managedCharts.forEach(chart => {
+      drillConfigurations[chart.chart_key] = configurationFromManagedChart(chart);
+    });
+    renderManagedDashboardCharts();
+    initializeDrillableCharts();
+    bindChartMenuEvents();
+  } catch (error) {
+    console.warn('无法加载数据库图表配置', error);
+  }
+}
+
+function configurationFromManagedChart(chart) {
+  const dimensions = chart.dimensions;
+  const first = dimensions[0];
+  const second = dimensions[1];
+  const sourceType = chart.visualization_type === 'donut' ? 'structure' :
+    chart.visualization_type === 'table' ? 'table' : 'revenue';
+  const labels = ['华东', '华南', '华北', '西南'];
+  const bars = labels.map((label, index) => [label, 88 - index * 17, String(820 - index * 145)]);
+  const rows = ['第一类', '第二类', '第三类', '其他'].map((label, index) =>
+    [label, String(410 - index * 75), `${42 - index * 9}%`]);
+  return {
+    metric: chart.metric,
+    semanticModel: chart.semantic_model,
+    sourceType,
+    pageTitle: `${chart.metric}下钻分析`,
+    sourceTitle: chart.title,
+    breadcrumb: `分析工作台 › ${chart.title} › ${dimensions.join(' › ')}`,
+    connectorOne: `点击当前数据点，下钻维度：${first}`,
+    levelOneLabel: `第 1 层 · ${first}`,
+    levelOneTitle: `${chart.metric}按${first}分析`,
+    bars,
+    connectorTwo: `点击 华东，下钻维度：${second}`,
+    levelTwoLabel: `第 2 层 · ${second}`,
+    levelTwoTitle: `华东${second}贡献`,
+    tableDimension: second,
+    total: '820', rows,
+    sourceColumns: [first, chart.metric, '占比'],
+    sourceRows: bars.map(([label, , value], index) => [label, value, `${40 - index * 7}%`]),
+    context: `第 2 层 · 华东${second}贡献`,
+    questions: [`${chart.metric}主要来自哪个${first}？`, `哪个${second}表现异常？`],
+    insight: `华东是当前${chart.metric}的主要贡献区域，建议继续按${second}定位变化来源。`,
+    insightSource: `洞察来源：${chart.semantic_model} 语义模型`,
+    evidence: `分析工作台 → ${chart.title} → ${dimensions.join(' → ')}`,
+  };
+}
+
+function renderManagedDashboardCharts() {
+  document.querySelectorAll('.managed-dashboard-chart').forEach(card => card.remove());
+  const dashboard = document.querySelector('#sales-dashboard');
+  managedCharts.forEach(chart => {
+    const card = document.createElement('article');
+    card.className = 'chart-card managed-dashboard-chart revenue-chart';
+    card.dataset.drillChart = chart.chart_key;
+    const header = document.createElement('header');
+    const titleGroup = document.createElement('div');
+    const title = document.createElement('strong'); title.textContent = chart.title;
+    const subtitle = document.createElement('small'); subtitle.textContent = `${chart.metric} · ${chart.dataset_name}`;
+    titleGroup.append(title, subtitle); header.append(titleGroup); card.append(header);
+    const preview = document.createElement('div');
+    preview.className = `managed-chart-preview ${chart.visualization_type}`;
+    if (chart.visualization_type === 'table') {
+      preview.innerHTML = '<table><thead><tr><th>维度</th><th>指标值</th><th>同比</th></tr></thead><tbody><tr><td>华东</td><td>820</td><td>+18.6%</td></tr><tr><td>华南</td><td>675</td><td>+12.4%</td></tr><tr><td>华北</td><td>530</td><td>+8.2%</td></tr></tbody></table>';
+    } else if (chart.visualization_type === 'donut') {
+      preview.innerHTML = '<div class="managed-donut"><strong>42%</strong></div><p>华东 42%　华南 30%　其他 28%</p>';
+    } else {
+      preview.innerHTML = '<i style="--h:42%"></i><i style="--h:58%"></i><i style="--h:51%"></i><i style="--h:72%"></i><i style="--h:88%"></i><i style="--h:76%"></i>';
+    }
+    card.append(preview); dashboard.append(card);
+  });
+}
+
+function renderChartManagement() {
+  document.querySelector('#dynamic-chart-total').textContent = String(managedCharts.length);
+  document.querySelector('#managed-drill-total').textContent = String(managedCharts.length + 2);
+  const body = document.querySelector('#managed-chart-table-body');
+  const builtin = [
+    { title: '季度销售收入趋势', chart_key: 'revenue', dataset_name: 'sales_orders', metric: '销售收入', visualization_type: 'bar', dimensions: ['区域', '产品线'], status: 'published' },
+    { title: '销售结构（按产品大类）', chart_key: 'structure', dataset_name: 'sales_orders', metric: '销售收入', visualization_type: 'donut', dimensions: ['区域', '渠道'], status: 'published' },
+  ];
+  const typeLabels = { bar: '柱状图', line: '折线图', donut: '环图', table: '指标表格' };
+  body.replaceChildren(...[...builtin, ...managedCharts].map(chart => {
+    const row = document.createElement('tr');
+    const values = [chart.title, chart.dataset_name, chart.metric, typeLabels[chart.visualization_type], chart.dimensions.join(' → ')];
+    values.forEach((value, index) => {
+      const cell = document.createElement('td');
+      if (index === 0) {
+        const strong = document.createElement('strong'); strong.textContent = value;
+        const small = document.createElement('small'); small.textContent = `Chart ID：${chart.chart_key}`;
+        cell.append(strong, small);
+      } else cell.textContent = value;
+      row.append(cell);
+    });
+    const status = document.createElement('td');
+    status.innerHTML = '<span class="registry-status ready">● 已发布</span>';
+    row.append(status);
+    return row;
+  }));
 }
 
 function renderRegistryCenter() {
@@ -287,19 +397,88 @@ document.querySelectorAll('.drill-trigger').forEach(item => {
   });
 });
 
-document.querySelectorAll('.chart-menu-trigger').forEach(button => button.addEventListener('click', event => {
-  event.stopPropagation();
-  const menu = document.querySelector(`[data-chart-menu="${button.dataset.drillChart}"]`);
-  const willOpen = menu.hidden;
-  closeChartMenus();
-  menu.hidden = !willOpen;
-  button.setAttribute('aria-expanded', String(willOpen));
-}));
+function bindChartMenuEvents() {
+  document.querySelectorAll('.chart-menu-trigger:not([data-bound])').forEach(button => {
+    button.dataset.bound = 'true';
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const menu = document.querySelector(`[data-chart-menu="${button.dataset.drillChart}"]`);
+      const willOpen = menu.hidden;
+      closeChartMenus();
+      menu.hidden = !willOpen;
+      button.setAttribute('aria-expanded', String(willOpen));
+    });
+  });
+  document.querySelectorAll('[data-drill-action]:not([data-bound])').forEach(button => {
+    button.dataset.bound = 'true';
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      selectDrillChart(button.dataset.drillChart, button.dataset.drillAction === 'enter');
+    });
+  });
+}
 
-document.querySelectorAll('[data-drill-action]').forEach(button => button.addEventListener('click', event => {
-  event.stopPropagation();
-  selectDrillChart(button.dataset.drillChart, button.dataset.drillAction === 'enter');
-}));
+bindChartMenuEvents();
+
+const chartWizard = document.querySelector('#chart-wizard');
+const chartWizardForm = document.querySelector('#chart-wizard-form');
+const chartWizardError = document.querySelector('#chart-wizard-error');
+
+function openChartWizard() {
+  chartWizardError.hidden = true;
+  chartWizard.hidden = false;
+  document.querySelector('#new-chart-key').focus();
+}
+
+function closeChartWizard() {
+  chartWizard.hidden = true;
+  chartWizardError.hidden = true;
+}
+
+document.querySelectorAll('.open-chart-wizard').forEach(button => button.addEventListener('click', openChartWizard));
+document.querySelector('#close-chart-wizard').addEventListener('click', closeChartWizard);
+document.querySelector('#cancel-chart-wizard').addEventListener('click', closeChartWizard);
+chartWizard.addEventListener('click', event => { if (event.target === chartWizard) closeChartWizard(); });
+
+chartWizardForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  chartWizardError.hidden = true;
+  const saveButton = document.querySelector('#save-chart-wizard');
+  const dimensions = document.querySelector('#new-chart-dimensions').value
+    .split(/[,，]/).map(item => item.trim()).filter(Boolean);
+  if (dimensions.length < 2 || new Set(dimensions).size !== dimensions.length) {
+    chartWizardError.textContent = '请配置至少两个不重复的下钻维度';
+    chartWizardError.hidden = false;
+    return;
+  }
+  saveButton.disabled = true;
+  saveButton.textContent = '正在创建…';
+  try {
+    await request('/api/v1/admin/charts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({
+        chart_key: document.querySelector('#new-chart-key').value.trim(),
+        title: document.querySelector('#new-chart-title').value.trim(),
+        dataset_name: document.querySelector('#new-chart-dataset').value.trim(),
+        metric: document.querySelector('#new-chart-metric').value.trim(),
+        visualization_type: document.querySelector('#new-chart-type').value,
+        semantic_model: document.querySelector('#new-chart-model').value.trim(),
+        dimensions,
+      }),
+    });
+    chartWizardForm.reset();
+    closeChartWizard();
+    await loadManagedCharts();
+    switchView('chart-management');
+  } catch (error) {
+    chartWizardError.textContent = error.message;
+    chartWizardError.hidden = false;
+  } finally {
+    saveButton.disabled = false;
+    saveButton.textContent = '创建并发布';
+  }
+});
 
 loginForm.addEventListener('submit', async event => {
   event.preventDefault();

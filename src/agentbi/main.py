@@ -9,6 +9,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +35,20 @@ class LoginPayload(BaseModel):
 
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=256)
+
+
+class ChartCreatePayload(BaseModel):
+    """A governed chart plus its initial drilldown path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chart_key: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")
+    title: str = Field(min_length=2, max_length=200)
+    metric: str = Field(min_length=1, max_length=128)
+    dataset_name: str = Field(min_length=1, max_length=200)
+    visualization_type: Literal["bar", "line", "donut", "table"]
+    semantic_model: str = Field(min_length=2, max_length=128)
+    dimensions: list[str] = Field(min_length=2, max_length=5)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -80,6 +95,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return identity
 
     admin_session = Depends(require_admin)
+
+    def enforce_csrf(request: Request, identity: SessionIdentity) -> None:
+        if not hmac.compare_digest(
+            request.headers.get("X-AgentBI-CSRF", ""), identity.csrf_token
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid CSRF token")
 
     @app.middleware("http")
     async def audit_request(request: Request, call_next) -> Response:
@@ -166,10 +187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response: Response,
         identity: SessionIdentity = current_session,
     ) -> Response:
-        if not hmac.compare_digest(
-            request.headers.get("X-AgentBI-CSRF", ""), identity.csrf_token
-        ):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid CSRF token")
+        enforce_csrf(request, identity)
         sessions.revoke(identity)
         sessions.audit(
             "logout",
@@ -184,6 +202,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/admin/users")
     async def list_users(_: SessionIdentity = admin_session) -> dict[str, object]:
         return {"users": sessions.list_users()}
+
+    @app.get("/api/v1/charts")
+    async def list_charts(_: SessionIdentity = current_session) -> dict[str, object]:
+        return {"charts": sessions.list_charts()}
+
+    @app.post("/api/v1/admin/charts", status_code=status.HTTP_201_CREATED)
+    async def create_chart(
+        payload: ChartCreatePayload,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        dimensions = [item.strip() for item in payload.dimensions if item.strip()]
+        if len(dimensions) < 2 or len(set(dimensions)) != len(dimensions):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="至少配置两个不重复的下钻维度",
+            )
+        try:
+            chart = sessions.create_chart_with_drilldown(
+                chart_key=payload.chart_key,
+                title=payload.title,
+                metric=payload.metric,
+                dataset_name=payload.dataset_name,
+                visualization_type=payload.visualization_type,
+                semantic_model=payload.semantic_model,
+                dimensions=dimensions,
+                actor_user_id=identity.subject,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="图表 ID 已存在") from exc
+        sessions.audit(
+            "chart_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.chart_key,
+        )
+        return {"chart": chart}
 
     @app.post(
         "/api/v1/analyze",

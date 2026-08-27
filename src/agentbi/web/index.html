@@ -51,7 +51,7 @@
         <button class="nav-item" data-view="drilldown" data-permission="drilldown:use"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v9m-4-4 4 4 4-4"/></svg>下钻分析</button>
         <button class="nav-item" data-permission="report:view"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM9 10h6m-6 4h6m-6 4h4"/></svg>分析报告</button>
         <div class="nav-divider admin-only">系统治理</div>
-        <button class="nav-item admin-only" data-permission="dashboard:manage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8m-8 4h8m-8 4h5"/></svg>仪表盘管理</button>
+        <button class="nav-item admin-only" data-view="chart-management" data-permission="dashboard:manage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8m-8 4h8m-8 4h5"/></svg>仪表盘管理</button>
         <button class="nav-item admin-only" data-permission="semantic_model:manage"><svg viewBox="0 0 24 24"><path d="m12 3 8 5-8 5-8-5zm-8 9 8 5 8-5m-16 4 8 5 8-5"/></svg>语义模型</button>
         <button class="nav-item admin-only" data-view="drill-registry" data-permission="semantic_model:manage"><svg viewBox="0 0 24 24"><path d="M5 4h14v5H5zM5 15h14v5H5zM9 9v6m6-6v6"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/></svg>下钻配置</button>
         <button class="nav-item admin-only" data-permission="datasource:manage"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>数据源</button>
@@ -112,7 +112,7 @@
       <section id="drill-registry-view" class="registry-view" hidden>
         <header class="registry-header">
           <div><h1>通用下钻注册中心</h1><p>统一管理图表指标、语义模型与下钻维度路径</p></div>
-          <div><span id="registry-count" class="scope-badge">0 个已注册图表</span><button id="registry-refresh" type="button">⟳ 刷新配置</button></div>
+          <div><span id="registry-count" class="scope-badge">0 个已注册图表</span><button class="open-chart-wizard primary-small" type="button">＋ 新增下钻配置</button><button id="registry-refresh" type="button">⟳ 刷新配置</button></div>
         </header>
         <div class="registry-content">
           <section class="registry-summary">
@@ -131,6 +131,25 @@
           <aside class="registry-note"><strong>新增图表如何获得下钻能力？</strong><p>为图表声明稳定的 Chart ID，并注册指标、语义模型和维度路径。校验通过后，系统自动生成“三点菜单 → 设为下钻起点 → 进入下钻分析”。</p><code>data-drill-chart="customer_growth"</code></aside>
         </div>
       </section>
+
+      <section id="chart-management-view" class="registry-view" hidden>
+        <header class="registry-header">
+          <div><h1>仪表盘管理</h1><p>创建图表定义，并同步配置受治理的下钻路径</p></div>
+          <div><button class="open-chart-wizard primary-small" type="button">＋ 新增图表</button></div>
+        </header>
+        <div class="registry-content">
+          <section class="registry-summary">
+            <article><span>内置图表</span><strong>2</strong><small>随演示工作台发布</small></article>
+            <article><span>新增图表</span><strong id="dynamic-chart-total">0</strong><small>保存在 AgentBI 数据库</small></article>
+            <article><span>已配置下钻</span><strong id="managed-drill-total">0</strong><small>发布后自动开放入口</small></article>
+            <article><span>数据连接</span><strong class="healthy-number">正常</strong><small>本地 SQLite 已连接</small></article>
+          </section>
+          <section class="registry-table-card">
+            <header><div><strong>图表清单</strong><small>新增图表会同时创建第一版下钻配置</small></div><span class="registry-version">数据库管理</span></header>
+            <table><thead><tr><th>图表</th><th>数据集</th><th>指标</th><th>类型</th><th>下钻维度</th><th>状态</th></tr></thead><tbody id="managed-chart-table-body"></tbody></table>
+          </section>
+        </div>
+      </section>
     </section>
 
     <aside class="agent-panel">
@@ -140,6 +159,26 @@
       <div class="agent-input"><textarea aria-label="向 AgentBI 提问" placeholder="针对当前仪表盘提问…"></textarea><button>开始分析</button><small>回答将遵循当前用户的数据权限</small></div>
     </aside>
   </main>
+
+  <div id="chart-wizard" class="modal-backdrop" hidden>
+    <section class="chart-wizard" role="dialog" aria-modal="true" aria-labelledby="chart-wizard-title">
+      <header><div><span>新增图表与下钻配置</span><h2 id="chart-wizard-title">创建受治理分析图表</h2></div><button id="close-chart-wizard" type="button" aria-label="关闭">×</button></header>
+      <form id="chart-wizard-form">
+        <div class="wizard-grid">
+          <label>图表 ID<small>保存后不可重复，建议使用英文</small><input id="new-chart-key" required minlength="2" maxlength="128" pattern="[A-Za-z][A-Za-z0-9_-]*" placeholder="customer_growth"></label>
+          <label>图表名称<small>显示在分析工作台</small><input id="new-chart-title" required maxlength="200" placeholder="新增客户趋势"></label>
+          <label>数据集<small>对应 Superset Dataset</small><input id="new-chart-dataset" required maxlength="200" placeholder="customer_sales"></label>
+          <label>核心指标<small>必须是受治理指标</small><input id="new-chart-metric" required maxlength="128" placeholder="新增客户数"></label>
+          <label>图表类型<small>决定原始图的展示形式</small><select id="new-chart-type"><option value="bar">柱状图</option><option value="line">折线图</option><option value="donut">环图</option><option value="table">指标表格</option></select></label>
+          <label>语义模型<small>对应 SuperSonic 模型</small><input id="new-chart-model" required maxlength="128" placeholder="customer_model"></label>
+          <label class="wizard-full">下钻维度路径<small>使用英文逗号或中文逗号分隔，至少两层</small><input id="new-chart-dimensions" required placeholder="区域, 渠道, 销售人员, 客户"></label>
+        </div>
+        <div id="chart-wizard-error" class="form-error" hidden></div>
+        <aside class="wizard-preview"><strong>发布后的交互</strong><span>分析工作台 → 图表三点菜单 → 进入下钻分析 → AgentBI 证据路径</span></aside>
+        <footer><button id="cancel-chart-wizard" type="button">取消</button><button id="save-chart-wizard" class="primary-button" type="submit">创建并发布</button></footer>
+      </form>
+    </section>
+  </div>
   <script src="/app/assets/drilldown-registry.js" defer></script>
   <script src="/app/assets/app.js" defer></script>
 </body>
