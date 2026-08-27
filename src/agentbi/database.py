@@ -161,6 +161,38 @@ class AnalysisReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
+class DataSourceAsset(Base):
+    """Governed Superset dataset metadata; credentials remain in Superset."""
+
+    __tablename__ = "data_source_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    source_type: Mapped[str] = mapped_column(String(64), default="Superset Dataset")
+    description: Mapped[str] = mapped_column(String(512), default="")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SemanticModelAsset(Base):
+    """Governed SuperSonic semantic-model registration."""
+
+    __tablename__ = "semantic_model_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    subject_area: Mapped[str] = mapped_column(String(128), default="通用主题域")
+    description: Mapped[str] = mapped_column(String(512), default="")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 @dataclass(frozen=True, slots=True)
 class AccountRecord:
     id: str
@@ -237,6 +269,46 @@ class IdentityRepository:
             if seed_demo_accounts:
                 self._seed_user(db, "user", user_password, "张晓", "user", "华东区域")
                 self._seed_user(db, "admin", admin_password, "系统管理员", "admin", "全部区域")
+            db.flush()
+            admin = db.scalar(select(User).where(User.username == "admin"))
+            creator = admin.id if admin else None
+            self._ensure_data_source(db, "sales_orders", creator, is_system=True)
+            self._ensure_semantic_model(db, "sales_model", creator, is_system=True)
+            for chart, drilldown in db.execute(
+                select(DashboardChart, DrilldownDefinition).join(
+                    DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id
+                )
+            ).all():
+                self._ensure_data_source(db, chart.dataset_name, chart.created_by)
+                self._ensure_semantic_model(db, drilldown.semantic_model, chart.created_by)
+
+    @staticmethod
+    def _ensure_data_source(
+        db: Session, name: str, actor_user_id: str | None, *, is_system: bool = False
+    ) -> DataSourceAsset:
+        asset = db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name.strip()))
+        if asset is None:
+            asset = DataSourceAsset(
+                id=str(uuid.uuid4()), name=name.strip(), created_by=actor_user_id, is_system=is_system
+            )
+            db.add(asset)
+            db.flush()
+        return asset
+
+    @staticmethod
+    def _ensure_semantic_model(
+        db: Session, name: str, actor_user_id: str | None, *, is_system: bool = False
+    ) -> SemanticModelAsset:
+        asset = db.scalar(
+            select(SemanticModelAsset).where(SemanticModelAsset.name == name.strip())
+        )
+        if asset is None:
+            asset = SemanticModelAsset(
+                id=str(uuid.uuid4()), name=name.strip(), created_by=actor_user_id, is_system=is_system
+            )
+            db.add(asset)
+            db.flush()
+        return asset
 
     def _seed_user(
         self,
@@ -424,6 +496,133 @@ class IdentityRepository:
                 for role in roles
             ]
 
+    def list_data_sources(self) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            assets = db.scalars(select(DataSourceAsset).order_by(DataSourceAsset.created_at)).all()
+            return [self._data_source_payload(db, asset) for asset in assets]
+
+    def create_data_source(
+        self, *, name: str, source_type: str, description: str, actor_user_id: str
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            if db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name.strip())):
+                raise ValueError("data source already exists")
+            asset = DataSourceAsset(
+                id=str(uuid.uuid4()), name=name.strip(), source_type=source_type.strip(),
+                description=description.strip(), created_by=actor_user_id,
+            )
+            db.add(asset); db.flush()
+            return self._data_source_payload(db, asset)
+
+    def update_data_source(
+        self, name: str, *, source_type: str, description: str, status: str
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            asset = db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name))
+            if asset is None:
+                raise KeyError("data source not found")
+            asset.source_type = source_type.strip(); asset.description = description.strip()
+            asset.status = status; asset.updated_at = utc_now(); db.flush()
+            return self._data_source_payload(db, asset)
+
+    def delete_data_source(self, name: str) -> None:
+        with Session(self.engine) as db, db.begin():
+            asset = db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name))
+            if asset is None:
+                raise KeyError("data source not found")
+            if asset.is_system or self._data_source_references(db, name):
+                raise PermissionError("data source is referenced")
+            db.delete(asset)
+
+    def list_semantic_models(self) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            assets = db.scalars(
+                select(SemanticModelAsset).order_by(SemanticModelAsset.created_at)
+            ).all()
+            return [self._semantic_model_payload(db, asset) for asset in assets]
+
+    def create_semantic_model(
+        self, *, name: str, subject_area: str, description: str, actor_user_id: str
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            if db.scalar(
+                select(SemanticModelAsset).where(SemanticModelAsset.name == name.strip())
+            ):
+                raise ValueError("semantic model already exists")
+            asset = SemanticModelAsset(
+                id=str(uuid.uuid4()), name=name.strip(), subject_area=subject_area.strip(),
+                description=description.strip(), created_by=actor_user_id,
+            )
+            db.add(asset); db.flush()
+            return self._semantic_model_payload(db, asset)
+
+    def update_semantic_model(
+        self, name: str, *, subject_area: str, description: str, status: str
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            asset = db.scalar(
+                select(SemanticModelAsset).where(SemanticModelAsset.name == name)
+            )
+            if asset is None:
+                raise KeyError("semantic model not found")
+            asset.subject_area = subject_area.strip(); asset.description = description.strip()
+            asset.status = status; asset.updated_at = utc_now(); db.flush()
+            return self._semantic_model_payload(db, asset)
+
+    def delete_semantic_model(self, name: str) -> None:
+        with Session(self.engine) as db, db.begin():
+            asset = db.scalar(
+                select(SemanticModelAsset).where(SemanticModelAsset.name == name)
+            )
+            if asset is None:
+                raise KeyError("semantic model not found")
+            if asset.is_system or self._semantic_model_references(db, name):
+                raise PermissionError("semantic model is referenced")
+            db.delete(asset)
+
+    @staticmethod
+    def _data_source_references(db: Session, name: str) -> int:
+        return int(
+            db.scalar(
+                select(func.count()).select_from(DashboardChart).where(
+                    DashboardChart.dataset_name == name
+                )
+            ) or 0
+        )
+
+    @classmethod
+    def _data_source_payload(cls, db: Session, asset: DataSourceAsset) -> dict[str, object]:
+        references = cls._data_source_references(db, asset.name) + (2 if asset.is_system else 0)
+        return {"name": asset.name, "type": asset.source_type, "description": asset.description,
+                "status": asset.status, "charts": references, "is_system": asset.is_system}
+
+    @staticmethod
+    def _semantic_model_references(db: Session, name: str) -> int:
+        return int(
+            db.scalar(
+                select(func.count()).select_from(DrilldownDefinition).where(
+                    DrilldownDefinition.semantic_model == name
+                )
+            ) or 0
+        )
+
+    @classmethod
+    def _semantic_model_payload(
+        cls, db: Session, asset: SemanticModelAsset
+    ) -> dict[str, object]:
+        rows = db.execute(
+            select(DashboardChart.metric)
+            .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
+            .where(DrilldownDefinition.semantic_model == asset.name)
+        ).all()
+        metrics = sorted({str(row[0]) for row in rows})
+        if asset.is_system:
+            metrics = sorted(set(metrics) | {"销售收入"})
+        references = cls._semantic_model_references(db, asset.name) + (2 if asset.is_system else 0)
+        return {"name": asset.name, "subject_area": asset.subject_area,
+                "description": asset.description, "status": asset.status,
+                "metrics": metrics, "charts": references, "is_system": asset.is_system}
+
     def list_audit_events(self, *, limit: int = 100) -> list[dict[str, object]]:
         with Session(self.engine) as db:
             rows = db.execute(
@@ -553,6 +752,8 @@ class IdentityRepository:
         with Session(self.engine) as db, db.begin():
             if db.scalar(select(DashboardChart).where(DashboardChart.chart_key == normalized_key)):
                 raise ValueError("chart key already exists")
+            self._ensure_data_source(db, dataset_name, actor_user_id)
+            self._ensure_semantic_model(db, semantic_model, actor_user_id)
             chart = DashboardChart(
                 id=str(uuid.uuid4()),
                 chart_key=normalized_key,
@@ -608,6 +809,8 @@ class IdentityRepository:
             if row is None:
                 raise KeyError("chart not found")
             chart, drilldown = row
+            self._ensure_data_source(db, dataset_name, chart.created_by)
+            self._ensure_semantic_model(db, semantic_model, chart.created_by)
             chart.title = title.strip()
             chart.metric = metric.strip()
             chart.dataset_name = dataset_name.strip()

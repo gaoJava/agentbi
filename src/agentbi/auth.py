@@ -160,6 +160,30 @@ class SessionManager:
     def list_roles(self) -> list[dict[str, object]]:
         return self.repository.list_roles()
 
+    def list_data_sources(self) -> list[dict[str, object]]:
+        return self.repository.list_data_sources()
+
+    def create_data_source(self, **values: object) -> dict[str, object]:
+        return self.repository.create_data_source(**values)
+
+    def update_data_source(self, name: str, **values: object) -> dict[str, object]:
+        return self.repository.update_data_source(name, **values)
+
+    def delete_data_source(self, name: str) -> None:
+        self.repository.delete_data_source(name)
+
+    def list_semantic_models(self) -> list[dict[str, object]]:
+        return self.repository.list_semantic_models()
+
+    def create_semantic_model(self, **values: object) -> dict[str, object]:
+        return self.repository.create_semantic_model(**values)
+
+    def update_semantic_model(self, name: str, **values: object) -> dict[str, object]:
+        return self.repository.update_semantic_model(name, **values)
+
+    def delete_semantic_model(self, name: str) -> None:
+        self.repository.delete_semantic_model(name)
+
     def update_user(self, **values: object) -> dict[str, object]:
         return self.repository.update_user(**values)
 

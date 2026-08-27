@@ -12,7 +12,10 @@ if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
 const drillConfigurations = drillRegistry.charts;
 let managedCharts = [];
 let loadedUsers = [];
+let loadedSemanticModels = [];
+let loadedDataSources = [];
 let pendingReport;
+let pendingAsset;
 const managedChartKeys = new Set();
 let activeView = 'dashboard';
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
@@ -221,6 +224,41 @@ async function runModuleAction(button, url, successView) {
   }
 }
 
+function assetActionGroup(kind, asset) {
+  const group = document.createElement('div'); group.className = 'registry-actions';
+  const checkLabel = kind === 'semantic-models' ? '检查同步' : '测试连接';
+  const checkSuffix = kind === 'semantic-models' ? 'sync' : 'test';
+  group.append(actionButton(checkLabel, 'module-action', event => runModuleAction(
+    event.currentTarget,
+    `/api/v1/admin/${kind}/${encodeURIComponent(asset.name)}/${checkSuffix}`,
+    kind,
+  )));
+  group.append(actionButton('修改', 'module-action', () => openAssetEditor(kind, asset)));
+  group.append(actionButton(asset.status === 'active' ? '下线' : '上线', 'warning-action', () => {
+    updateAssetStatus(kind, asset, asset.status === 'active' ? 'offline' : 'active');
+  }));
+  const remove = actionButton('删除', 'danger-action', () => openAssetDeleteConfirmation(kind, asset));
+  remove.disabled = asset.is_system || asset.charts > 0;
+  if (remove.disabled) remove.title = '系统资产或存在图表引用，不能删除';
+  group.append(remove);
+  return group;
+}
+
+async function updateAssetStatus(kind, asset, statusValue) {
+  const payload = kind === 'semantic-models'
+    ? { subject_area: asset.subject_area, description: asset.description, status: statusValue }
+    : { source_type: asset.type, description: asset.description, status: statusValue };
+  try {
+    await request(`/api/v1/admin/${kind}/${encodeURIComponent(asset.name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify(payload),
+    });
+    await loadModuleView(kind);
+    showManagementFeedback(`${asset.name} 已${statusValue === 'active' ? '上线' : '下线'}`);
+  } catch (error) { showManagementFeedback(error.message, true); }
+}
+
 async function loadModuleView(view) {
   const target = document.querySelector(`#${view}-view`);
   target.setAttribute('aria-busy', 'true');
@@ -230,24 +268,17 @@ async function loadModuleView(view) {
     } else if (view === 'reports') {
       renderReportList((await request('/api/v1/reports')).reports || []);
     } else if (view === 'semantic-models') {
-      const models = (await request('/api/v1/admin/semantic-models')).models || [];
-      renderModuleRows('semantic-model-table-body', models, model => [
+      loadedSemanticModels = (await request('/api/v1/admin/semantic-models')).models || [];
+      renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
         model.name, model.metrics.join('、'), model.charts,
-        model.status === 'published' ? '● 已发布' : '● 已下线',
-      ], model => actionButton('检查同步', 'module-action', event => runModuleAction(
-        event.currentTarget,
-        `/api/v1/admin/semantic-models/${encodeURIComponent(model.name)}/sync`,
-        'semantic-models',
-      )));
+        model.status === 'active' ? '● 已启用' : '● 已下线',
+      ], model => assetActionGroup('semantic-models', model));
     } else if (view === 'data-sources') {
-      const sources = (await request('/api/v1/admin/data-sources')).sources || [];
-      renderModuleRows('data-source-table-body', sources, source => [
-        source.name, source.type, source.charts, source.status === 'ready' ? '● 已配置' : '● 异常',
-      ], source => actionButton('测试连接', 'module-action', event => runModuleAction(
-        event.currentTarget,
-        `/api/v1/admin/data-sources/${encodeURIComponent(source.name)}/test`,
-        'data-sources',
-      )));
+      loadedDataSources = (await request('/api/v1/admin/data-sources')).sources || [];
+      renderModuleRows('data-source-table-body', loadedDataSources, source => [
+        source.name, source.type, source.charts,
+        source.status === 'active' ? '● 已启用' : '● 已下线',
+      ], source => assetActionGroup('data-sources', source));
     } else if (view === 'user-roles') {
       const [userBody, roleBody] = await Promise.all([
         request('/api/v1/admin/users'), request('/api/v1/admin/roles'),
@@ -269,6 +300,9 @@ async function loadModuleView(view) {
         report_created: '生成报告', report_deleted: '删除报告', user_created: '新增用户',
         user_updated: '修改用户权限',
         semantic_model_checked: '检查语义模型', data_source_tested: '测试数据源',
+        semantic_model_created: '新增语义模型', semantic_model_updated: '修改语义模型',
+        semantic_model_deleted: '删除语义模型', data_source_created: '新增数据源',
+        data_source_updated: '修改数据源', data_source_deleted: '删除数据源',
       };
       replaceTableRows('audit-event-table-body', events.map(event => [
         formatTimestamp(event.created_at), eventLabels[event.event_type] || event.event_type,
@@ -760,6 +794,94 @@ document.querySelector('#confirm-delete-chart').addEventListener('click', async 
   } finally {
     button.disabled = false; button.textContent = '确认删除';
   }
+});
+
+const assetEditor = document.querySelector('#asset-editor');
+const assetEditorForm = document.querySelector('#asset-editor-form');
+let editingAssetKind;
+let editingAssetName;
+
+function openAssetEditor(kind, asset = null) {
+  editingAssetKind = kind; editingAssetName = asset?.name;
+  assetEditorForm.reset();
+  const semantic = kind === 'semantic-models';
+  document.querySelector('#asset-editor-title').textContent = asset
+    ? `修改${semantic ? '语义模型' : '数据源'}` : `新增${semantic ? '语义模型' : '数据源'}`;
+  const name = document.querySelector('#asset-name');
+  name.disabled = Boolean(asset); name.value = asset?.name || '';
+  document.querySelector('#asset-secondary-label').textContent = semantic ? '主题域' : '数据源类型';
+  document.querySelector('#asset-secondary-help').textContent = semantic
+    ? '用于业务语义分类' : '例如 Superset Dataset';
+  document.querySelector('#asset-secondary').value = semantic
+    ? asset?.subject_area || '通用主题域' : asset?.type || 'Superset Dataset';
+  document.querySelector('#asset-description').value = asset?.description || '';
+  document.querySelector('#asset-status').value = asset?.status || 'active';
+  document.querySelector('#asset-status-field').hidden = !asset;
+  document.querySelector('#asset-editor-error').hidden = true;
+  assetEditor.hidden = false; (asset ? document.querySelector('#asset-secondary') : name).focus();
+}
+
+function closeAssetEditor() {
+  assetEditor.hidden = true; assetEditorForm.reset();
+  editingAssetKind = undefined; editingAssetName = undefined;
+  document.querySelector('#asset-name').disabled = false;
+}
+
+document.querySelectorAll('.open-asset-editor').forEach(button => {
+  button.addEventListener('click', () => openAssetEditor(button.dataset.assetKind));
+});
+document.querySelector('#close-asset-editor').addEventListener('click', closeAssetEditor);
+document.querySelector('#cancel-asset-editor').addEventListener('click', closeAssetEditor);
+assetEditor.addEventListener('click', event => { if (event.target === assetEditor) closeAssetEditor(); });
+assetEditorForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const kind = editingAssetKind; const editing = Boolean(editingAssetName);
+  const name = editingAssetName || document.querySelector('#asset-name').value.trim();
+  const semantic = kind === 'semantic-models';
+  const secondary = document.querySelector('#asset-secondary').value.trim();
+  const payload = semantic
+    ? { subject_area: secondary, description: document.querySelector('#asset-description').value.trim() }
+    : { source_type: secondary, description: document.querySelector('#asset-description').value.trim() };
+  if (!editing) payload.name = name;
+  else payload.status = document.querySelector('#asset-status').value;
+  const button = assetEditorForm.querySelector('button[type="submit"]');
+  const errorBox = document.querySelector('#asset-editor-error');
+  button.disabled = true; errorBox.hidden = true;
+  try {
+    await request(editing ? `/api/v1/admin/${kind}/${encodeURIComponent(name)}` : `/api/v1/admin/${kind}`, {
+      method: editing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify(payload),
+    });
+    closeAssetEditor(); await loadModuleView(kind);
+    showManagementFeedback(`${name} 已${editing ? '更新' : '创建'}`);
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
+  finally { button.disabled = false; }
+});
+
+function openAssetDeleteConfirmation(kind, asset) {
+  pendingAsset = { kind, asset };
+  document.querySelector('#delete-asset-name').textContent = asset.name;
+  document.querySelector('#delete-asset-confirm').hidden = false;
+}
+function closeAssetDeleteConfirmation() {
+  document.querySelector('#delete-asset-confirm').hidden = true; pendingAsset = undefined;
+}
+document.querySelector('#close-delete-asset').addEventListener('click', closeAssetDeleteConfirmation);
+document.querySelector('#cancel-delete-asset').addEventListener('click', closeAssetDeleteConfirmation);
+document.querySelector('#delete-asset-confirm').addEventListener('click', event => {
+  if (event.target.id === 'delete-asset-confirm') closeAssetDeleteConfirmation();
+});
+document.querySelector('#confirm-delete-asset').addEventListener('click', async () => {
+  if (!pendingAsset) return;
+  const { kind, asset } = pendingAsset;
+  try {
+    await request(`/api/v1/admin/${kind}/${encodeURIComponent(asset.name)}`, {
+      method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    closeAssetDeleteConfirmation(); await loadModuleView(kind);
+    showManagementFeedback(`${asset.name} 已删除`);
+  } catch (error) { showManagementFeedback(error.message, true); }
 });
 
 const userEditor = document.querySelector('#user-editor');

@@ -18,6 +18,8 @@ users ──< user_roles >── roles ──< role_permissions >── permissi
   ├──< auth_sessions
   ├──< audit_events
   ├──< analysis_reports
+  ├──< data_source_assets
+  ├──< semantic_model_assets
   └──< dashboard_charts ── drilldown_definitions
 ```
 
@@ -35,6 +37,8 @@ users ──< user_roles >── roles ──< role_permissions >── permissi
 | `dashboard_charts` | 图表定义 | Chart ID、名称、数据集、指标、可视化类型、发布状态和创建人 |
 | `drilldown_definitions` | 下钻配置 | 图表一对一配置；语义模型、维度路径、发布状态和创建人 |
 | `analysis_reports` | 分析报告快照 | 标题、来源仪表盘、数据范围、摘要、证据路径、创建人和生成时间 |
+| `data_source_assets` | 受治理数据源 | Superset Dataset 名称、类型、说明、启停状态、系统保护及创建人 |
+| `semantic_model_assets` | 受治理语义模型 | SuperSonic 模型名称、主题域、说明、启停状态、系统保护及创建人 |
 
 ## 安全规则
 
@@ -45,6 +49,7 @@ users ──< user_roles >── roles ──< role_permissions >── permissi
 - 修改类请求继续校验 CSRF；管理员接口同时检查管理员角色和 `user:manage` 权限。
 - 当前管理员不能停用自己或把自己降级为普通用户，避免误操作导致治理入口全部锁死。
 - 报告删除只允许创建者或管理员执行，前端二次确认，服务端再次校验所有权。
+- 数据源和语义模型删除前检查图表引用；系统内置或被引用资产只能修改/下线，不能删除。
 - 审计日志不记录密码、Cookie、问题正文、原始 SQL 或完整结果。
 
 ## 当前初始化数据

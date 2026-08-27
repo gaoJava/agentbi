@@ -163,13 +163,13 @@
       </section>
 
       <section id="semantic-models-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>语义模型</h1><p>从已注册图表聚合指标、模型与发布状态</p></div><button class="module-refresh" data-module="semantic-models" type="button">⟳ 刷新</button></header>
-        <div class="registry-content"><aside class="registry-note"><strong>数据从哪里来？</strong><p>当前语义模型由“仪表盘管理/下钻配置”中的图表自动聚合。新增或修改图表时同步注册模型；只有没有图表引用时，后续独立资产管理才允许删除。</p></aside><section class="registry-table-card"><table><thead><tr><th>模型名称</th><th>受治理指标</th><th>关联图表</th><th>状态</th><th>操作</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
+        <header class="registry-header"><div><h1>语义模型</h1><p>统一管理 SuperSonic 语义模型及图表引用</p></div><div><button class="primary-small open-asset-editor" data-asset-kind="semantic-models" type="button">＋ 新增模型</button><button class="module-refresh" data-module="semantic-models" type="button">⟳ 刷新</button></div></header>
+        <div class="registry-content"><aside class="registry-note"><strong>数据从哪里来？</strong><p>语义模型保存在 AgentBI 独立资产表；可在本页新增，也会在创建图表时自动登记。支持修改和上下线；存在图表引用或属于系统内置模型时禁止删除。</p></aside><section class="registry-table-card"><table><thead><tr><th>模型名称</th><th>受治理指标</th><th>关联图表</th><th>状态</th><th>操作</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
       </section>
 
       <section id="data-sources-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>数据源</h1><p>查看 Superset Dataset 与图表使用关系</p></div><button class="module-refresh" data-module="data-sources" type="button">⟳ 刷新</button></header>
-        <div class="registry-content"><aside class="registry-note"><strong>数据从哪里来？</strong><p>当前数据集名称取自已注册图表，对应 Superset Dataset。新增、修改和下线通过“仪表盘管理”完成；被图表引用的数据集不能直接删除。</p></aside><section class="registry-table-card"><table><thead><tr><th>数据集</th><th>类型</th><th>关联图表</th><th>连接状态</th><th>操作</th></tr></thead><tbody id="data-source-table-body"></tbody></table></section></div>
+        <header class="registry-header"><div><h1>数据源</h1><p>统一管理 Superset Dataset 与图表引用</p></div><div><button class="primary-small open-asset-editor" data-asset-kind="data-sources" type="button">＋ 新增数据源</button><button class="module-refresh" data-module="data-sources" type="button">⟳ 刷新</button></div></header>
+        <div class="registry-content"><aside class="registry-note"><strong>数据从哪里来？</strong><p>数据源保存在 AgentBI 独立资产表，对应 Superset Dataset；可在本页新增，也会在创建图表时自动登记。存在图表引用或属于系统内置数据源时禁止删除。</p></aside><section class="registry-table-card"><table><thead><tr><th>数据集</th><th>类型</th><th>关联图表</th><th>连接状态</th><th>操作</th></tr></thead><tbody id="data-source-table-body"></tbody></table></section></div>
       </section>
 
       <section id="user-roles-view" class="registry-view module-view" hidden>
@@ -239,6 +239,28 @@
       <header><div><span>不可恢复操作</span><h2 id="delete-report-title">确认删除分析报告</h2></div><button id="close-delete-report" type="button" aria-label="关闭">×</button></header>
       <div><p>将永久删除报告及其已保存的证据路径：</p><strong id="delete-report-name"></strong><small>仅报告创建者或系统管理员可执行此操作。</small></div>
       <footer><button id="cancel-delete-report" type="button">取消</button><button id="confirm-delete-report" class="danger-button" type="button">确认删除</button></footer>
+    </section>
+  </div>
+  <div id="asset-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="asset-editor-title">
+      <header><div><span>受治理资产注册</span><h2 id="asset-editor-title">新增资产</h2></div><button id="close-asset-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="asset-editor-form">
+        <div class="wizard-grid">
+          <label>资产名称<small>创建后不可修改，使用英文标识</small><input id="asset-name" required minlength="2" maxlength="200" pattern="[A-Za-z][A-Za-z0-9_.-]*"></label>
+          <label><span id="asset-secondary-label">资产类型</span><small id="asset-secondary-help">对应上游资产类型</small><input id="asset-secondary" required minlength="2" maxlength="128"></label>
+          <label class="wizard-full">说明<small>描述用途、负责人或数据边界</small><textarea id="asset-description" maxlength="512"></textarea></label>
+          <label id="asset-status-field" class="wizard-full">状态<small>下线后保留引用和审计信息</small><select id="asset-status"><option value="active">已启用</option><option value="offline">已下线</option></select></label>
+        </div>
+        <div id="asset-editor-error" class="form-error" hidden></div>
+        <footer><button id="cancel-asset-editor" type="button">取消</button><button class="primary-button" type="submit">保存资产</button></footer>
+      </form>
+    </section>
+  </div>
+  <div id="delete-asset-confirm" class="modal-backdrop" hidden>
+    <section class="delete-confirm" role="dialog" aria-modal="true" aria-labelledby="delete-asset-title">
+      <header><div><span>不可恢复操作</span><h2 id="delete-asset-title">确认删除资产</h2></div><button id="close-delete-asset" type="button" aria-label="关闭">×</button></header>
+      <div><p>将永久删除未被图表引用的资产：</p><strong id="delete-asset-name"></strong><small>系统内置资产或存在图表引用时，服务端会拒绝删除。</small></div>
+      <footer><button id="cancel-delete-asset" type="button">取消</button><button id="confirm-delete-asset" class="danger-button" type="button">确认删除</button></footer>
     </section>
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>

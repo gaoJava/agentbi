@@ -272,6 +272,54 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         )
         assert missing_model.status_code == 404
 
+        source_payload = {
+            "name": "crm_orders",
+            "source_type": "Superset Dataset",
+            "description": "CRM 订单数据集",
+        }
+        assert client.post("/api/v1/admin/data-sources", json=source_payload).status_code == 403
+        source_created = client.post(
+            "/api/v1/admin/data-sources", json=source_payload,
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert source_created.status_code == 201
+        source_updated = client.put(
+            "/api/v1/admin/data-sources/crm_orders",
+            json={"source_type": "Superset Dataset", "description": "CRM 订单数据集", "status": "offline"},
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert source_updated.status_code == 200
+        assert source_updated.json()["source"]["status"] == "offline"
+        assert client.delete(
+            "/api/v1/admin/data-sources/sales_orders",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        ).status_code == 409
+        assert client.delete(
+            "/api/v1/admin/data-sources/crm_orders",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        ).status_code == 204
+
+        model_payload = {
+            "name": "customer_value_model",
+            "subject_area": "客户价值",
+            "description": "客户价值分析模型",
+        }
+        model_created = client.post(
+            "/api/v1/admin/semantic-models", json=model_payload,
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert model_created.status_code == 201
+        model_updated = client.put(
+            "/api/v1/admin/semantic-models/customer_value_model",
+            json={"subject_area": "客户价值", "description": "客户价值分析模型", "status": "offline"},
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert model_updated.status_code == 200
+        assert client.delete(
+            "/api/v1/admin/semantic-models/customer_value_model",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        ).status_code == 204
+
         assert client.delete(f"/api/v1/reports/{report_id}").status_code == 403
         deleted = client.delete(
             f"/api/v1/reports/{report_id}",

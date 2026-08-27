@@ -105,6 +105,34 @@ class UserCreatePayload(BaseModel):
     is_active: bool = True
 
 
+class DataSourceCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=200, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    source_type: str = Field(min_length=2, max_length=64)
+    description: str = Field(default="", max_length=512)
+
+
+class DataSourceUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_type: str = Field(min_length=2, max_length=64)
+    description: str = Field(default="", max_length=512)
+    status: Literal["active", "offline"]
+
+
+class SemanticModelCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    subject_area: str = Field(min_length=2, max_length=128)
+    description: str = Field(default="", max_length=512)
+
+
+class SemanticModelUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subject_area: str = Field(min_length=2, max_length=128)
+    description: str = Field(default="", max_length=512)
+    status: Literal["active", "offline"]
+
+
 def validated_dimensions(items: list[str]) -> list[str]:
     """Normalize and reject ambiguous drill paths before they reach storage."""
 
@@ -438,30 +466,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/admin/semantic-models")
     async def list_semantic_models(_: SessionIdentity = admin_session) -> dict[str, object]:
-        charts = sessions.list_charts(published_only=False)
-        grouped: dict[str, dict[str, object]] = {
-            "sales_model": {
-                "name": "sales_model",
-                "metrics": {"销售收入"},
-                "charts": 2,
-                "status": "published",
-            }
-        }
-        for chart in charts:
-            model = str(chart["semantic_model"])
-            entry = grouped.setdefault(
-                model,
-                {"name": model, "metrics": set(), "charts": 0, "status": "offline"},
+        return {"models": sessions.list_semantic_models()}
+
+    @app.post("/api/v1/admin/semantic-models", status_code=status.HTTP_201_CREATED)
+    async def create_semantic_model(
+        payload: SemanticModelCreatePayload, request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            model = sessions.create_semantic_model(
+                name=payload.name, subject_area=payload.subject_area,
+                description=payload.description, actor_user_id=identity.subject,
             )
-            entry["metrics"].add(str(chart["metric"]))
-            entry["charts"] = int(entry["charts"]) + 1
-            if chart["is_published"]:
-                entry["status"] = "published"
-        models = [
-            {**entry, "metrics": sorted(entry["metrics"])}
-            for entry in grouped.values()
-        ]
-        return {"models": models}
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="语义模型已存在") from exc
+        sessions.audit("semantic_model_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=payload.name)
+        return {"model": model}
+
+    @app.put("/api/v1/admin/semantic-models/{model_name}")
+    async def update_semantic_model(
+        model_name: str, payload: SemanticModelUpdatePayload, request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            model = sessions.update_semantic_model(
+                model_name, subject_area=payload.subject_area,
+                description=payload.description, status=payload.status,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="语义模型不存在") from exc
+        sessions.audit("semantic_model_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=model_name)
+        return {"model": model}
+
+    @app.delete("/api/v1/admin/semantic-models/{model_name}", status_code=204)
+    async def delete_semantic_model(
+        model_name: str, request: Request, identity: SessionIdentity = admin_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            sessions.delete_semantic_model(model_name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="语义模型不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail="语义模型正被图表引用，不能删除") from exc
+        sessions.audit("semantic_model_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=model_name)
+        return Response(status_code=204)
 
     async def probe_upstream(base_url: str) -> dict[str, str]:
         """Return a bounded, non-sensitive upstream health result."""
@@ -485,11 +539,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         identity: SessionIdentity = admin_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
-        known_models = {
-            str(chart["semantic_model"])
-            for chart in sessions.list_charts(published_only=False)
-        }
-        known_models.add("sales_model")
+        known_models = {str(model["name"]) for model in sessions.list_semantic_models()}
         if model_name not in known_models:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="语义模型不存在")
         result = await probe_upstream(settings.supersonic_base_url)
@@ -509,23 +559,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/admin/data-sources")
     async def list_data_sources(_: SessionIdentity = admin_session) -> dict[str, object]:
-        charts = sessions.list_charts(published_only=False)
-        grouped: dict[str, dict[str, object]] = {
-            "sales_orders": {
-                "name": "sales_orders",
-                "type": "Superset Dataset",
-                "charts": 2,
-                "status": "ready",
-            }
-        }
-        for chart in charts:
-            dataset = str(chart["dataset_name"])
-            entry = grouped.setdefault(
-                dataset,
-                {"name": dataset, "type": "Superset Dataset", "charts": 0, "status": "ready"},
+        return {"sources": sessions.list_data_sources()}
+
+    @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
+    async def create_data_source(
+        payload: DataSourceCreatePayload, request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            source = sessions.create_data_source(
+                name=payload.name, source_type=payload.source_type,
+                description=payload.description, actor_user_id=identity.subject,
             )
-            entry["charts"] = int(entry["charts"]) + 1
-        return {"sources": list(grouped.values())}
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail="数据源已存在") from exc
+        sessions.audit("data_source_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=payload.name)
+        return {"source": source}
+
+    @app.put("/api/v1/admin/data-sources/{source_name}")
+    async def update_data_source(
+        source_name: str, payload: DataSourceUpdatePayload, request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            source = sessions.update_data_source(
+                source_name, source_type=payload.source_type,
+                description=payload.description, status=payload.status,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="数据源不存在") from exc
+        sessions.audit("data_source_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=source_name)
+        return {"source": source}
+
+    @app.delete("/api/v1/admin/data-sources/{source_name}", status_code=204)
+    async def delete_data_source(
+        source_name: str, request: Request, identity: SessionIdentity = admin_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            sessions.delete_data_source(source_name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="数据源不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail="数据源正被图表引用，不能删除") from exc
+        sessions.audit("data_source_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=source_name)
+        return Response(status_code=204)
 
     @app.post("/api/v1/admin/data-sources/{source_name}/test")
     async def test_data_source(
@@ -534,11 +617,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         identity: SessionIdentity = admin_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
-        known_sources = {
-            str(chart["dataset_name"])
-            for chart in sessions.list_charts(published_only=False)
-        }
-        known_sources.add("sales_orders")
+        known_sources = {str(source["name"]) for source in sessions.list_data_sources()}
         if source_name not in known_sources:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据源不存在")
         result = await probe_upstream(settings.superset_base_url)
