@@ -642,6 +642,31 @@ loginForm.addEventListener('submit', async event => {
 
 const accountMenu = document.querySelector('#account-menu');
 const accountMenuButton = document.querySelector('#account-menu-button');
+const sidebarToggle = document.querySelector('#sidebar-toggle');
+
+function setSidebarCollapsed(collapsed, { persist = true } = {}) {
+  workbenchView.classList.toggle('sidebar-collapsed', collapsed);
+  sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+  sidebarToggle.setAttribute('aria-label', collapsed ? '展开功能菜单' : '收起功能菜单');
+  sidebarToggle.title = collapsed ? '展开功能菜单' : '收起功能菜单';
+  if (persist) {
+    try { localStorage.setItem('agentbi.sidebarCollapsed', String(collapsed)); }
+    catch { /* Storage may be disabled; the current page state still works. */ }
+  }
+}
+
+document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+  item.title = item.textContent.trim();
+});
+let sidebarInitiallyCollapsed = false;
+try { sidebarInitiallyCollapsed = localStorage.getItem('agentbi.sidebarCollapsed') === 'true'; }
+catch { /* Keep the expanded default when storage is unavailable. */ }
+setSidebarCollapsed(sidebarInitiallyCollapsed, { persist: false });
+sidebarToggle.addEventListener('click', event => {
+  event.stopPropagation();
+  accountMenu.hidden = true;
+  setSidebarCollapsed(!workbenchView.classList.contains('sidebar-collapsed'));
+});
 
 accountMenuButton.addEventListener('click', event => {
   event.stopPropagation();
