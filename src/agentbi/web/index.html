@@ -48,16 +48,16 @@
       <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="收起功能菜单" aria-expanded="true" title="收起功能菜单"><svg viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></svg></button>
       <nav aria-label="主导航">
         <button class="nav-item active" data-view="dashboard" data-permission="workspace:view"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></svg>分析工作台</button>
-        <button class="nav-item" data-permission="dashboard:view"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14m8-14v14M4 11h16"/></svg>我的仪表盘</button>
+        <button class="nav-item" data-view="my-dashboards" data-permission="dashboard:view"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14m8-14v14M4 11h16"/></svg>我的仪表盘</button>
         <button class="nav-item" data-view="drilldown" data-permission="drilldown:use"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v9m-4-4 4 4 4-4"/></svg>下钻分析</button>
-        <button class="nav-item" data-permission="report:view"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM9 10h6m-6 4h6m-6 4h4"/></svg>分析报告</button>
+        <button class="nav-item" data-view="reports" data-permission="report:view"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM9 10h6m-6 4h6m-6 4h4"/></svg>分析报告</button>
         <div class="nav-divider admin-only">系统治理</div>
         <button class="nav-item admin-only" data-view="chart-management" data-permission="dashboard:manage"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8m-8 4h8m-8 4h5"/></svg>仪表盘管理</button>
-        <button class="nav-item admin-only" data-permission="semantic_model:manage"><svg viewBox="0 0 24 24"><path d="m12 3 8 5-8 5-8-5zm-8 9 8 5 8-5m-16 4 8 5 8-5"/></svg>语义模型</button>
+        <button class="nav-item admin-only" data-view="semantic-models" data-permission="semantic_model:manage"><svg viewBox="0 0 24 24"><path d="m12 3 8 5-8 5-8-5zm-8 9 8 5 8-5m-16 4 8 5 8-5"/></svg>语义模型</button>
         <button class="nav-item admin-only" data-view="drill-registry" data-permission="semantic_model:manage"><svg viewBox="0 0 24 24"><path d="M5 4h14v5H5zM5 15h14v5H5zM9 9v6m6-6v6"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/></svg>下钻配置</button>
-        <button class="nav-item admin-only" data-permission="datasource:manage"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>数据源</button>
-        <button class="nav-item admin-only" data-permission="user:manage"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 2-6 6-6s6 2 6 6m7-14a3 3 0 0 1 0 6m1 2c3 .5 4 2.5 4 6"/></svg>用户与角色</button>
-        <button class="nav-item admin-only" data-permission="audit:view"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/></svg>审计与安全</button>
+        <button class="nav-item admin-only" data-view="data-sources" data-permission="datasource:manage"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>数据源</button>
+        <button class="nav-item admin-only" data-view="user-roles" data-permission="user:manage"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 2-6 6-6s6 2 6 6m7-14a3 3 0 0 1 0 6m1 2c3 .5 4 2.5 4 6"/></svg>用户与角色</button>
+        <button class="nav-item admin-only" data-view="audit-security" data-permission="audit:view"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/></svg>审计与安全</button>
       </nav>
       <div class="sidebar-user">
         <span class="avatar" id="avatar">张</span>
@@ -88,8 +88,8 @@
         <div class="admin-overview-grid">
           <article class="chart-card health-panel"><header><strong>数据源健康状况</strong></header><div class="health-cards"><div><small>数据源连接</small><strong>12</strong><span>正常 ●</span></div><div><small>数据同步任务</small><strong>18</strong><span>正常 ●</span></div><div class="warn"><small>延迟任务</small><strong>3</strong><span>告警 ▲</span></div><div class="danger"><small>异常数据源</small><strong>1</strong><span>异常 ×</span></div></div></article>
           <article class="chart-card role-panel"><header><strong>权限分布（按角色）</strong></header><div class="role-summary"><div class="role-donut"><span>总用户数<b>256</b></span></div><ul><li><i class="blue"></i>系统管理员 <b>6</b></li><li><i class="cyan"></i>数据管理员 <b>12</b></li><li><i class="violet"></i>分析师 <b>68</b></li><li><i class="orange"></i>业务用户 <b>120</b></li></ul></div></article>
-          <article class="chart-card model-panel"><header><strong>语义模型状态</strong><button>查看全部模型 →</button></header><table><thead><tr><th>模型名称</th><th>主题域</th><th>状态</th><th>最近更新</th></tr></thead><tbody><tr><td>销售主题模型</td><td>销售域</td><td><em>● 正常</em></td><td>08-26 10:15</td></tr><tr><td>客户主题模型</td><td>客户域</td><td><em>● 正常</em></td><td>08-25 16:40</td></tr><tr><td>供应链主题模型</td><td>供应链域</td><td><em>● 正常</em></td><td>08-25 11:20</td></tr><tr><td>财务主题模型</td><td>财务域</td><td><em class="warn-text">● 告警</em></td><td>08-24 09:35</td></tr></tbody></table></article>
-          <article class="chart-card audit-panel"><header><strong>最近审计事件</strong><button>查看全部 →</button></header><ul><li><span class="audit-dot green">✓</span><div><b>用户登录成功</b><small>系统管理员 · 10:21:32</small></div></li><li><span class="audit-dot blue-bg">♙</span><div><b>角色权限更新</b><small>销售分析师 · 09:58:11</small></div></li><li><span class="audit-dot violet-bg">◉</span><div><b>数据源配置变更</b><small>CRM_Prod · 09:41:07</small></div></li><li><span class="audit-dot orange-bg">▦</span><div><b>仪表盘发布</b><small>全域经营看板 · 09:15:44</small></div></li></ul></article>
+          <article class="chart-card model-panel"><header><strong>语义模型状态</strong><button data-view="semantic-models">查看全部模型 →</button></header><table><thead><tr><th>模型名称</th><th>主题域</th><th>状态</th><th>最近更新</th></tr></thead><tbody><tr><td>销售主题模型</td><td>销售域</td><td><em>● 正常</em></td><td>08-26 10:15</td></tr><tr><td>客户主题模型</td><td>客户域</td><td><em>● 正常</em></td><td>08-25 16:40</td></tr><tr><td>供应链主题模型</td><td>供应链域</td><td><em>● 正常</em></td><td>08-25 11:20</td></tr><tr><td>财务主题模型</td><td>财务域</td><td><em class="warn-text">● 告警</em></td><td>08-24 09:35</td></tr></tbody></table></article>
+          <article class="chart-card audit-panel"><header><strong>最近审计事件</strong><button data-view="audit-security">查看全部 →</button></header><ul><li><span class="audit-dot green">✓</span><div><b>用户登录成功</b><small>系统管理员 · 10:21:32</small></div></li><li><span class="audit-dot blue-bg">♙</span><div><b>角色权限更新</b><small>销售分析师 · 09:58:11</small></div></li><li><span class="audit-dot violet-bg">◉</span><div><b>数据源配置变更</b><small>CRM_Prod · 09:41:07</small></div></li><li><span class="audit-dot orange-bg">▦</span><div><b>仪表盘发布</b><small>全域经营看板 · 09:15:44</small></div></li></ul></article>
         </div>
       </section>
 
@@ -150,6 +150,36 @@
             <table><thead><tr><th>图表</th><th>数据集</th><th>指标</th><th>类型</th><th>下钻维度</th><th>状态</th><th>操作</th></tr></thead><tbody id="managed-chart-table-body"></tbody></table>
           </section>
         </div>
+      </section>
+
+      <section id="my-dashboards-view" class="registry-view module-view" hidden>
+        <header class="registry-header"><div><h1>我的仪表盘</h1><p>只展示当前账号和数据范围内有权访问的分析资产</p></div><button class="module-refresh" data-module="my-dashboards" type="button">⟳ 刷新</button></header>
+        <div class="registry-content"><div id="dashboard-list" class="asset-card-grid"></div></div>
+      </section>
+
+      <section id="reports-view" class="registry-view module-view" hidden>
+        <header class="registry-header"><div><h1>分析报告</h1><p>保存 AgentBI 结论、数据范围与证据路径</p></div><button id="create-report" class="primary-small" type="button">＋ 生成当前快照报告</button></header>
+        <div class="registry-content"><div id="report-list" class="asset-card-grid"></div></div>
+      </section>
+
+      <section id="semantic-models-view" class="registry-view module-view" hidden>
+        <header class="registry-header"><div><h1>语义模型</h1><p>从已注册图表聚合指标、模型与发布状态</p></div><button class="module-refresh" data-module="semantic-models" type="button">⟳ 刷新</button></header>
+        <div class="registry-content"><section class="registry-table-card"><table><thead><tr><th>模型名称</th><th>受治理指标</th><th>关联图表</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
+      </section>
+
+      <section id="data-sources-view" class="registry-view module-view" hidden>
+        <header class="registry-header"><div><h1>数据源</h1><p>查看 Superset Dataset 与图表使用关系</p></div><button class="module-refresh" data-module="data-sources" type="button">⟳ 刷新</button></header>
+        <div class="registry-content"><section class="registry-table-card"><table><thead><tr><th>数据集</th><th>类型</th><th>关联图表</th><th>连接状态</th></tr></thead><tbody id="data-source-table-body"></tbody></table></section></div>
+      </section>
+
+      <section id="user-roles-view" class="registry-view module-view" hidden>
+        <header class="registry-header"><div><h1>用户与角色</h1><p>账号、角色和数据范围均由服务端 RBAC 控制</p></div><button class="module-refresh" data-module="user-roles" type="button">⟳ 刷新</button></header>
+        <div class="registry-content"><section class="registry-table-card"><table><thead><tr><th>用户</th><th>登录账号</th><th>角色</th><th>数据范围</th><th>状态</th><th>最近登录</th></tr></thead><tbody id="user-role-table-body"></tbody></table></section></div>
+      </section>
+
+      <section id="audit-security-view" class="registry-view module-view" hidden>
+        <header class="registry-header"><div><h1>审计与安全</h1><p>跟踪登录、配置变更、上下线和报告生成事件</p></div><button class="module-refresh" data-module="audit-security" type="button">⟳ 刷新</button></header>
+        <div class="registry-content"><section class="registry-summary security-summary"><article><span>身份认证</span><strong>会话签名</strong><small>服务端可撤销</small></article><article><span>权限控制</span><strong>RBAC</strong><small>按角色与数据范围</small></article><article><span>请求保护</span><strong>CSRF</strong><small>所有写操作校验</small></article><article><span>数据库</span><strong>SQLite</strong><small>可切换 PostgreSQL</small></article></section><section class="registry-table-card"><table><thead><tr><th>时间</th><th>事件</th><th>执行人</th><th>结果</th><th>来源 IP</th><th>详情</th></tr></thead><tbody id="audit-event-table-body"></tbody></table></section></div>
       </section>
     </section>
 

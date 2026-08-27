@@ -17,6 +17,7 @@ users ──< user_roles >── roles ──< role_permissions >── permissi
   │
   ├──< auth_sessions
   ├──< audit_events
+  ├──< analysis_reports
   └──< dashboard_charts ── drilldown_definitions
 ```
 
@@ -33,6 +34,7 @@ users ──< user_roles >── roles ──< role_permissions >── permissi
 | `audit_events` | 身份安全审计 | 登录、退出、拒绝等事件；结果、来源地址和有界详情 |
 | `dashboard_charts` | 图表定义 | Chart ID、名称、数据集、指标、可视化类型、发布状态和创建人 |
 | `drilldown_definitions` | 下钻配置 | 图表一对一配置；语义模型、维度路径、发布状态和创建人 |
+| `analysis_reports` | 分析报告快照 | 标题、来源仪表盘、数据范围、摘要、证据路径、创建人和生成时间 |
 
 ## 安全规则
 

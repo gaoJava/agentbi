@@ -144,6 +144,21 @@ class DrilldownDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class AnalysisReport(Base):
+    """Persisted report snapshot bound to its creator and governed evidence path."""
+
+    __tablename__ = "analysis_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    dashboard_name: Mapped[str] = mapped_column(String(200))
+    data_scope: Mapped[str] = mapped_column(String(256))
+    summary: Mapped[str] = mapped_column(Text)
+    evidence_path: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
 @dataclass(frozen=True, slots=True)
 class AccountRecord:
     id: str
@@ -340,6 +355,71 @@ class IdentityRepository:
                 }
                 for user in users
             ]
+
+    def list_audit_events(self, *, limit: int = 100) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            rows = db.execute(
+                select(AuditEvent, User)
+                .outerjoin(User, AuditEvent.actor_user_id == User.id)
+                .order_by(AuditEvent.created_at.desc())
+                .limit(min(max(limit, 1), 200))
+            ).all()
+            return [
+                {
+                    "id": event.id,
+                    "event_type": event.event_type,
+                    "outcome": event.outcome,
+                    "actor": user.display_name if user else "系统",
+                    "source_ip": event.source_ip,
+                    "detail": event.detail,
+                    "created_at": event.created_at.isoformat(),
+                }
+                for event, user in rows
+            ]
+
+    def create_report(
+        self,
+        *,
+        title: str,
+        dashboard_name: str,
+        data_scope: str,
+        summary: str,
+        evidence_path: str,
+        actor_user_id: str,
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            report = AnalysisReport(
+                id=str(uuid.uuid4()),
+                title=title.strip(),
+                dashboard_name=dashboard_name.strip(),
+                data_scope=data_scope.strip(),
+                summary=summary.strip(),
+                evidence_path=evidence_path.strip(),
+                created_by=actor_user_id,
+            )
+            db.add(report)
+            db.flush()
+            return self._report_payload(report)
+
+    def list_reports(self, *, actor_user_id: str, include_all: bool = False) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            statement = select(AnalysisReport).order_by(AnalysisReport.created_at.desc())
+            if not include_all:
+                statement = statement.where(AnalysisReport.created_by == actor_user_id)
+            reports = db.scalars(statement).all()
+            return [self._report_payload(report) for report in reports]
+
+    @staticmethod
+    def _report_payload(report: AnalysisReport) -> dict[str, object]:
+        return {
+            "id": report.id,
+            "title": report.title,
+            "dashboard_name": report.dashboard_name,
+            "data_scope": report.data_scope,
+            "summary": report.summary,
+            "evidence_path": report.evidence_path,
+            "created_at": report.created_at.isoformat(),
+        }
 
     def create_chart_with_drilldown(
         self,

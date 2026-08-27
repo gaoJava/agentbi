@@ -72,6 +72,15 @@ class ChartPublishPayload(BaseModel):
     published: bool
 
 
+class ReportCreatePayload(BaseModel):
+    """A bounded request to persist the current governed dashboard snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=200)
+    dashboard_name: str = Field(min_length=2, max_length=200)
+
+
 def validated_dimensions(items: list[str]) -> list[str]:
     """Normalize and reject ambiguous drill paths before they reach storage."""
 
@@ -235,6 +244,121 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/admin/users")
     async def list_users(_: SessionIdentity = admin_session) -> dict[str, object]:
         return {"users": sessions.list_users()}
+
+    @app.get("/api/v1/admin/audit-events")
+    async def list_audit_events(_: SessionIdentity = admin_session) -> dict[str, object]:
+        return {"events": sessions.list_audit_events()}
+
+    @app.get("/api/v1/dashboards")
+    async def list_dashboards(identity: SessionIdentity = current_session) -> dict[str, object]:
+        chart_count = len(sessions.list_charts()) + 2
+        dashboards: list[dict[str, object]] = [
+            {
+                "id": "sales-overview",
+                "title": "销售经营分析",
+                "description": "销售收入、毛利润、产品结构及受治理下钻分析",
+                "data_scope": identity.data_scope,
+                "chart_count": chart_count,
+                "role": "数据分析师" if identity.role != "admin" else "系统管理员",
+            }
+        ]
+        if identity.is_admin:
+            dashboards.insert(
+                0,
+                {
+                    "id": "governance-overview",
+                    "title": "全域经营与系统治理",
+                    "description": "数据源、语义模型、权限和安全审计总览",
+                    "data_scope": "全部区域",
+                    "chart_count": 4,
+                    "role": "系统管理员",
+                },
+            )
+        return {"dashboards": dashboards}
+
+    @app.get("/api/v1/reports")
+    async def list_reports(identity: SessionIdentity = current_session) -> dict[str, object]:
+        if "report:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        return {
+            "reports": sessions.list_reports(
+                actor_user_id=identity.subject,
+                include_all=identity.is_admin,
+            )
+        }
+
+    @app.post("/api/v1/reports", status_code=status.HTTP_201_CREATED)
+    async def create_report(
+        payload: ReportCreatePayload,
+        request: Request,
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "report:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        enforce_csrf(request, identity)
+        report = sessions.create_report(
+            title=payload.title,
+            dashboard_name=payload.dashboard_name,
+            data_scope=identity.data_scope,
+            summary=f"{identity.data_scope}最近 30 天经营指标快照已生成，可继续通过 AgentBI 下钻原因。",
+            evidence_path=f"{payload.dashboard_name} → 最近30天 → {identity.data_scope}",
+            actor_user_id=identity.subject,
+        )
+        sessions.audit(
+            "report_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=str(report["id"]),
+        )
+        return {"report": report}
+
+    @app.get("/api/v1/admin/semantic-models")
+    async def list_semantic_models(_: SessionIdentity = admin_session) -> dict[str, object]:
+        charts = sessions.list_charts(published_only=False)
+        grouped: dict[str, dict[str, object]] = {
+            "sales_model": {
+                "name": "sales_model",
+                "metrics": {"销售收入"},
+                "charts": 2,
+                "status": "published",
+            }
+        }
+        for chart in charts:
+            model = str(chart["semantic_model"])
+            entry = grouped.setdefault(
+                model,
+                {"name": model, "metrics": set(), "charts": 0, "status": "offline"},
+            )
+            entry["metrics"].add(str(chart["metric"]))
+            entry["charts"] = int(entry["charts"]) + 1
+            if chart["is_published"]:
+                entry["status"] = "published"
+        models = [
+            {**entry, "metrics": sorted(entry["metrics"])}
+            for entry in grouped.values()
+        ]
+        return {"models": models}
+
+    @app.get("/api/v1/admin/data-sources")
+    async def list_data_sources(_: SessionIdentity = admin_session) -> dict[str, object]:
+        charts = sessions.list_charts(published_only=False)
+        grouped: dict[str, dict[str, object]] = {
+            "sales_orders": {
+                "name": "sales_orders",
+                "type": "Superset Dataset",
+                "charts": 2,
+                "status": "ready",
+            }
+        }
+        for chart in charts:
+            dataset = str(chart["dataset_name"])
+            entry = grouped.setdefault(
+                dataset,
+                {"name": dataset, "type": "Superset Dataset", "charts": 0, "status": "ready"},
+            )
+            entry["charts"] = int(entry["charts"]) + 1
+        return {"sources": list(grouped.values())}
 
     @app.get("/api/v1/charts")
     async def list_charts(_: SessionIdentity = current_session) -> dict[str, object]:

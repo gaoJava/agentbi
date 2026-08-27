@@ -12,6 +12,7 @@ if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
 const drillConfigurations = drillRegistry.charts;
 let managedCharts = [];
 const managedChartKeys = new Set();
+let activeView = 'dashboard';
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
 if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = 'revenue';
 
@@ -70,20 +71,24 @@ function showWorkbench(user) {
 }
 
 function switchView(view) {
+  activeView = view;
   const drilldown = view === 'drilldown';
   const registry = view === 'drill-registry';
   const chartManagement = view === 'chart-management';
-  document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = drilldown || registry || chartManagement; });
-  document.querySelector('#drilldown-view').hidden = !drilldown;
-  document.querySelector('#drill-registry-view').hidden = !registry;
-  document.querySelector('#chart-management-view').hidden = !chartManagement;
+  const dashboard = view === 'dashboard';
+  document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = !dashboard; });
+  document.querySelectorAll('.drilldown-view,.registry-view').forEach(item => { item.hidden = true; });
+  if (!dashboard) {
+    const target = document.querySelector(`#${view}-view`);
+    if (target) target.hidden = false;
+  }
   document.querySelector('#dashboard-agent').hidden = drilldown;
   document.querySelector('#drill-agent').hidden = !drilldown;
   document.querySelector('.agent-input').hidden = drilldown;
-  document.querySelectorAll('[data-view]').forEach(item => {
+  document.querySelectorAll('.nav-item[data-view]').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
   });
-  if (!drilldown && !registry && !chartManagement && currentUser) {
+  if (dashboard && currentUser) {
     const admin = currentUser.role === 'admin';
     document.querySelector('#sales-dashboard').hidden = admin;
     document.querySelector('#admin-overview').hidden = !admin;
@@ -92,6 +97,7 @@ function switchView(view) {
   }
   if (registry) renderRegistryCenter();
   if (chartManagement) renderChartManagement();
+  if (document.querySelector(`#${view}-view.module-view`)) loadModuleView(view);
 }
 
 async function loadManagedCharts() {
@@ -115,6 +121,108 @@ async function loadManagedCharts() {
     bindChartMenuEvents();
   } catch (error) {
     console.warn('无法加载数据库图表配置', error);
+  }
+}
+
+function formatTimestamp(value) {
+  if (!value) return '尚未登录';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function replaceTableRows(bodyId, rows) {
+  const body = document.querySelector(`#${bodyId}`);
+  body.replaceChildren(...rows.map(values => {
+    const row = document.createElement('tr');
+    values.forEach(value => {
+      const cell = document.createElement('td');
+      cell.textContent = String(value);
+      row.append(cell);
+    });
+    return row;
+  }));
+}
+
+function renderDashboardList(dashboards) {
+  const container = document.querySelector('#dashboard-list');
+  container.replaceChildren(...dashboards.map(dashboard => {
+    const card = document.createElement('article'); card.className = 'asset-card';
+    const header = document.createElement('header');
+    const title = document.createElement('strong'); title.textContent = dashboard.title;
+    const scope = document.createElement('span'); scope.textContent = dashboard.data_scope;
+    header.append(title, scope);
+    const description = document.createElement('p'); description.textContent = dashboard.description;
+    const meta = document.createElement('div');
+    meta.textContent = `${dashboard.chart_count} 个图表　·　${dashboard.role}`;
+    const open = document.createElement('button'); open.type = 'button'; open.textContent = '打开仪表盘';
+    open.addEventListener('click', () => switchView('dashboard'));
+    card.append(header, description, meta, open);
+    return card;
+  }));
+}
+
+function renderReportList(reports) {
+  const container = document.querySelector('#report-list');
+  if (!reports.length) {
+    const empty = document.createElement('section'); empty.className = 'module-empty';
+    const title = document.createElement('strong'); title.textContent = '还没有已保存的分析报告';
+    const text = document.createElement('p'); text.textContent = '点击右上角生成当前仪表盘快照，系统会保存数据范围和证据路径。';
+    empty.append(title, text); container.replaceChildren(empty); return;
+  }
+  container.replaceChildren(...reports.map(report => {
+    const card = document.createElement('article'); card.className = 'asset-card report-card';
+    const header = document.createElement('header');
+    const title = document.createElement('strong'); title.textContent = report.title;
+    const time = document.createElement('span'); time.textContent = formatTimestamp(report.created_at);
+    header.append(title, time);
+    const summary = document.createElement('p'); summary.textContent = report.summary;
+    const meta = document.createElement('div'); meta.textContent = `${report.dashboard_name}　·　${report.data_scope}`;
+    const evidence = document.createElement('small'); evidence.textContent = `证据路径：${report.evidence_path}`;
+    card.append(header, summary, meta, evidence); return card;
+  }));
+}
+
+async function loadModuleView(view) {
+  const target = document.querySelector(`#${view}-view`);
+  target.setAttribute('aria-busy', 'true');
+  try {
+    if (view === 'my-dashboards') {
+      renderDashboardList((await request('/api/v1/dashboards')).dashboards || []);
+    } else if (view === 'reports') {
+      renderReportList((await request('/api/v1/reports')).reports || []);
+    } else if (view === 'semantic-models') {
+      const models = (await request('/api/v1/admin/semantic-models')).models || [];
+      replaceTableRows('semantic-model-table-body', models.map(model => [
+        model.name, model.metrics.join('、'), model.charts,
+        model.status === 'published' ? '● 已发布' : '● 已下线',
+      ]));
+    } else if (view === 'data-sources') {
+      const sources = (await request('/api/v1/admin/data-sources')).sources || [];
+      replaceTableRows('data-source-table-body', sources.map(source => [
+        source.name, source.type, source.charts, source.status === 'ready' ? '● 正常' : '● 异常',
+      ]));
+    } else if (view === 'user-roles') {
+      const users = (await request('/api/v1/admin/users')).users || [];
+      replaceTableRows('user-role-table-body', users.map(user => [
+        user.display_name, user.username, user.role === 'admin' ? '系统管理员' : '数据分析师',
+        user.data_scope, user.is_active ? '● 正常' : '● 已停用', formatTimestamp(user.last_login_at),
+      ]));
+    } else if (view === 'audit-security') {
+      const events = (await request('/api/v1/admin/audit-events')).events || [];
+      const eventLabels = {
+        login: '用户登录', logout: '用户退出', chart_created: '创建图表', chart_updated: '修改图表',
+        chart_published: '上线图表', chart_offlined: '下线图表', chart_deleted: '删除图表',
+        report_created: '生成报告',
+      };
+      replaceTableRows('audit-event-table-body', events.map(event => [
+        formatTimestamp(event.created_at), eventLabels[event.event_type] || event.event_type,
+        event.actor, event.outcome === 'success' ? '成功' : '拒绝', event.source_ip || '本机', event.detail || '—',
+      ]));
+    }
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    target.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -459,6 +567,29 @@ document.querySelectorAll('[data-view]').forEach(item => item.addEventListener('
   if (item.dataset.view === 'drilldown') renderDrilldown(selectedDrillChart);
   switchView(item.dataset.view);
 }));
+
+document.querySelectorAll('.module-refresh').forEach(button => {
+  button.addEventListener('click', () => loadModuleView(button.dataset.module));
+});
+
+document.querySelector('#create-report').addEventListener('click', async () => {
+  const button = document.querySelector('#create-report');
+  button.disabled = true; button.textContent = '正在生成…';
+  const dashboardName = currentUser.role === 'admin' ? '全域经营与系统治理' : '销售经营分析';
+  try {
+    await request('/api/v1/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({ title: `${dashboardName}快照报告`, dashboard_name: dashboardName }),
+    });
+    await loadModuleView('reports');
+    showManagementFeedback('分析报告已保存');
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    button.disabled = false; button.textContent = '＋ 生成当前快照报告';
+  }
+});
 
 document.querySelector('#registry-refresh').addEventListener('click', renderRegistryCenter);
 

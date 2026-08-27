@@ -154,6 +154,20 @@ class SessionManager:
     def list_users(self) -> list[dict[str, object]]:
         return self.repository.list_users()
 
+    def list_audit_events(self, *, limit: int = 100) -> list[dict[str, object]]:
+        return self.repository.list_audit_events(limit=limit)
+
+    def create_report(self, **values: object) -> dict[str, object]:
+        return self.repository.create_report(**values)
+
+    def list_reports(
+        self, *, actor_user_id: str, include_all: bool = False
+    ) -> list[dict[str, object]]:
+        return self.repository.list_reports(
+            actor_user_id=actor_user_id,
+            include_all=include_all,
+        )
+
     def list_charts(self, *, published_only: bool = True) -> list[dict[str, object]]:
         return self.repository.list_charts(published_only=published_only)
 

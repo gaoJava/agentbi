@@ -171,3 +171,40 @@ def test_normal_user_cannot_create_chart() -> None:
             headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
             json={"published": False},
         ).status_code == 403
+
+
+def test_navigation_modules_use_session_scoped_data() -> None:
+    with TestClient(create_app(settings())) as client:
+        user_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "user", "password": "user-password"},
+        )
+        user = user_login.json()["user"]
+        dashboards = client.get("/api/v1/dashboards")
+        assert dashboards.status_code == 200
+        assert len(dashboards.json()["dashboards"]) == 1
+        assert dashboards.json()["dashboards"][0]["data_scope"] == "华东区域"
+
+        payload = {"title": "华东经营快照", "dashboard_name": "销售经营分析"}
+        assert client.post("/api/v1/reports", json=payload).status_code == 403
+        created = client.post(
+            "/api/v1/reports",
+            json=payload,
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+        )
+        assert created.status_code == 201
+        assert created.json()["report"]["data_scope"] == "华东区域"
+        assert len(client.get("/api/v1/reports").json()["reports"]) == 1
+
+        admin_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin-password"},
+        )
+        assert admin_login.status_code == 200
+        assert len(client.get("/api/v1/dashboards").json()["dashboards"]) == 2
+        assert len(client.get("/api/v1/admin/users").json()["users"]) == 2
+        assert client.get("/api/v1/admin/semantic-models").json()["models"][0]["name"] == "sales_model"
+        assert client.get("/api/v1/admin/data-sources").json()["sources"][0]["name"] == "sales_orders"
+        events = client.get("/api/v1/admin/audit-events")
+        assert events.status_code == 200
+        assert any(event["event_type"] == "report_created" for event in events.json()["events"])
