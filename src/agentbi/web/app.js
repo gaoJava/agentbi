@@ -11,11 +11,13 @@ if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
 }
 const drillConfigurations = drillRegistry.charts;
 let managedCharts = [];
+const managedChartKeys = new Set();
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
 if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = 'revenue';
 
 function isValidDrillConfiguration(config) {
   return Boolean(
+    config?.published !== false &&
     config?.metric && config?.semanticModel && config?.sourceTitle &&
     ['revenue', 'structure', 'table'].includes(config.sourceType) &&
     Array.isArray(config.bars) && config.bars.length > 0 &&
@@ -95,11 +97,19 @@ function switchView(view) {
 async function loadManagedCharts() {
   if (!currentUser) return;
   try {
-    const body = await request('/api/v1/charts');
+    managedChartKeys.forEach(chartKey => delete drillConfigurations[chartKey]);
+    managedChartKeys.clear();
+    const endpoint = currentUser.role === 'admin' ? '/api/v1/admin/charts' : '/api/v1/charts';
+    const body = await request(endpoint);
     managedCharts = body.charts || [];
     managedCharts.forEach(chart => {
+      managedChartKeys.add(chart.chart_key);
       drillConfigurations[chart.chart_key] = configurationFromManagedChart(chart);
     });
+    if (!isValidDrillConfiguration(drillConfigurations[selectedDrillChart])) {
+      selectedDrillChart = 'revenue';
+      sessionStorage.setItem('agentbi.drillSource', selectedDrillChart);
+    }
     renderManagedDashboardCharts();
     initializeDrillableCharts();
     bindChartMenuEvents();
@@ -119,6 +129,7 @@ function configurationFromManagedChart(chart) {
   const rows = ['第一类', '第二类', '第三类', '其他'].map((label, index) =>
     [label, String(410 - index * 75), `${42 - index * 9}%`]);
   return {
+    published: chart.is_published,
     metric: chart.metric,
     semanticModel: chart.semantic_model,
     sourceType,
@@ -147,7 +158,7 @@ function configurationFromManagedChart(chart) {
 function renderManagedDashboardCharts() {
   document.querySelectorAll('.managed-dashboard-chart').forEach(card => card.remove());
   const dashboard = document.querySelector('#sales-dashboard');
-  managedCharts.forEach(chart => {
+  managedCharts.filter(chart => chart.is_published).forEach(chart => {
     const card = document.createElement('article');
     card.className = 'chart-card managed-dashboard-chart revenue-chart';
     card.dataset.drillChart = chart.chart_key;
@@ -171,14 +182,16 @@ function renderManagedDashboardCharts() {
 
 function renderChartManagement() {
   document.querySelector('#dynamic-chart-total').textContent = String(managedCharts.length);
-  document.querySelector('#managed-drill-total').textContent = String(managedCharts.length + 2);
+  document.querySelector('#managed-drill-total').textContent = String(
+    managedCharts.filter(chart => chart.is_published).length + 2
+  );
   const body = document.querySelector('#managed-chart-table-body');
   const builtin = [
     { title: '季度销售收入趋势', chart_key: 'revenue', dataset_name: 'sales_orders', metric: '销售收入', visualization_type: 'bar', dimensions: ['区域', '产品线'], status: 'published' },
     { title: '销售结构（按产品大类）', chart_key: 'structure', dataset_name: 'sales_orders', metric: '销售收入', visualization_type: 'donut', dimensions: ['区域', '渠道'], status: 'published' },
   ];
   const typeLabels = { bar: '柱状图', line: '折线图', donut: '环图', table: '指标表格' };
-  body.replaceChildren(...[...builtin, ...managedCharts].map(chart => {
+  body.replaceChildren(...[...builtin.map(chart => ({ ...chart, builtin: true, is_published: true })), ...managedCharts].map(chart => {
     const row = document.createElement('tr');
     const values = [chart.title, chart.dataset_name, chart.metric, typeLabels[chart.visualization_type], chart.dimensions.join(' → ')];
     values.forEach((value, index) => {
@@ -191,10 +204,70 @@ function renderChartManagement() {
       row.append(cell);
     });
     const status = document.createElement('td');
-    status.innerHTML = '<span class="registry-status ready">● 已发布</span>';
+    status.innerHTML = chart.is_published
+      ? '<span class="registry-status ready">● 已发布</span>'
+      : '<span class="registry-status offline">● 已下线</span>';
     row.append(status);
+    const action = document.createElement('td');
+    appendGovernanceActions(action, chart, true);
+    row.append(action);
     return row;
   }));
+}
+
+function actionButton(label, className, handler) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  if (className) button.className = className;
+  if (handler) button.addEventListener('click', handler);
+  return button;
+}
+
+function appendGovernanceActions(container, chart, valid) {
+  container.className = 'registry-actions';
+  const view = actionButton('查看下钻', '', () => selectDrillChart(chart.chart_key, true));
+  view.disabled = !valid || chart.is_published === false;
+  container.append(view);
+  if (chart.builtin) {
+    const builtin = document.createElement('span');
+    builtin.className = 'builtin-label'; builtin.textContent = '内置配置';
+    container.append(builtin);
+    return;
+  }
+  container.append(actionButton('修改', '', () => openChartWizard(chart)));
+  container.append(actionButton(chart.is_published ? '下线' : '上线', 'warning-action', () => {
+    setChartPublication(chart, !chart.is_published);
+  }));
+  const remove = actionButton('删除', 'danger-action', () => openDeleteConfirmation(chart));
+  remove.disabled = chart.is_published;
+  if (chart.is_published) remove.title = '请先下线图表';
+  container.append(remove);
+}
+
+async function setChartPublication(chart, published) {
+  try {
+    await request(`/api/v1/admin/charts/${encodeURIComponent(chart.chart_key)}/publication`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({ published }),
+    });
+    await loadManagedCharts();
+    renderRegistryCenter();
+    renderChartManagement();
+    showManagementFeedback(`${chart.title}已${published ? '上线' : '下线'}`);
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  }
+}
+
+function showManagementFeedback(message, isError = false) {
+  const feedback = document.querySelector('#management-feedback');
+  feedback.textContent = message;
+  feedback.classList.toggle('error', isError);
+  feedback.hidden = false;
+  window.clearTimeout(showManagementFeedback.timer);
+  showManagementFeedback.timer = window.setTimeout(() => { feedback.hidden = true; }, 3000);
 }
 
 function renderRegistryCenter() {
@@ -219,15 +292,14 @@ function renderRegistryCenter() {
     const path = document.createElement('td'); path.textContent = config.evidence || config.breadcrumb || '未配置';
     const status = document.createElement('td');
     const badge = document.createElement('span');
+    const managed = managedCharts.find(item => item.chart_key === chartId);
     const valid = isValidDrillConfiguration(config);
-    badge.className = valid ? 'registry-status ready' : 'registry-status invalid';
-    badge.textContent = valid ? '● 可用' : '● 待完善';
+    const offline = managed?.is_published === false;
+    badge.className = offline ? 'registry-status offline' : valid ? 'registry-status ready' : 'registry-status invalid';
+    badge.textContent = offline ? '● 已下线' : valid ? '● 可用' : '● 待完善';
     status.append(badge);
     const action = document.createElement('td');
-    const button = document.createElement('button');
-    button.type = 'button'; button.textContent = '查看下钻'; button.disabled = !valid;
-    button.addEventListener('click', () => selectDrillChart(chartId, true));
-    action.append(button);
+    appendGovernanceActions(action, managed || { chart_key: chartId, builtin: true, is_published: true }, valid);
     row.append(chart, model, type, path, status, action);
     return row;
   }));
@@ -423,22 +495,84 @@ bindChartMenuEvents();
 const chartWizard = document.querySelector('#chart-wizard');
 const chartWizardForm = document.querySelector('#chart-wizard-form');
 const chartWizardError = document.querySelector('#chart-wizard-error');
+let editingChartKey;
+let wizardReturnView = 'chart-management';
+let pendingDeleteChart;
 
-function openChartWizard() {
+function openChartWizard(chart) {
+  editingChartKey = chart?.chart_key;
+  wizardReturnView = document.querySelector('#drill-registry-view').hidden
+    ? 'chart-management' : 'drill-registry';
+  chartWizardForm.reset();
   chartWizardError.hidden = true;
+  document.querySelector('#chart-wizard-title').textContent = chart
+    ? '修改受治理分析图表' : '创建受治理分析图表';
+  document.querySelector('#save-chart-wizard').textContent = chart ? '保存修改' : '创建并发布';
+  const keyInput = document.querySelector('#new-chart-key');
+  keyInput.disabled = Boolean(chart);
+  if (chart) {
+    keyInput.value = chart.chart_key;
+    document.querySelector('#new-chart-title').value = chart.title;
+    document.querySelector('#new-chart-dataset').value = chart.dataset_name;
+    document.querySelector('#new-chart-metric').value = chart.metric;
+    document.querySelector('#new-chart-type').value = chart.visualization_type;
+    document.querySelector('#new-chart-model').value = chart.semantic_model;
+    document.querySelector('#new-chart-dimensions').value = chart.dimensions.join(' → ');
+  }
   chartWizard.hidden = false;
-  document.querySelector('#new-chart-key').focus();
+  (chart ? document.querySelector('#new-chart-title') : keyInput).focus();
 }
 
 function closeChartWizard() {
   chartWizard.hidden = true;
   chartWizardError.hidden = true;
+  editingChartKey = undefined;
+  chartWizardForm.reset();
+  document.querySelector('#new-chart-key').disabled = false;
 }
 
-document.querySelectorAll('.open-chart-wizard').forEach(button => button.addEventListener('click', openChartWizard));
+document.querySelectorAll('.open-chart-wizard').forEach(button => button.addEventListener('click', () => openChartWizard()));
 document.querySelector('#close-chart-wizard').addEventListener('click', closeChartWizard);
 document.querySelector('#cancel-chart-wizard').addEventListener('click', closeChartWizard);
 chartWizard.addEventListener('click', event => { if (event.target === chartWizard) closeChartWizard(); });
+
+function openDeleteConfirmation(chart) {
+  if (chart.is_published) return;
+  pendingDeleteChart = chart;
+  document.querySelector('#delete-chart-name').textContent = `${chart.title}（${chart.chart_key}）`;
+  document.querySelector('#delete-chart-confirm').hidden = false;
+}
+
+function closeDeleteConfirmation() {
+  document.querySelector('#delete-chart-confirm').hidden = true;
+  pendingDeleteChart = undefined;
+}
+
+document.querySelector('#cancel-delete-chart').addEventListener('click', closeDeleteConfirmation);
+document.querySelector('#close-delete-chart').addEventListener('click', closeDeleteConfirmation);
+document.querySelector('#delete-chart-confirm').addEventListener('click', event => {
+  if (event.target.id === 'delete-chart-confirm') closeDeleteConfirmation();
+});
+document.querySelector('#confirm-delete-chart').addEventListener('click', async () => {
+  if (!pendingDeleteChart) return;
+  const chart = pendingDeleteChart;
+  const button = document.querySelector('#confirm-delete-chart');
+  button.disabled = true; button.textContent = '正在删除…';
+  try {
+    await request(`/api/v1/admin/charts/${encodeURIComponent(chart.chart_key)}`, {
+      method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    closeDeleteConfirmation();
+    await loadManagedCharts();
+    renderRegistryCenter();
+    renderChartManagement();
+    showManagementFeedback(`${chart.title}已删除`);
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    button.disabled = false; button.textContent = '确认删除';
+  }
+});
 
 chartWizardForm.addEventListener('submit', async event => {
   event.preventDefault();
@@ -452,31 +586,36 @@ chartWizardForm.addEventListener('submit', async event => {
     return;
   }
   saveButton.disabled = true;
-  saveButton.textContent = '正在创建…';
+  const editingKey = editingChartKey;
+  const returnView = wizardReturnView;
+  saveButton.textContent = editingKey ? '正在保存…' : '正在创建…';
   try {
-    await request('/api/v1/admin/charts', {
-      method: 'POST',
+    const payload = {
+      title: document.querySelector('#new-chart-title').value.trim(),
+      dataset_name: document.querySelector('#new-chart-dataset').value.trim(),
+      metric: document.querySelector('#new-chart-metric').value.trim(),
+      visualization_type: document.querySelector('#new-chart-type').value,
+      semantic_model: document.querySelector('#new-chart-model').value.trim(),
+      dimensions,
+    };
+    if (!editingKey) payload.chart_key = document.querySelector('#new-chart-key').value.trim();
+    await request(editingKey
+      ? `/api/v1/admin/charts/${encodeURIComponent(editingKey)}`
+      : '/api/v1/admin/charts', {
+      method: editingKey ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
-      body: JSON.stringify({
-        chart_key: document.querySelector('#new-chart-key').value.trim(),
-        title: document.querySelector('#new-chart-title').value.trim(),
-        dataset_name: document.querySelector('#new-chart-dataset').value.trim(),
-        metric: document.querySelector('#new-chart-metric').value.trim(),
-        visualization_type: document.querySelector('#new-chart-type').value,
-        semantic_model: document.querySelector('#new-chart-model').value.trim(),
-        dimensions,
-      }),
+      body: JSON.stringify(payload),
     });
-    chartWizardForm.reset();
     closeChartWizard();
     await loadManagedCharts();
-    switchView('chart-management');
+    switchView(returnView);
+    showManagementFeedback(editingKey ? '图表与下钻配置已更新' : '图表已创建并发布');
   } catch (error) {
     chartWizardError.textContent = error.message;
     chartWizardError.hidden = false;
   } finally {
     saveButton.disabled = false;
-    saveButton.textContent = '创建并发布';
+    saveButton.textContent = editingKey ? '保存修改' : '创建并发布';
   }
 });
 

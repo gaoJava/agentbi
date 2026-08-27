@@ -154,8 +154,8 @@ class SessionManager:
     def list_users(self) -> list[dict[str, object]]:
         return self.repository.list_users()
 
-    def list_charts(self) -> list[dict[str, object]]:
-        return self.repository.list_charts()
+    def list_charts(self, *, published_only: bool = True) -> list[dict[str, object]]:
+        return self.repository.list_charts(published_only=published_only)
 
     def create_chart_with_drilldown(
         self,
@@ -179,6 +179,15 @@ class SessionManager:
             dimensions=dimensions,
             actor_user_id=actor_user_id,
         )
+
+    def update_chart_with_drilldown(self, **values: object) -> dict[str, object]:
+        return self.repository.update_chart_with_drilldown(**values)
+
+    def set_chart_published(self, chart_key: str, *, published: bool) -> dict[str, object]:
+        return self.repository.set_chart_published(chart_key, published=published)
+
+    def delete_chart(self, chart_key: str) -> None:
+        self.repository.delete_chart(chart_key)
 
     def audit(
         self,

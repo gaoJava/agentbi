@@ -379,15 +379,83 @@ class IdentityRepository:
             db.flush()
             return self._chart_payload(chart, drilldown)
 
-    def list_charts(self) -> list[dict[str, object]]:
+    def list_charts(self, *, published_only: bool = True) -> list[dict[str, object]]:
         with Session(self.engine) as db:
-            rows = db.execute(
+            statement = (
                 select(DashboardChart, DrilldownDefinition)
                 .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
-                .where(DashboardChart.is_published.is_(True))
                 .order_by(DashboardChart.created_at)
-            ).all()
+            )
+            if published_only:
+                statement = statement.where(DashboardChart.is_published.is_(True))
+            rows = db.execute(statement).all()
             return [self._chart_payload(chart, drilldown) for chart, drilldown in rows]
+
+    def update_chart_with_drilldown(
+        self,
+        *,
+        chart_key: str,
+        title: str,
+        metric: str,
+        dataset_name: str,
+        visualization_type: str,
+        semantic_model: str,
+        dimensions: list[str],
+    ) -> dict[str, object]:
+        normalized_key = chart_key.strip().lower()
+        with Session(self.engine) as db, db.begin():
+            row = db.execute(
+                select(DashboardChart, DrilldownDefinition)
+                .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
+                .where(DashboardChart.chart_key == normalized_key)
+            ).one_or_none()
+            if row is None:
+                raise KeyError("chart not found")
+            chart, drilldown = row
+            chart.title = title.strip()
+            chart.metric = metric.strip()
+            chart.dataset_name = dataset_name.strip()
+            chart.visualization_type = visualization_type
+            chart.updated_at = utc_now()
+            drilldown.semantic_model = semantic_model.strip()
+            drilldown.dimensions_json = json.dumps(dimensions, ensure_ascii=False)
+            drilldown.updated_at = utc_now()
+            db.flush()
+            return self._chart_payload(chart, drilldown)
+
+    def set_chart_published(self, chart_key: str, *, published: bool) -> dict[str, object]:
+        normalized_key = chart_key.strip().lower()
+        with Session(self.engine) as db, db.begin():
+            row = db.execute(
+                select(DashboardChart, DrilldownDefinition)
+                .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
+                .where(DashboardChart.chart_key == normalized_key)
+            ).one_or_none()
+            if row is None:
+                raise KeyError("chart not found")
+            chart, drilldown = row
+            chart.is_published = published
+            chart.updated_at = utc_now()
+            drilldown.status = "published" if published else "offline"
+            drilldown.updated_at = utc_now()
+            db.flush()
+            return self._chart_payload(chart, drilldown)
+
+    def delete_chart(self, chart_key: str) -> None:
+        normalized_key = chart_key.strip().lower()
+        with Session(self.engine) as db, db.begin():
+            row = db.execute(
+                select(DashboardChart, DrilldownDefinition)
+                .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
+                .where(DashboardChart.chart_key == normalized_key)
+            ).one_or_none()
+            if row is None:
+                raise KeyError("chart not found")
+            chart, drilldown = row
+            if chart.is_published:
+                raise RuntimeError("chart must be offline before deletion")
+            db.delete(drilldown)
+            db.delete(chart)
 
     @staticmethod
     def _chart_payload(
@@ -403,6 +471,7 @@ class IdentityRepository:
             "semantic_model": drilldown.semantic_model,
             "dimensions": json.loads(drilldown.dimensions_json),
             "status": drilldown.status,
+            "is_published": chart.is_published,
             "created_at": chart.created_at.isoformat(),
         }
 

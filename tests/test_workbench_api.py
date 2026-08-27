@@ -101,6 +101,49 @@ def test_admin_creates_governed_chart_and_drilldown() -> None:
         )
         assert duplicate.status_code == 409
 
+        updated_payload = {
+            "title": "新增客户趋势（已调整）",
+            "metric": "活跃客户数",
+            "dataset_name": "customer_sales_v2",
+            "visualization_type": "line",
+            "semantic_model": "customer_model_v2",
+            "dimensions": ["区域", "渠道", "门店"],
+        }
+        assert client.put("/api/v1/admin/charts/customer_growth", json=updated_payload).status_code == 403
+        updated = client.put(
+            "/api/v1/admin/charts/customer_growth",
+            json=updated_payload,
+            headers={"X-AgentBI-CSRF": csrf_token},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["chart"]["title"] == "新增客户趋势（已调整）"
+        assert updated.json()["chart"]["dimensions"] == ["区域", "渠道", "门店"]
+
+        blocked_delete = client.delete(
+            "/api/v1/admin/charts/customer_growth",
+            headers={"X-AgentBI-CSRF": csrf_token},
+        )
+        assert blocked_delete.status_code == 409
+        assert blocked_delete.json()["detail"] == "请先下线图表，再执行删除"
+
+        offline = client.patch(
+            "/api/v1/admin/charts/customer_growth/publication",
+            json={"published": False},
+            headers={"X-AgentBI-CSRF": csrf_token},
+        )
+        assert offline.status_code == 200
+        assert offline.json()["chart"]["is_published"] is False
+        assert client.get("/api/v1/charts").json()["charts"] == []
+        admin_charts = client.get("/api/v1/admin/charts").json()["charts"]
+        assert admin_charts[0]["status"] == "offline"
+
+        deleted = client.delete(
+            "/api/v1/admin/charts/customer_growth",
+            headers={"X-AgentBI-CSRF": csrf_token},
+        )
+        assert deleted.status_code == 204
+        assert client.get("/api/v1/admin/charts").json()["charts"] == []
+
 
 def test_normal_user_cannot_create_chart() -> None:
     with TestClient(create_app(settings())) as client:
@@ -122,3 +165,9 @@ def test_normal_user_cannot_create_chart() -> None:
             },
         )
         assert response.status_code == 403
+        assert client.get("/api/v1/admin/charts").status_code == 403
+        assert client.patch(
+            "/api/v1/admin/charts/forbidden_chart/publication",
+            headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
+            json={"published": False},
+        ).status_code == 403

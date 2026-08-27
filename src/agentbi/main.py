@@ -51,6 +51,39 @@ class ChartCreatePayload(BaseModel):
     dimensions: list[str] = Field(min_length=2, max_length=5)
 
 
+class ChartUpdatePayload(BaseModel):
+    """Editable governed chart and drilldown fields; the stable key never changes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=200)
+    metric: str = Field(min_length=1, max_length=128)
+    dataset_name: str = Field(min_length=1, max_length=200)
+    visualization_type: Literal["bar", "line", "donut", "table"]
+    semantic_model: str = Field(min_length=2, max_length=128)
+    dimensions: list[str] = Field(min_length=2, max_length=5)
+
+
+class ChartPublishPayload(BaseModel):
+    """Explicit publication state transition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    published: bool
+
+
+def validated_dimensions(items: list[str]) -> list[str]:
+    """Normalize and reject ambiguous drill paths before they reach storage."""
+
+    dimensions = [item.strip() for item in items if item.strip()]
+    if len(dimensions) < 2 or len(set(dimensions)) != len(dimensions):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="至少配置两个不重复的下钻维度",
+        )
+    return dimensions
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     supersonic = SuperSonicClient(settings)
@@ -73,7 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "X-AgentBI-Key", "X-AgentBI-CSRF"],
     )
     authenticate = require_api_key(settings)
@@ -207,6 +240,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_charts(_: SessionIdentity = current_session) -> dict[str, object]:
         return {"charts": sessions.list_charts()}
 
+    @app.get("/api/v1/admin/charts")
+    async def list_admin_charts(_: SessionIdentity = admin_session) -> dict[str, object]:
+        return {"charts": sessions.list_charts(published_only=False)}
+
     @app.post("/api/v1/admin/charts", status_code=status.HTTP_201_CREATED)
     async def create_chart(
         payload: ChartCreatePayload,
@@ -214,12 +251,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         identity: SessionIdentity = admin_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
-        dimensions = [item.strip() for item in payload.dimensions if item.strip()]
-        if len(dimensions) < 2 or len(set(dimensions)) != len(dimensions):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="至少配置两个不重复的下钻维度",
-            )
+        dimensions = validated_dimensions(payload.dimensions)
         try:
             chart = sessions.create_chart_with_drilldown(
                 chart_key=payload.chart_key,
@@ -241,6 +273,82 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail=payload.chart_key,
         )
         return {"chart": chart}
+
+    @app.put("/api/v1/admin/charts/{chart_key}")
+    async def update_chart(
+        chart_key: str,
+        payload: ChartUpdatePayload,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            chart = sessions.update_chart_with_drilldown(
+                chart_key=chart_key,
+                title=payload.title,
+                metric=payload.metric,
+                dataset_name=payload.dataset_name,
+                visualization_type=payload.visualization_type,
+                semantic_model=payload.semantic_model,
+                dimensions=validated_dimensions(payload.dimensions),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在") from exc
+        sessions.audit(
+            "chart_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=chart_key,
+        )
+        return {"chart": chart}
+
+    @app.patch("/api/v1/admin/charts/{chart_key}/publication")
+    async def set_chart_publication(
+        chart_key: str,
+        payload: ChartPublishPayload,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            chart = sessions.set_chart_published(chart_key, published=payload.published)
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在") from exc
+        event = "chart_published" if payload.published else "chart_offlined"
+        sessions.audit(
+            event,
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=chart_key,
+        )
+        return {"chart": chart}
+
+    @app.delete("/api/v1/admin/charts/{chart_key}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_chart(
+        chart_key: str,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            sessions.delete_chart(chart_key)
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在") from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="请先下线图表，再执行删除",
+            ) from exc
+        sessions.audit(
+            "chart_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=chart_key,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post(
         "/api/v1/analyze",
