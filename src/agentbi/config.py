@@ -32,6 +32,7 @@ class Settings:
     demo_user_password: str = ""
     demo_admin_password: str = ""
     database_url: str = "sqlite:///:memory:"
+    superset_base_url: str = "http://127.0.0.1:8088"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -73,4 +74,7 @@ class Settings:
             demo_user_password=demo_user_password,
             demo_admin_password=demo_admin_password,
             database_url=os.getenv("AGENTBI_DATABASE_URL", "sqlite:///:memory:"),
+            superset_base_url=os.getenv(
+                "SUPERSET_BASE_URL", "http://127.0.0.1:8088"
+            ).rstrip("/"),
         )

@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -79,6 +80,16 @@ class ReportCreatePayload(BaseModel):
 
     title: str = Field(min_length=2, max_length=200)
     dashboard_name: str = Field(min_length=2, max_length=200)
+
+
+class UserUpdatePayload(BaseModel):
+    """Administrator-controlled role, scope and account state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "admin"]
+    data_scope: str = Field(min_length=2, max_length=256)
+    is_active: bool
 
 
 def validated_dimensions(items: list[str]) -> list[str]:
@@ -245,6 +256,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_users(_: SessionIdentity = admin_session) -> dict[str, object]:
         return {"users": sessions.list_users()}
 
+    @app.put("/api/v1/admin/users/{username}")
+    async def update_user(
+        username: str,
+        payload: UserUpdatePayload,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        if username.lower() == identity.username.lower() and (
+            payload.role != "admin" or not payload.is_active
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="不能停用或降级当前管理员账号",
+            )
+        try:
+            user = sessions.update_user(
+                username=username,
+                role=payload.role,
+                data_scope=payload.data_scope,
+                is_active=payload.is_active,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在") from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="角色或数据范围无效",
+            ) from exc
+        sessions.audit(
+            "user_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=username,
+        )
+        return {"user": user}
+
     @app.get("/api/v1/admin/audit-events")
     async def list_audit_events(_: SessionIdentity = admin_session) -> dict[str, object]:
         return {"events": sessions.list_audit_events()}
@@ -313,6 +362,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"report": report}
 
+    @app.delete("/api/v1/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_report(
+        report_id: str,
+        request: Request,
+        identity: SessionIdentity = current_session,
+    ) -> Response:
+        if "report:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        enforce_csrf(request, identity)
+        try:
+            title = sessions.delete_report(
+                report_id,
+                actor_user_id=identity.subject,
+                include_all=identity.is_admin,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="报告不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权删除该报告") from exc
+        sessions.audit(
+            "report_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"{report_id}:{title}",
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get("/api/v1/admin/semantic-models")
     async def list_semantic_models(_: SessionIdentity = admin_session) -> dict[str, object]:
         charts = sessions.list_charts(published_only=False)
@@ -340,6 +417,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         return {"models": models}
 
+    async def probe_upstream(base_url: str) -> dict[str, str]:
+        """Return a bounded, non-sensitive upstream health result."""
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=min(settings.request_timeout_seconds, 3),
+                follow_redirects=False,
+            ) as client:
+                response = await client.get(f"{base_url.rstrip('/')}/health")
+            if response.status_code < 500:
+                return {"status": "ready", "message": "服务可访问，配置检查已完成"}
+        except httpx.HTTPError:
+            pass
+        return {"status": "unavailable", "message": "上游服务未启动或当前不可访问"}
+
+    @app.post("/api/v1/admin/semantic-models/{model_name}/sync")
+    async def sync_semantic_model(
+        model_name: str,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        known_models = {
+            str(chart["semantic_model"])
+            for chart in sessions.list_charts(published_only=False)
+        }
+        known_models.add("sales_model")
+        if model_name not in known_models:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="语义模型不存在")
+        result = await probe_upstream(settings.supersonic_base_url)
+        result["message"] = (
+            "SuperSonic 可访问，语义模型同步状态正常"
+            if result["status"] == "ready"
+            else "SuperSonic 未启动或当前不可访问"
+        )
+        sessions.audit(
+            "semantic_model_checked",
+            "success" if result["status"] == "ready" else "failed",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=model_name,
+        )
+        return {"result": result}
+
     @app.get("/api/v1/admin/data-sources")
     async def list_data_sources(_: SessionIdentity = admin_session) -> dict[str, object]:
         charts = sessions.list_charts(published_only=False)
@@ -359,6 +480,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             entry["charts"] = int(entry["charts"]) + 1
         return {"sources": list(grouped.values())}
+
+    @app.post("/api/v1/admin/data-sources/{source_name}/test")
+    async def test_data_source(
+        source_name: str,
+        request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        known_sources = {
+            str(chart["dataset_name"])
+            for chart in sessions.list_charts(published_only=False)
+        }
+        known_sources.add("sales_orders")
+        if source_name not in known_sources:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据源不存在")
+        result = await probe_upstream(settings.superset_base_url)
+        result["message"] = (
+            "Superset 可访问，数据源连接检查通过"
+            if result["status"] == "ready"
+            else "Superset 未启动或当前不可访问"
+        )
+        sessions.audit(
+            "data_source_tested",
+            "success" if result["status"] == "ready" else "failed",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=source_name,
+        )
+        return {"result": result}
 
     @app.get("/api/v1/charts")
     async def list_charts(_: SessionIdentity = current_session) -> dict[str, object]:

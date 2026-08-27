@@ -11,6 +11,8 @@ if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
 }
 const drillConfigurations = drillRegistry.charts;
 let managedCharts = [];
+let loadedUsers = [];
+let pendingReport;
 const managedChartKeys = new Set();
 let activeView = 'dashboard';
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
@@ -177,9 +179,46 @@ function renderReportList(reports) {
     header.append(title, time);
     const summary = document.createElement('p'); summary.textContent = report.summary;
     const meta = document.createElement('div'); meta.textContent = `${report.dashboard_name}　·　${report.data_scope}`;
-    const evidence = document.createElement('small'); evidence.textContent = `证据路径：${report.evidence_path}`;
-    card.append(header, summary, meta, evidence); return card;
+    const evidence = document.createElement('small'); evidence.className = 'report-evidence';
+    evidence.textContent = `证据路径：${report.evidence_path}`; evidence.hidden = true;
+    const actions = document.createElement('div'); actions.className = 'report-actions';
+    actions.append(
+      actionButton('查看证据', '', event => {
+        evidence.hidden = !evidence.hidden;
+        event.currentTarget.textContent = evidence.hidden ? '查看证据' : '收起证据';
+      }),
+      actionButton('删除报告', 'danger-action', () => openReportDeleteConfirmation(report)),
+    );
+    card.append(header, summary, meta, evidence, actions); return card;
   }));
+}
+
+function renderModuleRows(bodyId, items, valuesFor, actionFor) {
+  const body = document.querySelector(`#${bodyId}`);
+  body.replaceChildren(...items.map(item => {
+    const row = document.createElement('tr');
+    valuesFor(item).forEach(value => {
+      const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell);
+    });
+    const action = document.createElement('td'); action.append(actionFor(item)); row.append(action);
+    return row;
+  }));
+}
+
+async function runModuleAction(button, url, successView) {
+  const original = button.textContent;
+  button.disabled = true; button.textContent = '检查中…';
+  try {
+    const body = await request(url, {
+      method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    showManagementFeedback(body.result.message, body.result.status !== 'ready');
+    await loadModuleView(successView);
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    button.disabled = false; button.textContent = original;
+  }
 }
 
 async function loadModuleView(view) {
@@ -192,31 +231,41 @@ async function loadModuleView(view) {
       renderReportList((await request('/api/v1/reports')).reports || []);
     } else if (view === 'semantic-models') {
       const models = (await request('/api/v1/admin/semantic-models')).models || [];
-      replaceTableRows('semantic-model-table-body', models.map(model => [
+      renderModuleRows('semantic-model-table-body', models, model => [
         model.name, model.metrics.join('、'), model.charts,
         model.status === 'published' ? '● 已发布' : '● 已下线',
-      ]));
+      ], model => actionButton('检查同步', 'module-action', event => runModuleAction(
+        event.currentTarget,
+        `/api/v1/admin/semantic-models/${encodeURIComponent(model.name)}/sync`,
+        'semantic-models',
+      )));
     } else if (view === 'data-sources') {
       const sources = (await request('/api/v1/admin/data-sources')).sources || [];
-      replaceTableRows('data-source-table-body', sources.map(source => [
-        source.name, source.type, source.charts, source.status === 'ready' ? '● 正常' : '● 异常',
-      ]));
+      renderModuleRows('data-source-table-body', sources, source => [
+        source.name, source.type, source.charts, source.status === 'ready' ? '● 已配置' : '● 异常',
+      ], source => actionButton('测试连接', 'module-action', event => runModuleAction(
+        event.currentTarget,
+        `/api/v1/admin/data-sources/${encodeURIComponent(source.name)}/test`,
+        'data-sources',
+      )));
     } else if (view === 'user-roles') {
-      const users = (await request('/api/v1/admin/users')).users || [];
-      replaceTableRows('user-role-table-body', users.map(user => [
+      loadedUsers = (await request('/api/v1/admin/users')).users || [];
+      renderModuleRows('user-role-table-body', loadedUsers, user => [
         user.display_name, user.username, user.role === 'admin' ? '系统管理员' : '数据分析师',
         user.data_scope, user.is_active ? '● 正常' : '● 已停用', formatTimestamp(user.last_login_at),
-      ]));
+      ], user => actionButton('编辑权限', 'module-action', () => openUserEditor(user)));
     } else if (view === 'audit-security') {
       const events = (await request('/api/v1/admin/audit-events')).events || [];
       const eventLabels = {
         login: '用户登录', logout: '用户退出', chart_created: '创建图表', chart_updated: '修改图表',
         chart_published: '上线图表', chart_offlined: '下线图表', chart_deleted: '删除图表',
-        report_created: '生成报告',
+        report_created: '生成报告', report_deleted: '删除报告', user_updated: '修改用户权限',
+        semantic_model_checked: '检查语义模型', data_source_tested: '测试数据源',
       };
       replaceTableRows('audit-event-table-body', events.map(event => [
         formatTimestamp(event.created_at), eventLabels[event.event_type] || event.event_type,
-        event.actor, event.outcome === 'success' ? '成功' : '拒绝', event.source_ip || '本机', event.detail || '—',
+        event.actor, event.outcome === 'success' ? '成功' : event.outcome === 'failed' ? '失败' : '拒绝',
+        event.source_ip || '本机', event.detail || '—',
       ]));
     }
   } catch (error) {
@@ -698,6 +747,89 @@ document.querySelector('#confirm-delete-chart').addEventListener('click', async 
     renderRegistryCenter();
     renderChartManagement();
     showManagementFeedback(`${chart.title}已删除`);
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    button.disabled = false; button.textContent = '确认删除';
+  }
+});
+
+const userEditor = document.querySelector('#user-editor');
+const userEditorForm = document.querySelector('#user-editor-form');
+
+function openUserEditor(user) {
+  document.querySelector('#edit-user-name').value = user.username;
+  document.querySelector('#edit-user-role').value = user.role;
+  document.querySelector('#edit-user-scope').value = user.data_scope;
+  document.querySelector('#edit-user-active').checked = user.is_active;
+  document.querySelector('#user-editor-error').hidden = true;
+  userEditor.hidden = false;
+  document.querySelector('#edit-user-role').focus();
+}
+
+function closeUserEditor() {
+  userEditor.hidden = true;
+  userEditorForm.reset();
+  document.querySelector('#user-editor-error').hidden = true;
+}
+
+document.querySelector('#close-user-editor').addEventListener('click', closeUserEditor);
+document.querySelector('#cancel-user-editor').addEventListener('click', closeUserEditor);
+userEditor.addEventListener('click', event => { if (event.target === userEditor) closeUserEditor(); });
+userEditorForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = document.querySelector('#user-editor-error');
+  const button = userEditorForm.querySelector('button[type="submit"]');
+  errorBox.hidden = true; button.disabled = true; button.textContent = '正在保存…';
+  const username = document.querySelector('#edit-user-name').value;
+  try {
+    await request(`/api/v1/admin/users/${encodeURIComponent(username)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({
+        role: document.querySelector('#edit-user-role').value,
+        data_scope: document.querySelector('#edit-user-scope').value.trim(),
+        is_active: document.querySelector('#edit-user-active').checked,
+      }),
+    });
+    closeUserEditor();
+    await loadModuleView('user-roles');
+    showManagementFeedback(`${username} 的权限已更新`);
+  } catch (error) {
+    errorBox.textContent = error.message; errorBox.hidden = false;
+  } finally {
+    button.disabled = false; button.textContent = '保存权限';
+  }
+});
+
+function openReportDeleteConfirmation(report) {
+  pendingReport = report;
+  document.querySelector('#delete-report-name').textContent = report.title;
+  document.querySelector('#delete-report-confirm').hidden = false;
+}
+
+function closeReportDeleteConfirmation() {
+  document.querySelector('#delete-report-confirm').hidden = true;
+  pendingReport = undefined;
+}
+
+document.querySelector('#close-delete-report').addEventListener('click', closeReportDeleteConfirmation);
+document.querySelector('#cancel-delete-report').addEventListener('click', closeReportDeleteConfirmation);
+document.querySelector('#delete-report-confirm').addEventListener('click', event => {
+  if (event.target.id === 'delete-report-confirm') closeReportDeleteConfirmation();
+});
+document.querySelector('#confirm-delete-report').addEventListener('click', async () => {
+  if (!pendingReport) return;
+  const report = pendingReport;
+  const button = document.querySelector('#confirm-delete-report');
+  button.disabled = true; button.textContent = '正在删除…';
+  try {
+    await request(`/api/v1/reports/${encodeURIComponent(report.id)}`, {
+      method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    closeReportDeleteConfirmation();
+    await loadModuleView('reports');
+    showManagementFeedback(`${report.title}已删除`);
   } catch (error) {
     showManagementFeedback(error.message, true);
   } finally {

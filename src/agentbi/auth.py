@@ -154,6 +154,9 @@ class SessionManager:
     def list_users(self) -> list[dict[str, object]]:
         return self.repository.list_users()
 
+    def update_user(self, **values: object) -> dict[str, object]:
+        return self.repository.update_user(**values)
+
     def list_audit_events(self, *, limit: int = 100) -> list[dict[str, object]]:
         return self.repository.list_audit_events(limit=limit)
 
@@ -164,6 +167,15 @@ class SessionManager:
         self, *, actor_user_id: str, include_all: bool = False
     ) -> list[dict[str, object]]:
         return self.repository.list_reports(
+            actor_user_id=actor_user_id,
+            include_all=include_all,
+        )
+
+    def delete_report(
+        self, report_id: str, *, actor_user_id: str, include_all: bool = False
+    ) -> str:
+        return self.repository.delete_report(
+            report_id,
             actor_user_id=actor_user_id,
             include_all=include_all,
         )

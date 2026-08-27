@@ -27,6 +27,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    delete,
     select,
 )
 from sqlalchemy.engine import make_url
@@ -377,6 +378,37 @@ class IdentityRepository:
                 for event, user in rows
             ]
 
+    def update_user(
+        self,
+        *,
+        username: str,
+        role: str,
+        data_scope: str,
+        is_active: bool,
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            user = db.scalar(select(User).where(User.username == username.strip().lower()))
+            if user is None:
+                raise KeyError("user not found")
+            if db.get(Role, role) is None:
+                raise ValueError("role not found")
+            user.primary_role_code = role
+            user.data_scope = data_scope.strip()
+            user.is_active = is_active
+            user.updated_at = utc_now()
+            db.execute(delete(UserRole).where(UserRole.user_id == user.id))
+            db.add(UserRole(user_id=user.id, role_code=role))
+            db.flush()
+            return {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.display_name,
+                "role": user.primary_role_code,
+                "data_scope": user.data_scope,
+                "is_active": user.is_active,
+                "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+            }
+
     def create_report(
         self,
         *,
@@ -408,6 +440,23 @@ class IdentityRepository:
                 statement = statement.where(AnalysisReport.created_by == actor_user_id)
             reports = db.scalars(statement).all()
             return [self._report_payload(report) for report in reports]
+
+    def delete_report(
+        self,
+        report_id: str,
+        *,
+        actor_user_id: str,
+        include_all: bool = False,
+    ) -> str:
+        with Session(self.engine) as db, db.begin():
+            report = db.get(AnalysisReport, report_id)
+            if report is None:
+                raise KeyError("report not found")
+            if not include_all and report.created_by != actor_user_id:
+                raise PermissionError("report does not belong to actor")
+            title = report.title
+            db.delete(report)
+            return title
 
     @staticmethod
     def _report_payload(report: AnalysisReport) -> dict[str, object]:

@@ -194,6 +194,7 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         )
         assert created.status_code == 201
         assert created.json()["report"]["data_scope"] == "华东区域"
+        report_id = created.json()["report"]["id"]
         assert len(client.get("/api/v1/reports").json()["reports"]) == 1
 
         admin_login = client.post(
@@ -201,6 +202,7 @@ def test_navigation_modules_use_session_scoped_data() -> None:
             json={"username": "admin", "password": "admin-password"},
         )
         assert admin_login.status_code == 200
+        admin = admin_login.json()["user"]
         assert len(client.get("/api/v1/dashboards").json()["dashboards"]) == 2
         assert len(client.get("/api/v1/admin/users").json()["users"]) == 2
         assert client.get("/api/v1/admin/semantic-models").json()["models"][0]["name"] == "sales_model"
@@ -208,3 +210,45 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         events = client.get("/api/v1/admin/audit-events")
         assert events.status_code == 200
         assert any(event["event_type"] == "report_created" for event in events.json()["events"])
+
+        user_update = {
+            "role": "user",
+            "data_scope": "华南区域",
+            "is_active": True,
+        }
+        assert client.put("/api/v1/admin/users/user", json=user_update).status_code == 403
+        updated = client.put(
+            "/api/v1/admin/users/user",
+            json=user_update,
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["user"]["data_scope"] == "华南区域"
+
+        self_lockout = client.put(
+            "/api/v1/admin/users/admin",
+            json={"role": "user", "data_scope": "全部区域", "is_active": True},
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert self_lockout.status_code == 409
+        assert self_lockout.json()["detail"] == "不能停用或降级当前管理员账号"
+
+        assert client.post("/api/v1/admin/data-sources/sales_orders/test").status_code == 403
+        missing_source = client.post(
+            "/api/v1/admin/data-sources/not-found/test",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert missing_source.status_code == 404
+        missing_model = client.post(
+            "/api/v1/admin/semantic-models/not-found/sync",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert missing_model.status_code == 404
+
+        assert client.delete(f"/api/v1/reports/{report_id}").status_code == 403
+        deleted = client.delete(
+            f"/api/v1/reports/{report_id}",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert deleted.status_code == 204
+        assert client.get("/api/v1/reports").json()["reports"] == []
