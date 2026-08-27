@@ -617,6 +617,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         return {"status": "unavailable", "message": "上游服务未启动或当前不可访问"}
 
+    @app.get("/api/v1/superset/workspace")
+    async def superset_workspace(
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "dashboard:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        path = settings.superset_dashboard_path.strip()
+        if (
+            not path.startswith("/superset/dashboard/")
+            or path.startswith("//")
+            or "\\" in path
+            or "://" in path
+        ):
+            return {
+                "workspace": {
+                    "available": False,
+                    "status": "misconfigured",
+                    "message": "Superset 仪表盘路径配置无效",
+                }
+            }
+        health = await probe_upstream(settings.superset_base_url)
+        if health["status"] != "ready":
+            return {
+                "workspace": {
+                    "available": False,
+                    "status": "unavailable",
+                    "message": "Superset 未启动，可继续使用本地降级画布",
+                }
+            }
+        separator = "&" if "?" in path else "?"
+        return {
+            "workspace": {
+                "available": True,
+                "status": "ready",
+                "view_url": f"{settings.superset_base_url}{path}{separator}standalone=3",
+                "edit_url": f"{settings.superset_base_url}{path}",
+                "can_edit": "dashboard:manage" in identity.permissions,
+                "message": "Superset 分析画布已连接",
+            }
+        }
+
     @app.post("/api/v1/admin/semantic-models/{model_name}/sync")
     async def sync_semantic_model(
         model_name: str,

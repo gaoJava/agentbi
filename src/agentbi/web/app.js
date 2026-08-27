@@ -18,6 +18,9 @@ let loadedRoles = [];
 let loadedPermissions = [];
 let pendingReport;
 let pendingAsset;
+let dashboardCanvasMode = 'local';
+let supersetWorkspace;
+let supersetFrameMode = 'view';
 const managedChartKeys = new Set();
 let activeView = 'dashboard';
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
@@ -46,8 +49,89 @@ async function request(url, options = {}) {
 
 function showLogin() {
   currentUser = undefined;
+  supersetWorkspace = undefined;
+  const frame = document.querySelector('#superset-frame');
+  frame.removeAttribute('src');
+  frame.hidden = true;
   workbenchView.hidden = true;
   loginView.hidden = false;
+}
+
+function renderDashboardCanvasMode() {
+  const dashboard = activeView === 'dashboard';
+  const superset = dashboard && dashboardCanvasMode === 'superset';
+  const admin = currentUser?.role === 'admin';
+  document.querySelector('#sales-dashboard').hidden = !dashboard || superset || admin;
+  document.querySelector('#admin-overview').hidden = !dashboard || superset || !admin;
+  document.querySelector('#permission-card').hidden = !dashboard || superset;
+  document.querySelector('#superset-canvas').hidden = !superset;
+  document.querySelector('#local-canvas-tab').classList.toggle('active', !superset);
+  document.querySelector('#superset-canvas-tab').classList.toggle('active', superset);
+  if (dashboard && currentUser) {
+    document.querySelector('#agent-dashboard-name').textContent = superset
+      ? 'Superset 分析画布'
+      : (admin ? '全域经营治理' : '华东销售经营分析');
+  }
+}
+
+function showSupersetUnavailable(message) {
+  document.querySelector('#superset-loading').hidden = true;
+  document.querySelector('#superset-frame').hidden = true;
+  document.querySelector('#superset-unavailable-message').textContent = message;
+  document.querySelector('#superset-unavailable').hidden = false;
+}
+
+function setSupersetFrameMode(mode) {
+  if (!supersetWorkspace?.available) return;
+  if (mode === 'edit' && !supersetWorkspace.can_edit) {
+    showManagementFeedback('当前账号没有编辑 Superset 仪表盘的权限', true);
+    return;
+  }
+  supersetFrameMode = mode;
+  const frame = document.querySelector('#superset-frame');
+  const loading = document.querySelector('#superset-loading');
+  const target = mode === 'edit' ? supersetWorkspace.edit_url : supersetWorkspace.view_url;
+  document.querySelector('#superset-view-mode').classList.toggle('active', mode === 'view');
+  document.querySelector('#superset-edit-mode').classList.toggle('active', mode === 'edit');
+  document.querySelector('#superset-mode-label').textContent = mode === 'edit'
+    ? '编辑态 · 修改保存于 Superset'
+    : '查看态 · 隐藏重复导航';
+  document.querySelector('#superset-unavailable').hidden = true;
+  loading.hidden = false;
+  frame.hidden = true;
+  frame.onload = () => {
+    if (dashboardCanvasMode !== 'superset') return;
+    loading.hidden = true;
+    frame.hidden = false;
+  };
+  frame.src = target;
+}
+
+async function loadSupersetWorkspace({ force = false } = {}) {
+  if (!currentUser || dashboardCanvasMode !== 'superset') return;
+  document.querySelector('#superset-unavailable').hidden = true;
+  document.querySelector('#superset-loading').hidden = false;
+  if (supersetWorkspace?.available && !force) {
+    setSupersetFrameMode(supersetFrameMode);
+    return;
+  }
+  try {
+    const body = await request('/api/v1/superset/workspace');
+    supersetWorkspace = body.workspace;
+    if (!supersetWorkspace.available) {
+      showSupersetUnavailable(supersetWorkspace.message || 'Superset 服务当前不可用，可继续使用本地降级画布。');
+      return;
+    }
+    setSupersetFrameMode(supersetFrameMode === 'edit' && supersetWorkspace.can_edit ? 'edit' : 'view');
+  } catch (error) {
+    showSupersetUnavailable(error.message);
+  }
+}
+
+function selectDashboardCanvas(mode) {
+  dashboardCanvasMode = mode;
+  renderDashboardCanvasMode();
+  if (mode === 'superset') loadSupersetWorkspace();
 }
 
 function showWorkbench(user) {
@@ -103,6 +187,7 @@ function switchView(view) {
     document.querySelector('#admin-overview').hidden = !admin;
     document.querySelector('#user-permissions').hidden = admin;
     document.querySelector('#admin-permissions').hidden = !admin;
+    renderDashboardCanvasMode();
   }
   if (registry) renderRegistryCenter();
   if (chartManagement) renderChartManagement();
@@ -666,6 +751,28 @@ document.querySelectorAll('[data-view]').forEach(item => item.addEventListener('
   if (item.dataset.view === 'drilldown') renderDrilldown(selectedDrillChart);
   switchView(item.dataset.view);
 }));
+
+document.querySelector('#local-canvas-tab').addEventListener('click', () => selectDashboardCanvas('local'));
+document.querySelector('#superset-canvas-tab').addEventListener('click', () => selectDashboardCanvas('superset'));
+document.querySelector('#back-local-canvas').addEventListener('click', () => selectDashboardCanvas('local'));
+document.querySelector('#retry-superset').addEventListener('click', () => loadSupersetWorkspace({ force: true }));
+document.querySelector('#superset-view-mode').addEventListener('click', () => setSupersetFrameMode('view'));
+document.querySelector('#superset-edit-mode').addEventListener('click', () => setSupersetFrameMode('edit'));
+document.querySelector('#refresh-dashboard').addEventListener('click', async () => {
+  if (dashboardCanvasMode === 'superset') {
+    await loadSupersetWorkspace({ force: true });
+    return;
+  }
+  await loadManagedCharts();
+  showManagementFeedback('经营总览已刷新');
+});
+document.querySelector('#edit-dashboard').addEventListener('click', () => {
+  if (dashboardCanvasMode === 'superset') {
+    setSupersetFrameMode('edit');
+    return;
+  }
+  switchView('chart-management');
+});
 
 document.querySelectorAll('.module-refresh').forEach(button => {
   button.addEventListener('click', () => loadModuleView(button.dataset.module));

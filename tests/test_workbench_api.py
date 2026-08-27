@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 # ``agentbi.main`` exports an ASGI app at import time and intentionally fails
 # closed without secrets. Tests provide isolated non-production values first.
@@ -62,6 +63,28 @@ def test_login_rejects_wrong_password() -> None:
         )
         assert response.status_code == 401
         assert response.json()["detail"] == "用户名或密码错误"
+
+
+def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
+    unsafe_settings = replace(
+        settings(),
+        superset_dashboard_path="https://attacker.example/superset/dashboard/1/",
+    )
+    with TestClient(create_app(unsafe_settings)) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "user", "password": "user-password"},
+        )
+        assert login.status_code == 200
+
+        response = client.get("/api/v1/superset/workspace")
+        assert response.status_code == 200
+        workspace = response.json()["workspace"]
+        assert workspace == {
+            "available": False,
+            "status": "misconfigured",
+            "message": "Superset 仪表盘路径配置无效",
+        }
 
 
 def test_admin_creates_governed_chart_and_drilldown() -> None:

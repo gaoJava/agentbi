@@ -33,6 +33,7 @@ class Settings:
     demo_admin_password: str = ""
     database_url: str = "sqlite:///:memory:"
     superset_base_url: str = "http://127.0.0.1:8088"
+    superset_dashboard_path: str = "/superset/dashboard/1/"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -77,4 +78,7 @@ class Settings:
             superset_base_url=os.getenv(
                 "SUPERSET_BASE_URL", "http://127.0.0.1:8088"
             ).rstrip("/"),
+            superset_dashboard_path=os.getenv(
+                "SUPERSET_DASHBOARD_PATH", "/superset/dashboard/1/"
+            ),
         )

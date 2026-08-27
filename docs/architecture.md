@@ -39,6 +39,13 @@ The dashboard adapter captures `dashboard_id`, `chart_id`, `dataset_id`, `time_r
 filters, and the last selected data point. The backend adds the authenticated subject and roles.
 Roles supplied directly by browser JavaScript must never be accepted in a production deployment.
 
+The product workbench exposes a server-controlled Superset workspace descriptor. The browser
+cannot supply an arbitrary iframe URL: only a configured `/superset/dashboard/...` path is
+accepted, and edit capability is derived from the authenticated AgentBI permission set. The
+current loopback demo reuses a local Superset browser session and restricts `frame-ancestors` to
+the 8090 workbench. Production must exchange a short-lived Superset Guest Token and keep the
+Superset origin behind the same TLS gateway; the local-session mode is not a deployment design.
+
 ## Failure behavior
 
 - Invalid context: reject with HTTP 422 without calling SuperSonic.

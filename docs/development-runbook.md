@@ -58,6 +58,22 @@ several minutes; subsequent rebuilds are incremental. In the integrated Superset
 stack, port `9000` is already used by Superset's Webpack server, so do not start both frontends
 on that port. The AgentBI demo only requires the SuperSonic backend on `9080`.
 
+## 3.1 Optional Superset canvas
+
+The workbench keeps a local fallback canvas and probes Superset before setting an iframe URL.
+For the repository demo dashboard, configure:
+
+```powershell
+$env:SUPERSET_BASE_URL = 'http://127.0.0.1:8088'
+$env:SUPERSET_DASHBOARD_PATH = '/superset/dashboard/1/'
+```
+
+`SUPERSET_DASHBOARD_PATH` must be an application-relative `/superset/dashboard/...` path;
+absolute or protocol-relative URLs are rejected. The local Superset configuration permits framing
+only from `http://127.0.0.1:8090` and `http://localhost:8090`. This trusted local-session mode is
+for workstation testing only. A deployed environment must use HTTPS, exact production origins,
+Superset's Embedded SDK and short-lived Guest Tokens rather than sharing a browser login session.
+
 On Windows, the chat SDK Rollup configuration must use a regular-expression include for
 TypeScript (`/\.tsx?$/`). The plugin's default glob did not match drive-letter paths and caused
 the SDK to be consumed without processed CSS Modules. Runtime bundling currently uses

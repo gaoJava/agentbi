@@ -73,9 +73,9 @@
     <section class="canvas-shell">
       <header class="topbar dashboard-section">
         <div><h1 id="dashboard-title">华东销售经营分析</h1><p id="dashboard-subtitle">实时洞察关键指标与业务变化</p></div>
-        <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button>最近 30 天⌄</button><button class="edit-button" data-permission="dashboard:manage">编辑仪表盘</button></div>
+        <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button>最近 30 天⌄</button><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">编辑仪表盘</button></div>
       </header>
-      <section class="canvas-toolbar dashboard-section"><div><button class="active">经营总览</button><button>探索分析</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button>⟳ 刷新</button></div></section>
+      <section class="canvas-toolbar dashboard-section"><div><button id="local-canvas-tab" class="active">经营总览</button><button id="superset-canvas-tab">Superset 画布</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button id="refresh-dashboard">⟳ 刷新</button></div></section>
       <section class="dashboard-grid dashboard-section" id="sales-dashboard">
         <article class="metric-card"><div><span>销售收入</span><strong>¥ 28,764.36万</strong><small class="up">↑ 18.6% 较上月</small></div><div class="sparkline"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
         <article class="metric-card"><div><span>毛利润</span><strong>¥ 7,362.85万</strong><small class="up">↑ 14.2% 较上月</small></div><div class="sparkline purple"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
@@ -91,6 +91,13 @@
           <article class="chart-card model-panel"><header><strong>语义模型状态</strong><button data-view="semantic-models">查看全部模型 →</button></header><table><thead><tr><th>模型名称</th><th>主题域</th><th>状态</th><th>最近更新</th></tr></thead><tbody><tr><td>销售主题模型</td><td>销售域</td><td><em>● 正常</em></td><td>08-26 10:15</td></tr><tr><td>客户主题模型</td><td>客户域</td><td><em>● 正常</em></td><td>08-25 16:40</td></tr><tr><td>供应链主题模型</td><td>供应链域</td><td><em>● 正常</em></td><td>08-25 11:20</td></tr><tr><td>财务主题模型</td><td>财务域</td><td><em class="warn-text">● 告警</em></td><td>08-24 09:35</td></tr></tbody></table></article>
           <article class="chart-card audit-panel"><header><strong>最近审计事件</strong><button data-view="audit-security">查看全部 →</button></header><ul><li><span class="audit-dot green">✓</span><div><b>用户登录成功</b><small>系统管理员 · 10:21:32</small></div></li><li><span class="audit-dot blue-bg">♙</span><div><b>角色权限更新</b><small>销售分析师 · 09:58:11</small></div></li><li><span class="audit-dot violet-bg">◉</span><div><b>数据源配置变更</b><small>CRM_Prod · 09:41:07</small></div></li><li><span class="audit-dot orange-bg">▦</span><div><b>仪表盘发布</b><small>全域经营看板 · 09:15:44</small></div></li></ul></article>
         </div>
+      </section>
+
+      <section id="superset-canvas" class="superset-canvas dashboard-section" hidden>
+        <header><div><span class="registry-status ready">● 受控嵌入</span><strong>Superset 分析画布</strong><small id="superset-mode-label">查看态 · 隐藏重复导航</small></div><div><button id="superset-view-mode" class="active" type="button">查看态</button><button id="superset-edit-mode" data-permission="dashboard:manage" type="button">编辑态</button></div></header>
+        <div id="superset-loading" class="superset-state"><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>正在检查上游服务和仪表盘配置。</p></div>
+        <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">可继续使用本地降级画布。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button">返回经营总览</button></div></div>
+        <iframe id="superset-frame" title="Superset 分析画布" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" referrerpolicy="same-origin" hidden></iframe>
       </section>
 
       <section id="permission-card" class="permission-card dashboard-section">
