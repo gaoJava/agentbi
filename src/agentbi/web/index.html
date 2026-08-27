@@ -171,7 +171,7 @@
           <label>核心指标<small>必须是受治理指标</small><input id="new-chart-metric" required maxlength="128" placeholder="新增客户数"></label>
           <label>图表类型<small>决定原始图的展示形式</small><select id="new-chart-type"><option value="bar">柱状图</option><option value="line">折线图</option><option value="donut">环图</option><option value="table">指标表格</option></select></label>
           <label>语义模型<small>对应 SuperSonic 模型</small><input id="new-chart-model" required maxlength="128" placeholder="customer_model"></label>
-          <label class="wizard-full">下钻维度路径<small>使用英文逗号或中文逗号分隔，至少两层</small><input id="new-chart-dimensions" required placeholder="区域, 渠道, 销售人员, 客户"></label>
+          <label class="wizard-full">下钻维度路径<small>支持逗号或箭头分隔，至少两层，例如：区域 → 渠道 → 客户</small><input id="new-chart-dimensions" required placeholder="区域 → 渠道 → 销售人员 → 客户"></label>
         </div>
         <div id="chart-wizard-error" class="form-error" hidden></div>
         <aside class="wizard-preview"><strong>发布后的交互</strong><span>分析工作台 → 图表三点菜单 → 进入下钻分析 → AgentBI 证据路径</span></aside>

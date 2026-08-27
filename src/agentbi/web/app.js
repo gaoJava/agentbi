@@ -445,7 +445,7 @@ chartWizardForm.addEventListener('submit', async event => {
   chartWizardError.hidden = true;
   const saveButton = document.querySelector('#save-chart-wizard');
   const dimensions = document.querySelector('#new-chart-dimensions').value
-    .split(/[,，]/).map(item => item.trim()).filter(Boolean);
+    .split(/[,，→>]+/).map(item => item.trim()).filter(Boolean);
   if (dimensions.length < 2 || new Set(dimensions).size !== dimensions.length) {
     chartWizardError.textContent = '请配置至少两个不重复的下钻维度';
     chartWizardError.hidden = false;
