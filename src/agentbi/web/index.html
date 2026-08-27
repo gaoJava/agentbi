@@ -173,8 +173,8 @@
       </section>
 
       <section id="user-roles-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>用户与角色</h1><p>账号、角色和数据范围均由服务端 RBAC 控制</p></div><div><button id="create-user" class="primary-small" type="button">＋ 新增用户</button><button class="module-refresh" data-module="user-roles" type="button">⟳ 刷新</button></div></header>
-        <div class="registry-content"><section class="registry-table-card"><header><div><strong>用户账号</strong><small>停用代替物理删除，保留报告和审计证据</small></div></header><table><thead><tr><th>用户</th><th>登录账号</th><th>角色</th><th>数据范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody id="user-role-table-body"></tbody></table></section><section class="registry-table-card"><header><div><strong>角色与权限</strong><small>当前内置角色由数据库初始化，权限由服务端实时加载</small></div></header><table><thead><tr><th>角色</th><th>角色代码</th><th>用户数</th><th>权限数量</th><th>类型</th></tr></thead><tbody id="role-table-body"></tbody></table></section></div>
+        <header class="registry-header"><div><h1>用户与角色</h1><p>账号、角色和数据范围均由服务端 RBAC 控制</p></div><div><button id="create-role" type="button">＋ 新增角色</button><button id="create-user" class="primary-small" type="button">＋ 新增用户</button><button class="module-refresh" data-module="user-roles" type="button">⟳ 刷新</button></div></header>
+        <div class="registry-content"><section class="registry-table-card"><header><div><strong>用户账号</strong><small>停用代替物理删除，保留报告和审计证据</small></div></header><table><thead><tr><th>用户</th><th>登录账号</th><th>角色</th><th>数据范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody id="user-role-table-body"></tbody></table></section><section class="registry-table-card"><header><div><strong>角色与权限</strong><small>内置角色不可修改；自定义角色可配置最小权限集合</small></div></header><table><thead><tr><th>角色</th><th>角色代码</th><th>用户数</th><th>权限数量</th><th>类型</th><th>操作</th></tr></thead><tbody id="role-table-body"></tbody></table></section></div>
       </section>
 
       <section id="audit-security-view" class="registry-view module-view" hidden>
@@ -231,6 +231,21 @@
         </div>
         <div id="user-editor-error" class="form-error" hidden></div>
         <footer><button id="cancel-user-editor" type="button">取消</button><button class="primary-button" type="submit">保存权限</button></footer>
+      </form>
+    </section>
+  </div>
+  <div id="role-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="role-editor-title">
+      <header><div><span>最小权限 RBAC</span><h2 id="role-editor-title">新增角色</h2></div><button id="close-role-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="role-editor-form">
+        <div class="wizard-grid">
+          <label>角色代码<small>创建后不可修改</small><input id="role-code" required minlength="2" maxlength="64" pattern="[a-z][a-z0-9_-]*"></label>
+          <label>角色名称<small>展示给管理员和用户</small><input id="role-name" required minlength="2" maxlength="128"></label>
+          <label class="wizard-full">角色说明<small>描述职责和授权边界</small><textarea id="role-description" maxlength="512"></textarea></label>
+          <fieldset class="permission-picker wizard-full"><legend>权限清单</legend><p>至少选择一项；建议只授予完成工作所需的最小权限。</p><div id="role-permission-options"></div></fieldset>
+        </div>
+        <div id="role-editor-error" class="form-error" hidden></div>
+        <footer><button id="cancel-role-editor" type="button">取消</button><button class="primary-button" type="submit">保存角色</button></footer>
       </form>
     </section>
   </div>

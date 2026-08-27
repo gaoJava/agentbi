@@ -228,11 +228,40 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         assert updated.status_code == 200
         assert updated.json()["user"]["data_scope"] == "华南区域"
 
+        permissions = client.get("/api/v1/admin/permissions")
+        assert permissions.status_code == 200
+        assert len(permissions.json()["permissions"]) == 10
+        role_payload = {
+            "code": "regional_analyst",
+            "name": "区域分析师",
+            "description": "只使用分析能力",
+            "permissions": ["workspace:view", "dashboard:view", "drilldown:use"],
+        }
+        assert client.post("/api/v1/admin/roles", json=role_payload).status_code == 403
+        role_created = client.post(
+            "/api/v1/admin/roles", json=role_payload,
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert role_created.status_code == 201
+        role_updated = client.put(
+            "/api/v1/admin/roles/regional_analyst",
+            json={"name": "区域经营分析师", "description": "区域范围",
+                  "permissions": ["workspace:view", "dashboard:view", "report:view",
+                                  "datasource:manage"]},
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert role_updated.status_code == 200
+        assert client.put(
+            "/api/v1/admin/roles/admin",
+            json={"name": "管理员", "description": "", "permissions": ["workspace:view"]},
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        ).status_code == 409
+
         new_user = {
             "username": "analyst2",
             "password": "safe-password",
             "display_name": "分析师二号",
-            "role": "user",
+            "role": "regional_analyst",
             "data_scope": "华北区域",
             "is_active": True,
         }
@@ -251,6 +280,21 @@ def test_navigation_modules_use_session_scoped_data() -> None:
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert duplicate_user.status_code == 409
+        assert client.delete(
+            "/api/v1/admin/roles/regional_analyst",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        ).status_code == 409
+        disposable_role = client.post(
+            "/api/v1/admin/roles",
+            json={"code": "temporary", "name": "临时角色", "description": "",
+                  "permissions": ["workspace:view"]},
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        )
+        assert disposable_role.status_code == 201
+        assert client.delete(
+            "/api/v1/admin/roles/temporary",
+            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+        ).status_code == 204
 
         self_lockout = client.put(
             "/api/v1/admin/users/admin",
@@ -327,3 +371,12 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         )
         assert deleted.status_code == 204
         assert client.get("/api/v1/reports").json()["reports"] == []
+
+        custom_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "analyst2", "password": "safe-password"},
+        )
+        assert custom_login.status_code == 200
+        assert custom_login.json()["user"]["role"] == "regional_analyst"
+        assert client.get("/api/v1/admin/data-sources").status_code == 200
+        assert client.get("/api/v1/admin/users").status_code == 403

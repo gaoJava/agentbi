@@ -14,6 +14,8 @@ let managedCharts = [];
 let loadedUsers = [];
 let loadedSemanticModels = [];
 let loadedDataSources = [];
+let loadedRoles = [];
+let loadedPermissions = [];
 let pendingReport;
 let pendingAsset;
 const managedChartKeys = new Set();
@@ -52,12 +54,14 @@ function showWorkbench(user) {
   currentUser = user;
   const permissions = new Set(user.permissions);
   document.querySelectorAll('[data-permission]').forEach(item => { item.hidden = !permissions.has(item.dataset.permission); });
-  document.querySelectorAll('.admin-only').forEach(item => { item.hidden = user.role !== 'admin'; });
+  const hasGovernance = ['dashboard:manage', 'semantic_model:manage', 'datasource:manage', 'user:manage', 'audit:view']
+    .some(permission => permissions.has(permission));
+  document.querySelectorAll('.admin-only:not([data-permission])').forEach(item => { item.hidden = !hasGovernance; });
   document.querySelectorAll('.admin-data').forEach(item => { item.hidden = user.role !== 'admin'; });
   document.querySelectorAll('.chart-menu-trigger').forEach(item => { item.hidden = !permissions.has('drilldown:use'); });
   document.querySelector('#user-name').textContent = user.display_name;
   document.querySelector('#account-username').textContent = user.username;
-  document.querySelector('#user-role').textContent = user.role === 'admin' ? '系统管理员' : '数据分析师';
+  document.querySelector('#user-role').textContent = user.role_label;
   document.querySelector('#avatar').textContent = user.display_name.slice(0, 1);
   document.querySelector('#scope-badge').textContent = `⌖ 数据范围：${user.data_scope}`;
   document.querySelector('#agent-scope').textContent = user.data_scope;
@@ -280,18 +284,21 @@ async function loadModuleView(view) {
         source.status === 'active' ? '● 已启用' : '● 已下线',
       ], source => assetActionGroup('data-sources', source));
     } else if (view === 'user-roles') {
-      const [userBody, roleBody] = await Promise.all([
+      const [userBody, roleBody, permissionBody] = await Promise.all([
         request('/api/v1/admin/users'), request('/api/v1/admin/roles'),
+        request('/api/v1/admin/permissions'),
       ]);
       loadedUsers = userBody.users || [];
+      loadedRoles = roleBody.roles || [];
+      loadedPermissions = permissionBody.permissions || [];
       renderModuleRows('user-role-table-body', loadedUsers, user => [
-        user.display_name, user.username, user.role === 'admin' ? '系统管理员' : '数据分析师',
+        user.display_name, user.username, user.role_name,
         user.data_scope, user.is_active ? '● 正常' : '● 已停用', formatTimestamp(user.last_login_at),
       ], user => actionButton('编辑权限', 'module-action', () => openUserEditor(user)));
-      replaceTableRows('role-table-body', (roleBody.roles || []).map(role => [
+      renderModuleRows('role-table-body', loadedRoles, role => [
         role.name, role.code, role.user_count, role.permissions.length,
         role.builtin ? '内置角色' : '自定义角色',
-      ]));
+      ], role => roleActionGroup(role));
     } else if (view === 'audit-security') {
       const events = (await request('/api/v1/admin/audit-events')).events || [];
       const eventLabels = {
@@ -303,6 +310,7 @@ async function loadModuleView(view) {
         semantic_model_created: '新增语义模型', semantic_model_updated: '修改语义模型',
         semantic_model_deleted: '删除语义模型', data_source_created: '新增数据源',
         data_source_updated: '修改数据源', data_source_deleted: '删除数据源',
+        role_created: '新增角色', role_updated: '修改角色', role_deleted: '删除角色',
       };
       replaceTableRows('audit-event-table-body', events.map(event => [
         formatTimestamp(event.created_at), eventLabels[event.event_type] || event.event_type,
@@ -859,8 +867,8 @@ assetEditorForm.addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 
-function openAssetDeleteConfirmation(kind, asset) {
-  pendingAsset = { kind, asset };
+function openAssetDeleteConfirmation(kind, asset, returnView = kind) {
+  pendingAsset = { kind, asset, returnView };
   document.querySelector('#delete-asset-name').textContent = asset.name;
   document.querySelector('#delete-asset-confirm').hidden = false;
 }
@@ -874,14 +882,88 @@ document.querySelector('#delete-asset-confirm').addEventListener('click', event 
 });
 document.querySelector('#confirm-delete-asset').addEventListener('click', async () => {
   if (!pendingAsset) return;
-  const { kind, asset } = pendingAsset;
+  const { kind, asset, returnView } = pendingAsset;
   try {
     await request(`/api/v1/admin/${kind}/${encodeURIComponent(asset.name)}`, {
       method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
     });
-    closeAssetDeleteConfirmation(); await loadModuleView(kind);
+    closeAssetDeleteConfirmation(); await loadModuleView(returnView);
     showManagementFeedback(`${asset.name} 已删除`);
   } catch (error) { showManagementFeedback(error.message, true); }
+});
+
+function roleActionGroup(role) {
+  const group = document.createElement('div'); group.className = 'registry-actions';
+  if (role.builtin) {
+    const label = document.createElement('span'); label.className = 'builtin-label';
+    label.textContent = '系统保护'; group.append(label); return group;
+  }
+  group.append(actionButton('修改', 'module-action', () => openRoleEditor(role)));
+  const remove = actionButton('删除', 'danger-action', () => {
+    openAssetDeleteConfirmation('roles', { name: role.code }, 'user-roles');
+  });
+  remove.disabled = role.user_count > 0;
+  if (remove.disabled) remove.title = '该角色已分配用户，不能删除';
+  group.append(remove); return group;
+}
+
+const roleEditor = document.querySelector('#role-editor');
+const roleEditorForm = document.querySelector('#role-editor-form');
+let editingRoleCode;
+
+function renderPermissionOptions(selected = []) {
+  const selectedSet = new Set(selected);
+  const container = document.querySelector('#role-permission-options');
+  container.replaceChildren(...loadedPermissions.map(permission => {
+    const label = document.createElement('label');
+    const input = document.createElement('input'); input.type = 'checkbox';
+    input.value = permission.code; input.checked = selectedSet.has(permission.code);
+    const text = document.createElement('span'); text.textContent = permission.name;
+    label.append(input, text); return label;
+  }));
+}
+
+function openRoleEditor(role = null) {
+  editingRoleCode = role?.code; roleEditorForm.reset();
+  document.querySelector('#role-editor-title').textContent = role ? '修改自定义角色' : '新增角色';
+  const code = document.querySelector('#role-code'); code.disabled = Boolean(role);
+  code.value = role?.code || ''; document.querySelector('#role-name').value = role?.name || '';
+  document.querySelector('#role-description').value = role?.description || '';
+  renderPermissionOptions(role?.permissions || ['workspace:view', 'dashboard:view']);
+  document.querySelector('#role-editor-error').hidden = true; roleEditor.hidden = false;
+  (role ? document.querySelector('#role-name') : code).focus();
+}
+function closeRoleEditor() {
+  roleEditor.hidden = true; roleEditorForm.reset(); editingRoleCode = undefined;
+  document.querySelector('#role-code').disabled = false;
+}
+document.querySelector('#create-role').addEventListener('click', () => openRoleEditor());
+document.querySelector('#close-role-editor').addEventListener('click', closeRoleEditor);
+document.querySelector('#cancel-role-editor').addEventListener('click', closeRoleEditor);
+roleEditor.addEventListener('click', event => { if (event.target === roleEditor) closeRoleEditor(); });
+roleEditorForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const permissions = [...document.querySelectorAll('#role-permission-options input:checked')]
+    .map(input => input.value);
+  const errorBox = document.querySelector('#role-editor-error');
+  if (!permissions.length) {
+    errorBox.textContent = '请至少选择一项权限'; errorBox.hidden = false; return;
+  }
+  const editing = Boolean(editingRoleCode);
+  const payload = {
+    name: document.querySelector('#role-name').value.trim(),
+    description: document.querySelector('#role-description').value.trim(), permissions,
+  };
+  if (!editing) payload.code = document.querySelector('#role-code').value.trim();
+  try {
+    await request(editing ? `/api/v1/admin/roles/${encodeURIComponent(editingRoleCode)}` : '/api/v1/admin/roles', {
+      method: editing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify(payload),
+    });
+    closeRoleEditor(); await loadModuleView('user-roles');
+    showManagementFeedback(`角色已${editing ? '更新' : '创建'}`);
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
 });
 
 const userEditor = document.querySelector('#user-editor');
@@ -897,7 +979,12 @@ function openUserEditor(user = null) {
   const password = document.querySelector('#edit-user-password');
   displayName.required = creating; password.required = creating;
   displayName.value = ''; password.value = '';
-  document.querySelector('#edit-user-role').value = user?.role || 'user';
+  const roleSelect = document.querySelector('#edit-user-role');
+  roleSelect.replaceChildren(...loadedRoles.map(role => {
+    const option = document.createElement('option'); option.value = role.code;
+    option.textContent = role.name; return option;
+  }));
+  roleSelect.value = user?.role || 'user';
   document.querySelector('#edit-user-scope').value = user?.data_scope || '全部区域';
   document.querySelector('#edit-user-active').checked = user?.is_active ?? true;
   userEditorForm.querySelector('button[type="submit"]').textContent = creating ? '创建用户' : '保存权限';

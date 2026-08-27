@@ -44,6 +44,7 @@ class SessionIdentity:
             "username": self.username,
             "display_name": self.display_name,
             "role": self.role,
+            "role_label": "系统管理员" if self.role == "admin" else "数据分析师" if self.role == "user" else self.role,
             "roles": list(self.roles),
             "data_scope": self.data_scope,
             "csrf_token": self.csrf_token,
@@ -159,6 +160,18 @@ class SessionManager:
 
     def list_roles(self) -> list[dict[str, object]]:
         return self.repository.list_roles()
+
+    def list_permissions(self) -> list[dict[str, str]]:
+        return self.repository.list_permissions()
+
+    def create_role(self, **values: object) -> dict[str, object]:
+        return self.repository.create_role(**values)
+
+    def update_role(self, code: str, **values: object) -> dict[str, object]:
+        return self.repository.update_role(code, **values)
+
+    def delete_role(self, code: str) -> None:
+        self.repository.delete_role(code)
 
     def list_data_sources(self) -> list[dict[str, object]]:
         return self.repository.list_data_sources()

@@ -87,7 +87,7 @@ class UserUpdatePayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["user", "admin"]
+    role: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
     data_scope: str = Field(min_length=2, max_length=256)
     is_active: bool
 
@@ -100,7 +100,7 @@ class UserCreatePayload(BaseModel):
     username: str = Field(min_length=3, max_length=128, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
     password: str = Field(min_length=8, max_length=256)
     display_name: str = Field(min_length=2, max_length=128)
-    role: Literal["user", "admin"]
+    role: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
     data_scope: str = Field(min_length=2, max_length=256)
     is_active: bool = True
 
@@ -131,6 +131,21 @@ class SemanticModelUpdatePayload(BaseModel):
     subject_area: str = Field(min_length=2, max_length=128)
     description: str = Field(default="", max_length=512)
     status: Literal["active", "offline"]
+
+
+class RoleCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
+    name: str = Field(min_length=2, max_length=128)
+    description: str = Field(default="", max_length=512)
+    permissions: list[str] = Field(min_length=1, max_length=20)
+
+
+class RoleUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=128)
+    description: str = Field(default="", max_length=512)
+    permissions: list[str] = Field(min_length=1, max_length=20)
 
 
 def validated_dimensions(items: list[str]) -> list[str]:
@@ -183,12 +198,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     current_session = Depends(current_identity)
 
+    def require_permission(permission: str):
+        def checker(identity: SessionIdentity = current_session) -> SessionIdentity:
+            if permission not in identity.permissions:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+            return identity
+
+        return Depends(checker)
+
     def require_admin(identity: SessionIdentity = current_session) -> SessionIdentity:
-        if not identity.is_admin or "user:manage" not in identity.permissions:
+        if "user:manage" not in identity.permissions:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
         return identity
 
     admin_session = Depends(require_admin)
+    audit_session = require_permission("audit:view")
+    semantic_session = require_permission("semantic_model:manage")
+    datasource_session = require_permission("datasource:manage")
+    dashboard_management_session = require_permission("dashboard:manage")
 
     def enforce_csrf(request: Request, identity: SessionIdentity) -> None:
         if not hmac.compare_digest(
@@ -330,6 +357,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_roles(_: SessionIdentity = admin_session) -> dict[str, object]:
         return {"roles": sessions.list_roles()}
 
+    @app.get("/api/v1/admin/permissions")
+    async def list_permissions(_: SessionIdentity = admin_session) -> dict[str, object]:
+        return {"permissions": sessions.list_permissions()}
+
+    @app.post("/api/v1/admin/roles", status_code=status.HTTP_201_CREATED)
+    async def create_role(
+        payload: RoleCreatePayload, request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            role = sessions.create_role(
+                code=payload.code, name=payload.name, description=payload.description,
+                permissions=payload.permissions,
+            )
+        except ValueError as exc:
+            detail = "角色代码已存在" if "exists" in str(exc) else "权限配置无效"
+            raise HTTPException(status_code=409 if "exists" in str(exc) else 422, detail=detail) from exc
+        sessions.audit("role_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=payload.code)
+        return {"role": role}
+
+    @app.put("/api/v1/admin/roles/{role_code}")
+    async def update_role(
+        role_code: str, payload: RoleUpdatePayload, request: Request,
+        identity: SessionIdentity = admin_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            role = sessions.update_role(
+                role_code, name=payload.name, description=payload.description,
+                permissions=payload.permissions,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="角色不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail="内置角色不可修改") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="权限配置无效") from exc
+        sessions.audit("role_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=role_code)
+        return {"role": role}
+
+    @app.delete("/api/v1/admin/roles/{role_code}", status_code=204)
+    async def delete_role(
+        role_code: str, request: Request, identity: SessionIdentity = admin_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            sessions.delete_role(role_code)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="角色不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail="内置角色或已分配角色不能删除") from exc
+        sessions.audit("role_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=role_code)
+        return Response(status_code=204)
+
     @app.put("/api/v1/admin/users/{username}")
     async def update_user(
         username: str,
@@ -369,7 +454,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"user": user}
 
     @app.get("/api/v1/admin/audit-events")
-    async def list_audit_events(_: SessionIdentity = admin_session) -> dict[str, object]:
+    async def list_audit_events(_: SessionIdentity = audit_session) -> dict[str, object]:
         return {"events": sessions.list_audit_events()}
 
     @app.get("/api/v1/dashboards")
@@ -465,13 +550,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/v1/admin/semantic-models")
-    async def list_semantic_models(_: SessionIdentity = admin_session) -> dict[str, object]:
+    async def list_semantic_models(_: SessionIdentity = semantic_session) -> dict[str, object]:
         return {"models": sessions.list_semantic_models()}
 
     @app.post("/api/v1/admin/semantic-models", status_code=status.HTTP_201_CREATED)
     async def create_semantic_model(
         payload: SemanticModelCreatePayload, request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
@@ -488,7 +573,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/v1/admin/semantic-models/{model_name}")
     async def update_semantic_model(
         model_name: str, payload: SemanticModelUpdatePayload, request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
@@ -504,7 +589,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/v1/admin/semantic-models/{model_name}", status_code=204)
     async def delete_semantic_model(
-        model_name: str, request: Request, identity: SessionIdentity = admin_session,
+        model_name: str, request: Request, identity: SessionIdentity = semantic_session,
     ) -> Response:
         enforce_csrf(request, identity)
         try:
@@ -536,7 +621,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def sync_semantic_model(
         model_name: str,
         request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         known_models = {str(model["name"]) for model in sessions.list_semantic_models()}
@@ -558,13 +643,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"result": result}
 
     @app.get("/api/v1/admin/data-sources")
-    async def list_data_sources(_: SessionIdentity = admin_session) -> dict[str, object]:
+    async def list_data_sources(_: SessionIdentity = datasource_session) -> dict[str, object]:
         return {"sources": sessions.list_data_sources()}
 
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(
         payload: DataSourceCreatePayload, request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
@@ -581,7 +666,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/v1/admin/data-sources/{source_name}")
     async def update_data_source(
         source_name: str, payload: DataSourceUpdatePayload, request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
@@ -597,7 +682,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/v1/admin/data-sources/{source_name}", status_code=204)
     async def delete_data_source(
-        source_name: str, request: Request, identity: SessionIdentity = admin_session,
+        source_name: str, request: Request, identity: SessionIdentity = datasource_session,
     ) -> Response:
         enforce_csrf(request, identity)
         try:
@@ -614,7 +699,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def test_data_source(
         source_name: str,
         request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         known_sources = {str(source["name"]) for source in sessions.list_data_sources()}
@@ -640,14 +725,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"charts": sessions.list_charts()}
 
     @app.get("/api/v1/admin/charts")
-    async def list_admin_charts(_: SessionIdentity = admin_session) -> dict[str, object]:
+    async def list_admin_charts(
+        _: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
         return {"charts": sessions.list_charts(published_only=False)}
 
     @app.post("/api/v1/admin/charts", status_code=status.HTTP_201_CREATED)
     async def create_chart(
         payload: ChartCreatePayload,
         request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = dashboard_management_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         dimensions = validated_dimensions(payload.dimensions)
@@ -678,7 +765,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         chart_key: str,
         payload: ChartUpdatePayload,
         request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = dashboard_management_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
@@ -707,7 +794,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         chart_key: str,
         payload: ChartPublishPayload,
         request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = dashboard_management_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
@@ -728,7 +815,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def delete_chart(
         chart_key: str,
         request: Request,
-        identity: SessionIdentity = admin_session,
+        identity: SessionIdentity = dashboard_management_session,
     ) -> Response:
         enforce_csrf(request, identity)
         try:

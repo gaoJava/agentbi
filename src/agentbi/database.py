@@ -423,6 +423,7 @@ class IdentityRepository:
                     "username": user.username,
                     "display_name": user.display_name,
                     "role": user.primary_role_code,
+                    "role_name": db.get(Role, user.primary_role_code).name,
                     "data_scope": user.data_scope,
                     "is_active": user.is_active,
                     "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
@@ -463,6 +464,7 @@ class IdentityRepository:
                 "username": user.username,
                 "display_name": user.display_name,
                 "role": user.primary_role_code,
+                "role_name": db.get(Role, user.primary_role_code).name,
                 "data_scope": user.data_scope,
                 "is_active": user.is_active,
                 "last_login_at": None,
@@ -495,6 +497,80 @@ class IdentityRepository:
                 }
                 for role in roles
             ]
+
+    def list_permissions(self) -> list[dict[str, str]]:
+        with Session(self.engine) as db:
+            permissions = db.scalars(select(Permission).order_by(Permission.code)).all()
+            return [{"code": item.code, "name": item.name} for item in permissions]
+
+    def create_role(
+        self, *, code: str, name: str, description: str, permissions: list[str]
+    ) -> dict[str, object]:
+        normalized = code.strip().lower()
+        with Session(self.engine) as db, db.begin():
+            if db.get(Role, normalized) is not None:
+                raise ValueError("role already exists")
+            self._validate_permissions(db, permissions)
+            role = Role(code=normalized, name=name.strip(), description=description.strip())
+            db.add(role); db.flush()
+            for permission in sorted(set(permissions)):
+                db.add(RolePermission(role_code=normalized, permission_code=permission))
+            db.flush()
+            return self._role_payload(db, role)
+
+    def update_role(
+        self, code: str, *, name: str, description: str, permissions: list[str]
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            role = db.get(Role, code)
+            if role is None:
+                raise KeyError("role not found")
+            if code in {"user", "admin"}:
+                raise PermissionError("builtin role is immutable")
+            self._validate_permissions(db, permissions)
+            role.name = name.strip(); role.description = description.strip()
+            db.execute(delete(RolePermission).where(RolePermission.role_code == code))
+            for permission in sorted(set(permissions)):
+                db.add(RolePermission(role_code=code, permission_code=permission))
+            db.flush()
+            return self._role_payload(db, role)
+
+    def delete_role(self, code: str) -> None:
+        with Session(self.engine) as db, db.begin():
+            role = db.get(Role, code)
+            if role is None:
+                raise KeyError("role not found")
+            if code in {"user", "admin"}:
+                raise PermissionError("builtin role is immutable")
+            assigned = db.scalar(
+                select(func.count()).select_from(UserRole).where(UserRole.role_code == code)
+            )
+            if assigned:
+                raise PermissionError("role is assigned")
+            db.execute(delete(RolePermission).where(RolePermission.role_code == code))
+            db.delete(role)
+
+    @staticmethod
+    def _validate_permissions(db: Session, permissions: list[str]) -> None:
+        known = set(db.scalars(select(Permission.code)).all())
+        if not permissions or not set(permissions).issubset(known):
+            raise ValueError("invalid permissions")
+
+    @staticmethod
+    def _role_payload(db: Session, role: Role) -> dict[str, object]:
+        permissions = list(
+            db.scalars(
+                select(RolePermission.permission_code)
+                .where(RolePermission.role_code == role.code)
+                .order_by(RolePermission.permission_code)
+            ).all()
+        )
+        count = db.scalar(
+            select(func.count()).select_from(UserRole).where(UserRole.role_code == role.code)
+        )
+        return {"code": role.code, "name": role.name, "description": role.description,
+                "permissions": permissions, "user_count": int(count or 0),
+                "builtin": role.code in {"user", "admin"}}
 
     def list_data_sources(self) -> list[dict[str, object]]:
         with Session(self.engine) as db:
@@ -670,6 +746,7 @@ class IdentityRepository:
                 "username": user.username,
                 "display_name": user.display_name,
                 "role": user.primary_role_code,
+                "role_name": db.get(Role, user.primary_role_code).name,
                 "data_scope": user.data_scope,
                 "is_active": user.is_active,
                 "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
