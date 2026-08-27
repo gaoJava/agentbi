@@ -10,6 +10,7 @@ window.AGENTBI_DRILLDOWN_REGISTRY = Object.freeze({
   charts: {
     revenue: {
       metric: '销售收入', semanticModel: 'sales_model', sourceType: 'revenue',
+      dimensions: ['区域', '产品线', '渠道'],
       pageTitle: '销售收入下钻分析', sourceTitle: '季度销售收入趋势',
       breadcrumb: '销售总览 › 2024 Q4 › 华东 › 产品线',
       connectorOne: '点击 2024 Q4，下钻维度：区域',
@@ -23,10 +24,11 @@ window.AGENTBI_DRILLDOWN_REGISTRY = Object.freeze({
       questions: ['华东增长来自哪里？', '哪个产品线拖累毛利？'],
       insight: '消费电子贡献 42%，但毛利率环比下降 3.2 个百分点。',
       insightSource: '洞察来源：与 2024 Q3 环比对比',
-      evidence: '销售总览 → 2024 Q4 → 华东 → 产品线',
+      evidence: '销售总览 → 2024 Q4 → 华东 → 产品线 → 渠道',
     },
     structure: {
       metric: '销售收入', semanticModel: 'sales_model', sourceType: 'structure',
+      dimensions: ['区域', '渠道'],
       pageTitle: '销售结构下钻分析', sourceTitle: '销售结构（按产品大类）',
       breadcrumb: '销售总览 › 销售结构 › 消费电子 › 华东 › 渠道',
       connectorOne: '点击 消费电子，下钻维度：区域',

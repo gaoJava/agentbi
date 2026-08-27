@@ -72,6 +72,7 @@
 .drill-source-donut[hidden],.drill-ready-badge[hidden],.chart-menu[hidden]{display:none!important}
 .drill-source-table{height:145px;padding:10px 18px;overflow:auto;border-bottom:1px solid #e3e7ed}
 .drill-source-table[hidden]{display:none!important}
+.dynamic-drill-levels{display:contents}.dynamic-level-content{display:grid;grid-template-columns:minmax(220px,.7fr) 1fr;gap:28px;align-items:center}.dynamic-level-bars{display:grid;gap:12px}.dynamic-level-bars>div{display:grid;grid-template-columns:90px 1fr 50px;align-items:center;gap:10px}.dynamic-level-bars i{height:10px;border-radius:6px;background:linear-gradient(90deg,#3479ee,#8eb7fa);width:var(--w)}.dynamic-level-bars b{text-align:right}.dynamic-level-meta{display:grid;gap:10px;padding:18px;border-radius:10px;background:#f6f9fe;color:#65758b}.dynamic-level-meta strong{color:#10233d;font-size:17px}
 .drill-source-table table{width:100%;border-collapse:collapse;font-size:10px}
 .drill-source-table th,.drill-source-table td{padding:7px 10px;border-bottom:1px solid #e8edf4;text-align:left}
 .drill-source-table th{color:#68778b;background:#f7f9fc}

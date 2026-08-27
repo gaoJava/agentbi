@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
-  <link rel="stylesheet" href="/app/assets/app.css">
-  <link rel="stylesheet" href="/app/assets/prototype.css">
+  <link rel="stylesheet" href="/app/assets/app.css?v=20260827.3">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260827.3">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -114,6 +114,7 @@
           <article class="drill-level"><header><div><span id="drill-level-one-label">第 1 层 · 区域</span><strong id="drill-level-one-title">2024 Q4 各区域销售收入</strong></div><button>✦ 让 Agent 分析此层</button></header><div id="drill-level-one-bars" class="drill-region-bars"></div></article>
           <div class="drill-connector"><i>↓</i><span id="drill-connector-two">点击 华东，下钻维度：产品线</span></div>
           <article class="drill-level product-level"><header><div><span id="drill-level-two-label">第 2 层 · 产品线</span><strong id="drill-level-two-title">华东产品线贡献</strong></div><button>✦ 让 Agent 分析此层</button></header><div class="product-content"><div class="product-donut"><span><b id="drill-total">420</b>亿元</span></div><table><thead><tr><th id="drill-table-dimension">产品线</th><th>销售收入（亿元）</th><th>占比</th></tr></thead><tbody id="drill-table-body"></tbody></table><div class="drill-actions"><button>← 返回上一层</button><button class="continue">↓ 继续下钻</button></div></div></article>
+          <div id="drill-dynamic-levels" class="dynamic-drill-levels"></div>
         </div>
       </section>
 
@@ -286,7 +287,7 @@
     </section>
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
-  <script src="/app/assets/drilldown-registry.js" defer></script>
-  <script src="/app/assets/app.js" defer></script>
+  <script src="/app/assets/drilldown-registry.js?v=20260827.3" defer></script>
+  <script src="/app/assets/app.js?v=20260827.3" defer></script>
 </body>
 </html>

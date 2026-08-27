@@ -424,6 +424,7 @@ function configurationFromManagedChart(chart) {
     published: chart.is_published,
     metric: chart.metric,
     semanticModel: chart.semantic_model,
+    dimensions,
     sourceType,
     pageTitle: `${chart.metric}下钻分析`,
     sourceTitle: chart.title,
@@ -597,6 +598,79 @@ function renderRegistryCenter() {
   }));
 }
 
+function setDrillAgentLayer(config, level, title, evidence) {
+  document.querySelector('#drill-agent-context').textContent = `第 ${level} 层 · ${title}`;
+  document.querySelector('#drill-evidence').textContent = evidence;
+  document.querySelector('#drill-insight-source').textContent =
+    `${config.insightSource} · 当前分析第 ${level} 层`;
+}
+
+function drillEvidenceForLevel(config, level) {
+  const path = String(config.evidence || '').split('→').map(item => item.trim()).filter(Boolean);
+  const dimensions = Array.isArray(config.dimensions) ? config.dimensions : [];
+  const baseLength = Math.max(1, path.length - dimensions.length);
+  return path.slice(0, Math.min(path.length, baseLength + level)).join(' → ');
+}
+
+function renderDynamicDrillLevels(config) {
+  const container = document.querySelector('#drill-dynamic-levels');
+  const dimensions = Array.isArray(config.dimensions) ? config.dimensions : [];
+  const extraDimensions = dimensions.slice(2);
+  let selectedValue = config.rows[0]?.[0] || '第一项';
+  let deepestTitle = config.levelTwoTitle;
+  const nodes = [];
+  extraDimensions.forEach((dimension, offset) => {
+    const level = offset + 3;
+    const connector = document.createElement('div');
+    connector.className = 'drill-connector';
+    const arrow = document.createElement('i'); arrow.textContent = '↓';
+    const connectorText = document.createElement('span');
+    connectorText.textContent = `点击 ${selectedValue}，下钻维度：${dimension}`;
+    connector.append(arrow, connectorText);
+
+    const article = document.createElement('article');
+    article.className = 'drill-level dynamic-drill-level';
+    const header = document.createElement('header');
+    const heading = document.createElement('div');
+    const label = document.createElement('span'); label.textContent = `第 ${level} 层 · ${dimension}`;
+    const title = document.createElement('strong');
+    title.textContent = `${selectedValue}${dimension}贡献`;
+    deepestTitle = title.textContent;
+    heading.append(label, title);
+    const analyze = document.createElement('button');
+    analyze.type = 'button'; analyze.textContent = '✦ 让 Agent 分析此层';
+    const evidence = drillEvidenceForLevel(config, level);
+    analyze.addEventListener('click', () => setDrillAgentLayer(config, level, title.textContent, evidence));
+    header.append(heading, analyze);
+
+    const content = document.createElement('div'); content.className = 'dynamic-level-content';
+    const bars = document.createElement('div'); bars.className = 'dynamic-level-bars';
+    const candidates = dimension.includes('渠道')
+      ? ['直营网', '电商平台', '经销商', '其他']
+      : dimension.includes('客户')
+        ? ['重点客户', '成长客户', '一般客户', '待激活客户']
+        : [`${dimension} A`, `${dimension} B`, `${dimension} C`, '其他'];
+    candidates.forEach((name, index) => {
+      const row = document.createElement('div');
+      const itemName = document.createElement('span'); itemName.textContent = name;
+      const bar = document.createElement('i'); bar.style.setProperty('--w', `${88 - index * 17}%`);
+      const value = document.createElement('b'); value.textContent = String(320 - index * 58);
+      row.append(itemName, bar, value); bars.append(row);
+    });
+    const meta = document.createElement('div'); meta.className = 'dynamic-level-meta';
+    const summary = document.createElement('strong'); summary.textContent = `${candidates[0]}贡献最高`;
+    const description = document.createElement('span');
+    description.textContent = `当前路径下 ${candidates[0]} 占比 42%，可继续沿下一维度下钻或交给 Agent 分析。`;
+    meta.append(summary, description); content.append(bars, meta);
+    article.append(header, content); nodes.push(connector, article);
+    selectedValue = candidates[0];
+  });
+  container.replaceChildren(...nodes);
+  return extraDimensions.length
+    ? { level: dimensions.length, title: deepestTitle, evidence: drillEvidenceForLevel(config, dimensions.length) }
+    : { level: 2, title: config.levelTwoTitle, evidence: drillEvidenceForLevel(config, 2) };
+}
+
 function renderDrilldown(chartId) {
   const config = drillConfigurations[chartId];
   document.querySelector('#drill-page-title').textContent = config.pageTitle;
@@ -633,12 +707,21 @@ function renderDrilldown(chartId) {
     });
     return row;
   }));
-  document.querySelector('#drill-agent-context').textContent = config.context;
+  const deepest = renderDynamicDrillLevels(config);
+  const layerButtons = document.querySelectorAll('#drilldown-view > .drill-header + .drill-scroll > .drill-level > header > button');
+  const layerTitles = [config.sourceTitle, config.levelOneTitle, config.levelTwoTitle];
+  layerButtons.forEach((button, level) => {
+    button.onclick = () => setDrillAgentLayer(
+      config, level, layerTitles[level], drillEvidenceForLevel(config, level),
+    );
+  });
+  document.querySelector('#drill-agent-context').textContent = Array.isArray(config.dimensions) && config.dimensions.length > 2
+    ? `第 ${deepest.level} 层 · ${deepest.title}` : config.context;
   document.querySelector('#drill-question-one').firstChild.textContent = `${config.questions[0]} `;
   document.querySelector('#drill-question-two').firstChild.textContent = `${config.questions[1]} `;
   document.querySelector('#drill-insight').textContent = config.insight;
   document.querySelector('#drill-insight-source').textContent = config.insightSource;
-  document.querySelector('#drill-evidence').textContent = config.evidence;
+  document.querySelector('#drill-evidence').textContent = deepest.evidence;
   document.querySelectorAll('[data-drill-chart]').forEach(card => {
     if (!card.classList.contains('chart-card')) return;
     card.classList.toggle('drill-source-selected', card.dataset.drillChart === chartId);
