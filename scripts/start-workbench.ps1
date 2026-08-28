@@ -32,6 +32,8 @@ $env:AGENTBI_DATABASE_URL = 'sqlite:///./data/agentbi.db'
 $env:SUPERSONIC_BASE_URL = 'http://127.0.0.1:9080'
 $env:SUPERSET_BASE_URL = 'http://127.0.0.1:8088'
 $env:SUPERSET_DASHBOARD_PATH = '/superset/dashboard/1/'
+$env:SUPERSET_USER = 'admin'
+$env:SUPERSET_PASSWORD = 'admin'
 $env:AGENTBI_ALLOWED_ORIGINS = "http://127.0.0.1:$Port"
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
 

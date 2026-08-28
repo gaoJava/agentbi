@@ -131,6 +131,23 @@ class DashboardChart(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class SupersetDashboardAsset(Base):
+    """Dashboard metadata synchronized from Superset; no credentials are stored."""
+
+    __tablename__ = "superset_dashboard_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    superset_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    slug: Mapped[str | None] = mapped_column(String(200))
+    url_path: Mapped[str] = mapped_column(String(512))
+    chart_count: Mapped[int] = mapped_column(Integer, default=0)
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+    available: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_home: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class DrilldownDefinition(Base):
     __tablename__ = "drilldown_definitions"
 
@@ -811,6 +828,111 @@ class IdentityRepository:
             "summary": report.summary,
             "evidence_path": report.evidence_path,
             "created_at": report.created_at.isoformat(),
+        }
+
+    def sync_superset_dashboards(
+        self, dashboards: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        """Atomically upsert a bounded Superset dashboard inventory."""
+
+        with Session(self.engine) as db, db.begin():
+            existing = {
+                item.superset_id: item for item in db.scalars(select(SupersetDashboardAsset)).all()
+            }
+            seen: set[int] = set()
+            for payload in dashboards:
+                superset_id = int(payload["superset_id"])
+                seen.add(superset_id)
+                asset = existing.get(superset_id)
+                if asset is None:
+                    asset = SupersetDashboardAsset(id=str(uuid.uuid4()), superset_id=superset_id)
+                    db.add(asset)
+                asset.title = str(payload["title"])[:200]
+                asset.slug = str(payload["slug"])[:200] if payload.get("slug") else None
+                asset.url_path = str(payload["url_path"])[:512]
+                asset.chart_count = max(0, int(payload.get("chart_count", 0)))
+                asset.published = bool(payload.get("published", False))
+                asset.available = True
+                asset.synced_at = utc_now()
+            for superset_id, asset in existing.items():
+                if superset_id not in seen:
+                    asset.available = False
+                    asset.is_home = False
+            db.flush()
+            home = db.scalar(
+                select(SupersetDashboardAsset).where(SupersetDashboardAsset.is_home.is_(True))
+            )
+            if home is None:
+                candidates = db.scalars(
+                    select(SupersetDashboardAsset)
+                    .where(
+                        SupersetDashboardAsset.available.is_(True),
+                        SupersetDashboardAsset.published.is_(True),
+                    )
+                    .order_by(SupersetDashboardAsset.title)
+                ).all()
+                preferred = next(
+                    (item for item in candidates if item.title.lower() == "sales dashboard"),
+                    candidates[0] if candidates else None,
+                )
+                if preferred is not None:
+                    preferred.is_home = True
+            db.flush()
+            return [self._superset_dashboard_payload(item) for item in self._dashboard_assets(db)]
+
+    def list_superset_dashboards(self) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            return [self._superset_dashboard_payload(item) for item in self._dashboard_assets(db)]
+
+    def set_home_superset_dashboard(self, superset_id: int) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            target = db.scalar(
+                select(SupersetDashboardAsset).where(
+                    SupersetDashboardAsset.superset_id == superset_id,
+                    SupersetDashboardAsset.available.is_(True),
+                    SupersetDashboardAsset.published.is_(True),
+                )
+            )
+            if target is None:
+                raise KeyError("dashboard not found")
+            for item in db.scalars(select(SupersetDashboardAsset)).all():
+                item.is_home = item.id == target.id
+            db.flush()
+            return self._superset_dashboard_payload(target)
+
+    def get_home_superset_dashboard(self) -> dict[str, object] | None:
+        with Session(self.engine) as db:
+            asset = db.scalar(
+                select(SupersetDashboardAsset).where(
+                    SupersetDashboardAsset.is_home.is_(True),
+                    SupersetDashboardAsset.available.is_(True),
+                    SupersetDashboardAsset.published.is_(True),
+                )
+            )
+            return self._superset_dashboard_payload(asset) if asset else None
+
+    @staticmethod
+    def _dashboard_assets(db: Session) -> list[SupersetDashboardAsset]:
+        return list(
+            db.scalars(
+                select(SupersetDashboardAsset).order_by(
+                    SupersetDashboardAsset.is_home.desc(), SupersetDashboardAsset.title
+                )
+            ).all()
+        )
+
+    @staticmethod
+    def _superset_dashboard_payload(asset: SupersetDashboardAsset) -> dict[str, object]:
+        return {
+            "superset_id": asset.superset_id,
+            "title": asset.title,
+            "slug": asset.slug,
+            "url_path": asset.url_path,
+            "chart_count": asset.chart_count,
+            "published": asset.published,
+            "available": asset.available,
+            "is_home": asset.is_home,
+            "synced_at": asset.synced_at.isoformat(),
         }
 
     def create_chart_with_drilldown(

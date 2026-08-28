@@ -34,6 +34,8 @@ class Settings:
     database_url: str = "sqlite:///:memory:"
     superset_base_url: str = "http://127.0.0.1:8088"
     superset_dashboard_path: str = "/superset/dashboard/1/"
+    superset_username: str | None = None
+    superset_password: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -81,4 +83,6 @@ class Settings:
             superset_dashboard_path=os.getenv(
                 "SUPERSET_DASHBOARD_PATH", "/superset/dashboard/1/"
             ),
+            superset_username=os.getenv("SUPERSET_USER") or None,
+            superset_password=os.getenv("SUPERSET_PASSWORD") or None,
         )

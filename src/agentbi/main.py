@@ -23,6 +23,7 @@ from agentbi.config import Settings
 from agentbi.models import AnalyzeRequest, AnalyzeResponse
 from agentbi.orchestrator import Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
+from agentbi.superset import SupersetApiError, SupersetClient
 from agentbi.supersonic import SuperSonicClient, UpstreamError
 
 # Reuse Uvicorn's configured handler so audit events are emitted in every launch mode.
@@ -165,6 +166,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     supersonic = SuperSonicClient(settings)
     orchestrator = Orchestrator(settings, supersonic)
     sessions = SessionManager(settings)
+    superset_client = SupersetClient(
+        settings.superset_base_url,
+        settings.superset_username,
+        settings.superset_password,
+        settings.request_timeout_seconds,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -178,6 +185,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url=None,
     )
+    app.state.superset_client = superset_client
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -482,7 +490,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "role": "系统管理员",
                 },
             )
+        for asset in sessions.list_superset_dashboards():
+            if not asset["available"] or not asset["published"]:
+                continue
+            dashboards.insert(0, {
+                "id": f"superset-{asset['superset_id']}",
+                "title": asset["title"],
+                "description": f"Superset 真实仪表盘 · {asset['chart_count']} 个图表",
+                "data_scope": identity.data_scope,
+                "chart_count": asset["chart_count"],
+                "role": "系统管理员" if identity.is_admin else "数据分析师",
+                "source": "superset",
+                "is_home": asset["is_home"],
+            })
         return {"dashboards": dashboards}
+
+    @app.get("/api/v1/admin/superset/dashboards")
+    async def list_superset_dashboards(
+        _: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        return {"dashboards": sessions.list_superset_dashboards()}
+
+    @app.post("/api/v1/admin/superset/dashboards/sync")
+    async def sync_superset_dashboards(
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            inventory = await app.state.superset_client.list_dashboards()
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        dashboards = sessions.sync_superset_dashboards(inventory)
+        sessions.audit(
+            "superset_dashboards_synced", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=str(len(inventory)),
+        )
+        return {"dashboards": dashboards, "count": len(inventory), "message": "Superset 仪表盘同步完成"}
+
+    @app.post("/api/v1/admin/superset/dashboards/{superset_id}/home")
+    async def set_home_superset_dashboard(
+        superset_id: int,
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dashboard = sessions.set_home_superset_dashboard(superset_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="仪表盘不存在或未发布") from exc
+        sessions.audit(
+            "superset_home_dashboard_changed", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=str(superset_id),
+        )
+        return {"dashboard": dashboard}
 
     @app.get("/api/v1/reports")
     async def list_reports(identity: SessionIdentity = current_session) -> dict[str, object]:
@@ -627,7 +688,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, object]:
         if "dashboard:view" not in identity.permissions:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
-        path = settings.superset_dashboard_path.strip()
+        home_dashboard = sessions.get_home_superset_dashboard()
+        path = str(home_dashboard["url_path"] if home_dashboard else settings.superset_dashboard_path).strip()
         if (
             not path.startswith("/superset/dashboard/")
             or path.startswith("//")
@@ -658,6 +720,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "view_url": f"{settings.superset_base_url}{path}{separator}standalone=3",
                 "edit_url": f"{settings.superset_base_url}{path}",
                 "can_edit": "dashboard:manage" in identity.permissions,
+                "dashboard_id": home_dashboard["superset_id"] if home_dashboard else None,
+                "dashboard_title": home_dashboard["title"] if home_dashboard else "Superset 仪表盘",
                 "message": "Superset 分析画布已连接",
             }
         }

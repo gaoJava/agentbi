@@ -16,9 +16,10 @@ let loadedSemanticModels = [];
 let loadedDataSources = [];
 let loadedRoles = [];
 let loadedPermissions = [];
+let loadedSupersetDashboards = [];
 let pendingReport;
 let pendingAsset;
-let dashboardCanvasMode = 'local';
+let dashboardCanvasMode = 'superset';
 let supersetWorkspace;
 let supersetFrameMode = 'view';
 const managedChartKeys = new Set();
@@ -69,7 +70,7 @@ function renderDashboardCanvasMode() {
   document.querySelector('#superset-canvas-tab').classList.toggle('active', superset);
   if (dashboard && currentUser) {
     document.querySelector('#agent-dashboard-name').textContent = superset
-      ? 'Superset 分析画布'
+      ? (supersetWorkspace?.dashboard_title || '经营总览')
       : (admin ? '全域经营治理' : '华东销售经营分析');
   }
 }
@@ -105,6 +106,7 @@ function setSupersetFrameMode(mode) {
     frame.hidden = false;
   };
   frame.src = target;
+  document.querySelector('#agent-dashboard-name').textContent = supersetWorkspace.dashboard_title || '经营总览';
 }
 
 async function loadSupersetWorkspace({ force = false } = {}) {
@@ -160,6 +162,7 @@ function showWorkbench(user) {
   loginView.hidden = true;
   workbenchView.hidden = false;
   switchView('dashboard');
+  selectDashboardCanvas('superset');
   loadManagedCharts();
 }
 
@@ -190,7 +193,10 @@ function switchView(view) {
     renderDashboardCanvasMode();
   }
   if (registry) renderRegistryCenter();
-  if (chartManagement) renderChartManagement();
+  if (chartManagement) {
+    renderChartManagement();
+    loadSupersetDashboardAssets().catch(error => showManagementFeedback(error.message, true));
+  }
   if (document.querySelector(`#${view}-view.module-view`)) loadModuleView(view);
 }
 
@@ -249,7 +255,10 @@ function renderDashboardList(dashboards) {
     const meta = document.createElement('div');
     meta.textContent = `${dashboard.chart_count} 个图表　·　${dashboard.role}`;
     const open = document.createElement('button'); open.type = 'button'; open.textContent = '打开仪表盘';
-    open.addEventListener('click', () => switchView('dashboard'));
+    open.addEventListener('click', () => {
+      switchView('dashboard');
+      selectDashboardCanvas(dashboard.source === 'superset' ? 'superset' : 'local');
+    });
     card.append(header, description, meta, open);
     return card;
   }));
@@ -506,6 +515,43 @@ function renderChartManagement() {
     row.append(action);
     return row;
   }));
+}
+
+function renderSupersetDashboardAssets() {
+  document.querySelector('#superset-dashboard-total').textContent = `${loadedSupersetDashboards.length} 个仪表盘`;
+  const body = document.querySelector('#superset-dashboard-table-body');
+  if (!loadedSupersetDashboards.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td'); cell.colSpan = 6;
+    cell.textContent = '尚未同步，请点击“同步 Superset”获取真实仪表盘。';
+    row.append(cell); body.replaceChildren(row); return;
+  }
+  body.replaceChildren(...loadedSupersetDashboards.map(dashboard => {
+    const row = document.createElement('tr');
+    const values = [dashboard.title, dashboard.superset_id, dashboard.chart_count,
+      dashboard.published && dashboard.available ? '● 已发布' : '● 不可用',
+      dashboard.is_home ? '✓ 当前总览' : '—'];
+    values.forEach(value => { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell); });
+    const action = document.createElement('td'); action.className = 'registry-actions';
+    const home = actionButton('设为经营总览', '', async () => {
+      try {
+        await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}/home`, {
+          method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+        });
+        supersetWorkspace = undefined;
+        await loadSupersetDashboardAssets();
+        showManagementFeedback(`${dashboard.title} 已设为经营总览`);
+      } catch (error) { showManagementFeedback(error.message, true); }
+    });
+    home.disabled = dashboard.is_home || !dashboard.published || !dashboard.available;
+    action.append(home); row.append(action); return row;
+  }));
+}
+
+async function loadSupersetDashboardAssets() {
+  const body = await request('/api/v1/admin/superset/dashboards');
+  loadedSupersetDashboards = body.dashboards || [];
+  renderSupersetDashboardAssets();
 }
 
 function actionButton(label, className, handler) {
@@ -855,6 +901,26 @@ document.querySelector('#edit-dashboard').addEventListener('click', () => {
     return;
   }
   switchView('chart-management');
+});
+
+document.querySelector('#sync-superset-dashboards').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = '正在同步…';
+  try {
+    const body = await request('/api/v1/admin/superset/dashboards/sync', {
+      method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    loadedSupersetDashboards = body.dashboards || [];
+    renderSupersetDashboardAssets();
+    supersetWorkspace = undefined;
+    showManagementFeedback(`已同步 ${body.count} 个 Superset 仪表盘`);
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = '⟳ 同步 Superset';
+  }
 });
 
 document.querySelectorAll('.module-refresh').forEach(button => {

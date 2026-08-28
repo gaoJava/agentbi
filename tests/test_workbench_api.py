@@ -65,6 +65,33 @@ def test_login_rejects_wrong_password() -> None:
         assert response.json()["detail"] == "用户名或密码错误"
 
 
+def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
+    class FakeSupersetClient:
+        async def list_dashboards(self) -> list[dict[str, object]]:
+            return [
+                {"superset_id": 5, "title": "Sales Dashboard", "slug": None,
+                 "url_path": "/superset/dashboard/5/", "chart_count": 10, "published": True},
+                {"superset_id": 7, "title": "Executive Dashboard", "slug": "executive",
+                 "url_path": "/superset/dashboard/7/", "chart_count": 4, "published": True},
+            ]
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        headers = {"X-AgentBI-CSRF": login["csrf_token"]}
+        synced = client.post("/api/v1/admin/superset/dashboards/sync", headers=headers)
+        assert synced.status_code == 200
+        assert synced.json()["count"] == 2
+        assert next(item for item in synced.json()["dashboards"] if item["is_home"])["superset_id"] == 5
+
+        selected = client.post("/api/v1/admin/superset/dashboards/7/home", headers=headers)
+        assert selected.status_code == 200
+        assert selected.json()["dashboard"]["is_home"] is True
+
+
 def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
     unsafe_settings = replace(
         settings(),

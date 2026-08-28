@@ -75,7 +75,7 @@
         <div><h1 id="dashboard-title">华东销售经营分析</h1><p id="dashboard-subtitle">实时洞察关键指标与业务变化</p></div>
         <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button>最近 30 天⌄</button><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">编辑仪表盘</button></div>
       </header>
-      <section class="canvas-toolbar dashboard-section"><div><button id="local-canvas-tab" class="active">经营总览</button><button id="superset-canvas-tab">Superset 画布</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button id="refresh-dashboard">⟳ 刷新</button></div></section>
+      <section class="canvas-toolbar dashboard-section"><div><button id="superset-canvas-tab" class="active">经营总览</button><button id="local-canvas-tab">本地概览（降级）</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button id="refresh-dashboard">⟳ 刷新</button></div></section>
       <section class="dashboard-grid dashboard-section" id="sales-dashboard">
         <article class="metric-card"><div><span>销售收入</span><strong>¥ 28,764.36万</strong><small class="up">↑ 18.6% 较上月</small></div><div class="sparkline"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
         <article class="metric-card"><div><span>毛利润</span><strong>¥ 7,362.85万</strong><small class="up">↑ 14.2% 较上月</small></div><div class="sparkline purple"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
@@ -96,7 +96,7 @@
       <section id="superset-canvas" class="superset-canvas dashboard-section" hidden>
         <header><div><span class="registry-status ready">● 受控嵌入</span><strong>Superset 分析画布</strong><small id="superset-mode-label">查看态 · 隐藏重复导航</small></div><div><button id="superset-view-mode" class="active" type="button">查看态</button><button id="superset-edit-mode" data-permission="dashboard:manage" type="button">编辑态</button></div></header>
         <div id="superset-loading" class="superset-state"><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>正在检查上游服务和仪表盘配置。</p></div>
-        <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">可继续使用本地降级画布。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button">返回经营总览</button></div></div>
+        <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">可继续使用本地降级画布。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button">使用本地降级画布</button></div></div>
         <iframe id="superset-frame" title="Superset 分析画布" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" referrerpolicy="same-origin" hidden></iframe>
       </section>
 
@@ -143,10 +143,14 @@
 
       <section id="chart-management-view" class="registry-view" hidden>
         <header class="registry-header">
-          <div><h1>仪表盘管理</h1><p>创建图表定义，并同步配置受治理的下钻路径</p></div>
-          <div><button class="open-chart-wizard primary-small" type="button">＋ 新增图表</button></div>
+          <div><h1>仪表盘管理</h1><p>同步 Superset 真实仪表盘，并管理 AgentBI 下钻配置</p></div>
+          <div><button id="sync-superset-dashboards" class="primary-small" type="button">⟳ 同步 Superset</button><button class="open-chart-wizard primary-small" type="button">＋ 新增下钻配置</button></div>
         </header>
         <div class="registry-content">
+          <section class="registry-table-card">
+            <header><div><strong>Superset 仪表盘</strong><small>图表类型和数据由 Superset 提供；可选择一个作为经营总览</small></div><span id="superset-dashboard-total" class="registry-version">0 个仪表盘</span></header>
+            <table><thead><tr><th>仪表盘</th><th>Superset ID</th><th>图表数</th><th>发布状态</th><th>经营总览</th><th>操作</th></tr></thead><tbody id="superset-dashboard-table-body"></tbody></table>
+          </section>
           <section class="registry-summary">
             <article><span>内置图表</span><strong>2</strong><small>随演示工作台发布</small></article>
             <article><span>新增图表</span><strong id="dynamic-chart-total">0</strong><small>保存在 AgentBI 数据库</small></article>
@@ -154,7 +158,7 @@
             <article><span>数据连接</span><strong class="healthy-number">正常</strong><small>本地 SQLite 已连接</small></article>
           </section>
           <section class="registry-table-card">
-            <header><div><strong>图表清单</strong><small>新增图表会同时创建第一版下钻配置</small></div><span class="registry-version">数据库管理</span></header>
+            <header><div><strong>AgentBI 下钻配置</strong><small>为图表声明语义模型和维度路径，不替代 Superset 绘图</small></div><span class="registry-version">数据库管理</span></header>
             <table><thead><tr><th>图表</th><th>数据集</th><th>指标</th><th>类型</th><th>下钻维度</th><th>状态</th><th>操作</th></tr></thead><tbody id="managed-chart-table-body"></tbody></table>
           </section>
         </div>

@@ -223,6 +223,20 @@ class SessionManager:
             include_all=include_all,
         )
 
+    def sync_superset_dashboards(
+        self, dashboards: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        return self.repository.sync_superset_dashboards(dashboards)
+
+    def list_superset_dashboards(self) -> list[dict[str, object]]:
+        return self.repository.list_superset_dashboards()
+
+    def set_home_superset_dashboard(self, superset_id: int) -> dict[str, object]:
+        return self.repository.set_home_superset_dashboard(superset_id)
+
+    def get_home_superset_dashboard(self) -> dict[str, object] | None:
+        return self.repository.get_home_superset_dashboard()
+
     def list_charts(self, *, published_only: bool = True) -> list[dict[str, object]]:
         return self.repository.list_charts(published_only=published_only)
 
