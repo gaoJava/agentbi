@@ -294,7 +294,7 @@
       <form id="database-editor-form">
         <div class="wizard-grid">
           <label>连接名称<small>显示在 Superset 与 AgentBI 中</small><input id="database-name" required minlength="2" maxlength="250" placeholder="sales_prod"></label>
-          <label class="wizard-full">SQLAlchemy URI<small>仅提交给 Superset，不在 AgentBI 保存或回显</small><input id="database-uri" type="password" required minlength="8" maxlength="1024" autocomplete="new-password" placeholder="postgresql://user:password@host:5432/database"></label>
+          <label class="wizard-full">SQLAlchemy URI<small id="database-uri-help">仅提交给 Superset，不在 AgentBI 保存或回显</small><input id="database-uri" type="password" required minlength="8" maxlength="1024" autocomplete="new-password" placeholder="postgresql://user:password@host:5432/database"></label>
           <label class="account-state wizard-full"><input id="database-sqllab" type="checkbox" checked> 允许在 Superset SQL Lab 使用</label>
         </div>
         <div id="database-editor-error" class="form-error" hidden></div>
@@ -318,6 +318,9 @@
       <div class="registry-content"><p id="dataset-detail-meta"></p><section class="registry-table-card"><table><thead><tr><th>字段</th><th>类型</th><th>时间列</th><th>可筛选</th></tr></thead><tbody id="dataset-column-table-body"></tbody></table></section></div>
       <footer><button id="cancel-dataset-detail" type="button">关闭</button></footer>
     </section>
+  </div>
+  <div id="dataset-description-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="dataset-description-title"><header><div><span>业务元数据</span><h2 id="dataset-description-title">修改 Dataset 说明</h2></div><button id="close-dataset-description" type="button" aria-label="关闭">×</button></header><form id="dataset-description-form"><div class="wizard-grid"><label class="wizard-full">业务说明<small>用于解释数据口径、范围和负责人</small><textarea id="dataset-description" maxlength="1000"></textarea></label></div><div id="dataset-description-error" class="form-error" hidden></div><footer><button id="cancel-dataset-description" type="button">取消</button><button class="primary-button" type="submit">保存说明</button></footer></form></section>
   </div>
   <div id="delete-asset-confirm" class="modal-backdrop" hidden>
     <section class="delete-confirm" role="dialog" aria-modal="true" aria-labelledby="delete-asset-title">

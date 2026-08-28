@@ -202,6 +202,41 @@ def test_superset_asset_deletion_conflicts_are_safe() -> None:
         assert database.status_code == 409
 
 
+def test_admin_updates_superset_database_and_dataset_metadata() -> None:
+    class FakeSupersetClient:
+        async def update_database(
+            self, database_id: int, database_name: str, sqlalchemy_uri: str,
+            expose_in_sqllab: bool,
+        ) -> dict[str, object]:
+            assert (database_id, database_name, sqlalchemy_uri, expose_in_sqllab) == (
+                1, "sales_prod", "", False,
+            )
+            return {"superset_id": database_id, "name": database_name}
+
+        async def update_dataset(self, dataset_id: int, description: str) -> dict[str, object]:
+            assert (dataset_id, description) == (3, "销售订单事实表")
+            return {"superset_id": dataset_id, "description": description}
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        headers = {"X-AgentBI-CSRF": user["csrf_token"]}
+        database = client.put(
+            "/api/v1/admin/superset/databases/1",
+            json={"database_name": "sales_prod", "sqlalchemy_uri": "", "expose_in_sqllab": False},
+            headers=headers,
+        )
+        dataset = client.put(
+            "/api/v1/admin/superset/datasets/3",
+            json={"description": "销售订单事实表"}, headers=headers,
+        )
+        assert database.status_code == 200
+        assert dataset.status_code == 200
+
+
 def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
     unsafe_settings = replace(
         settings(),

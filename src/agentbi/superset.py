@@ -180,6 +180,24 @@ class SupersetClient:
         body = response.json()
         return {"superset_id": body.get("id"), "name": database_name}
 
+    async def update_database(
+        self, database_id: int, database_name: str, sqlalchemy_uri: str,
+        expose_in_sqllab: bool,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "database_name": database_name.strip(),
+            "expose_in_sqllab": expose_in_sqllab,
+        }
+        if sqlalchemy_uri.strip():
+            self._database_payload(database_name, sqlalchemy_uri)
+            payload["sqlalchemy_uri"] = sqlalchemy_uri.strip()
+        response = await self._authorized_request(
+            "PUT", f"/api/v1/database/{database_id}", json=payload
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("数据库连接修改失败，请检查名称和新连接串")
+        return {"superset_id": database_id, "name": database_name.strip()}
+
     async def create_dataset(
         self, database_id: int, schema_name: str, table_name: str
     ) -> dict[str, object]:
@@ -192,6 +210,14 @@ class SupersetClient:
             raise SupersetApiError("Dataset 创建失败，请检查数据库、Schema、表名或重复配置")
         body = response.json()
         return {"superset_id": body.get("id"), "name": table_name.strip()}
+
+    async def update_dataset(self, dataset_id: int, description: str) -> dict[str, object]:
+        response = await self._authorized_request(
+            "PUT", f"/api/v1/dataset/{dataset_id}", json={"description": description.strip()}
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("Dataset 修改失败")
+        return {"superset_id": dataset_id, "description": description.strip()}
 
     async def get_dataset(self, dataset_id: int) -> dict[str, object]:
         response = await self._authorized_request("GET", f"/api/v1/dataset/{dataset_id}")

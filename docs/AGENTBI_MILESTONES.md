@@ -234,3 +234,4 @@
 | 2026-08-28 | 增加真实数据库连接入口：管理员可在 AgentBI 填写 SQLAlchemy URI、先测试后创建到 Superset；连接密钥只做内存转发、不落 AgentBI 数据库、不回显，写操作受 RBAC、CSRF 与审计保护。 |
 | 2026-08-28 | 数据源治理继续接入 Superset：页面动态展示当前环境实际可用连接器；管理员可选择真实 Database、Schema 和物理表创建 Superset Dataset，成功后立即回读真实资产清单。 |
 | 2026-08-28 | 补齐真实资产查看与安全删除：Dataset 可查看真实字段类型、时间列、筛选能力和指标；删除前调用 Superset 关联检查，已被图表/仪表盘引用的 Dataset 与 Database 均返回 409 并保留资产。 |
+| 2026-08-28 | 补齐真实资产修改：Database 可修改名称和 SQL Lab 权限，连接串留空沿用 Superset 原密钥、填写新值则先测试后替换；Dataset 可维护业务说明，所有变更均经 RBAC、CSRF 和审计。 |

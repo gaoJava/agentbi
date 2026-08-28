@@ -138,6 +138,20 @@ class SupersetDatasetPayload(BaseModel):
     table_name: str = Field(min_length=1, max_length=250)
 
 
+class SupersetDatabaseUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    database_name: str = Field(min_length=2, max_length=250)
+    sqlalchemy_uri: str = Field(default="", max_length=1024)
+    expose_in_sqllab: bool = True
+
+
+class SupersetDatasetUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(default="", max_length=1000)
+
+
 class SemanticModelCreatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
@@ -880,6 +894,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_ip=request.client.host if request.client else "", detail=str(database_id),
         )
         return Response(status_code=204)
+
+    @app.put("/api/v1/admin/superset/databases/{database_id}")
+    async def update_superset_database(
+        database_id: int, payload: SupersetDatabaseUpdatePayload, request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            database = await app.state.superset_client.update_database(
+                database_id, payload.database_name, payload.sqlalchemy_uri,
+                payload.expose_in_sqllab,
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_database_updated", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=payload.database_name,
+        )
+        return {"database": database, "message": "数据库连接已更新"}
+
+    @app.put("/api/v1/admin/superset/datasets/{dataset_id}")
+    async def update_superset_dataset(
+        dataset_id: int, payload: SupersetDatasetUpdatePayload, request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dataset = await app.state.superset_client.update_dataset(
+                dataset_id, payload.description
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_dataset_updated", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=str(dataset_id),
+        )
+        return {"dataset": dataset, "message": "Dataset 说明已更新"}
 
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(

@@ -18,6 +18,8 @@ let loadedRoles = [];
 let loadedPermissions = [];
 let loadedSupersetDashboards = [];
 let loadedSupersetDatabases = [];
+let editingSupersetDatabaseId;
+let editingSupersetDataset;
 let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
@@ -391,6 +393,7 @@ async function loadModuleView(view) {
         database.expose_in_sqllab ? '● 已开放' : '—', database.superset_id,
       ], database => {
         const group = document.createElement('div'); group.className = 'registry-actions';
+        group.append(actionButton('修改', '', () => openDatabaseEditor(database)));
         const remove = actionButton('删除', 'danger-action', () => deleteSupersetAsset('databases', database));
         remove.disabled = database.dataset_count > 0;
         if (remove.disabled) remove.title = `仍有 ${database.dataset_count} 个 Dataset，不能删除`;
@@ -402,6 +405,7 @@ async function loadModuleView(view) {
       ], dataset => {
         const group = document.createElement('div'); group.className = 'registry-actions';
         group.append(actionButton('查看字段', '', () => openDatasetDetail(dataset)));
+        group.append(actionButton('修改说明', '', () => openDatasetDescriptionEditor(dataset)));
         group.append(actionButton('删除', 'danger-action', () => deleteSupersetAsset('datasets', dataset)));
         return group;
       });
@@ -968,6 +972,22 @@ function databasePayload() {
   };
 }
 
+function openDatabaseEditor(database) {
+  editingSupersetDatabaseId = database?.superset_id;
+  document.querySelector('#database-editor-form').reset();
+  document.querySelector('#database-editor-title').textContent = database ? '修改数据库连接' : '新增数据库连接';
+  document.querySelector('#database-name').value = database?.name || '';
+  document.querySelector('#database-sqllab').checked = database?.expose_in_sqllab ?? true;
+  const uri = document.querySelector('#database-uri');
+  uri.required = !database;
+  document.querySelector('#database-uri-help').textContent = database
+    ? '留空则沿用 Superset 中的原连接密钥；填写后将测试并替换'
+    : '仅提交给 Superset，不在 AgentBI 保存或回显';
+  document.querySelector('#database-editor-error').hidden = true;
+  document.querySelector('#database-editor').hidden = false;
+  document.querySelector('#database-name').focus();
+}
+
 async function submitDatabaseAction(path, successMessage) {
   const errorBox = document.querySelector('#database-editor-error');
   errorBox.hidden = true;
@@ -985,22 +1005,36 @@ async function submitDatabaseAction(path, successMessage) {
 }
 
 document.querySelector('#open-database-editor').addEventListener('click', () => {
-  document.querySelector('#database-editor-form').reset();
-  document.querySelector('#database-sqllab').checked = true;
-  document.querySelector('#database-editor').hidden = false;
-  document.querySelector('#database-name').focus();
+  openDatabaseEditor();
 });
 document.querySelector('#close-database-editor').addEventListener('click', closeDatabaseEditor);
 document.querySelector('#cancel-database-editor').addEventListener('click', closeDatabaseEditor);
 document.querySelector('#test-database-connection').addEventListener('click', async () => {
   const form = document.querySelector('#database-editor-form');
   if (!form.reportValidity()) return;
+  if (!document.querySelector('#database-uri').value.trim()) {
+    showManagementFeedback('连接串未变更，将沿用 Superset 中的原密钥'); return;
+  }
   await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功');
 });
 document.querySelector('#database-editor-form').addEventListener('submit', async event => {
   event.preventDefault();
-  if (!await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功')) return;
-  if (!await submitDatabaseAction('/api/v1/admin/superset/databases', '数据库连接创建成功')) return;
+  const payload = databasePayload();
+  if (payload.sqlalchemy_uri &&
+      !await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功')) return;
+  if (!editingSupersetDatabaseId) {
+    if (!await submitDatabaseAction('/api/v1/admin/superset/databases', '数据库连接创建成功')) return;
+  } else {
+    const errorBox = document.querySelector('#database-editor-error');
+    try {
+      const body = await request(`/api/v1/admin/superset/databases/${editingSupersetDatabaseId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+        body: JSON.stringify(payload),
+      });
+      showManagementFeedback(body.message);
+    } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; return; }
+  }
   document.querySelector('#database-uri').value = '';
   closeDatabaseEditor();
   await loadModuleView('data-sources');
@@ -1069,6 +1103,31 @@ async function deleteSupersetAsset(kind, asset) {
 function closeDatasetDetail() { document.querySelector('#dataset-detail').hidden = true; }
 document.querySelector('#close-dataset-detail').addEventListener('click', closeDatasetDetail);
 document.querySelector('#cancel-dataset-detail').addEventListener('click', closeDatasetDetail);
+
+function openDatasetDescriptionEditor(dataset) {
+  editingSupersetDataset = dataset;
+  document.querySelector('#dataset-description-title').textContent = `修改 ${dataset.name} 说明`;
+  document.querySelector('#dataset-description').value = dataset.description || '';
+  document.querySelector('#dataset-description-error').hidden = true;
+  document.querySelector('#dataset-description-editor').hidden = false;
+}
+function closeDatasetDescriptionEditor() {
+  document.querySelector('#dataset-description-editor').hidden = true;
+}
+document.querySelector('#close-dataset-description').addEventListener('click', closeDatasetDescriptionEditor);
+document.querySelector('#cancel-dataset-description').addEventListener('click', closeDatasetDescriptionEditor);
+document.querySelector('#dataset-description-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = document.querySelector('#dataset-description-error'); errorBox.hidden = true;
+  try {
+    const body = await request(`/api/v1/admin/superset/datasets/${editingSupersetDataset.superset_id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({ description: document.querySelector('#dataset-description').value.trim() }),
+    });
+    closeDatasetDescriptionEditor(); showManagementFeedback(body.message); await loadModuleView('data-sources');
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
+});
 
 document.querySelector('#create-report').addEventListener('click', async () => {
   const button = document.querySelector('#create-report');
