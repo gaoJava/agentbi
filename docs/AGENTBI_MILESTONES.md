@@ -232,3 +232,4 @@
 | 2026-08-28 | 打通 Superset 资产闭环：管理员同步 9 个真实仪表盘并选择经营总览，工作台默认加载含 10 个真实图表的 `Sales Dashboard`；普通用户只读、管理员可编辑，本地画布保留为降级方案。 |
 | 2026-08-28 | 数据源页面切换为真实 Superset 资产：通过服务端 API 展示 Database 与 Dataset，实测读取 `examples` PostgreSQL 连接和 21 个数据集；响应不包含连接 URI、用户名或密码，原本地演示登记不再作为主页面数据。 |
 | 2026-08-28 | 增加真实数据库连接入口：管理员可在 AgentBI 填写 SQLAlchemy URI、先测试后创建到 Superset；连接密钥只做内存转发、不落 AgentBI 数据库、不回显，写操作受 RBAC、CSRF 与审计保护。 |
+| 2026-08-28 | 数据源治理继续接入 Superset：页面动态展示当前环境实际可用连接器；管理员可选择真实 Database、Schema 和物理表创建 Superset Dataset，成功后立即回读真实资产清单。 |

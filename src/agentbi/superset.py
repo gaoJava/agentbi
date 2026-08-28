@@ -114,6 +114,8 @@ class SupersetClient:
                 database_response, dataset_response = await self._get_data_assets(
                     client, headers
                 )
+                available_response = await client.get("/api/v1/database/available/", headers=headers)
+                available_response.raise_for_status()
                 databases = [
                     {
                         "superset_id": int(item["id"]),
@@ -144,7 +146,16 @@ class SupersetClient:
                             "explore_url": str(item.get("explore_url") or ""),
                         }
                     )
-                return {"databases": databases, "datasets": datasets}
+                available_engines = [
+                    {
+                        "engine": str(item.get("engine") or ""),
+                        "name": str(item.get("name") or item.get("engine") or ""),
+                        "drivers": list(item.get("available_drivers") or []),
+                        "placeholder": str(item.get("sqlalchemy_uri_placeholder") or ""),
+                    }
+                    for item in available_response.json().get("databases", [])
+                ]
+                return {"databases": databases, "datasets": datasets, "available_engines": available_engines}
         except SupersetApiError:
             raise
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
@@ -168,6 +179,19 @@ class SupersetClient:
             raise SupersetApiError("数据库连接创建失败，名称可能重复或连接参数无效")
         body = response.json()
         return {"superset_id": body.get("id"), "name": database_name}
+
+    async def create_dataset(
+        self, database_id: int, schema_name: str, table_name: str
+    ) -> dict[str, object]:
+        response = await self._authorized_request(
+            "POST", "/api/v1/dataset/",
+            json={"database": database_id, "schema": schema_name.strip() or None,
+                  "table_name": table_name.strip()},
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("Dataset 创建失败，请检查数据库、Schema、表名或重复配置")
+        body = response.json()
+        return {"superset_id": body.get("id"), "name": table_name.strip()}
 
     def _database_payload(self, database_name: str, sqlalchemy_uri: str) -> dict[str, object]:
         parsed = urlsplit(sqlalchemy_uri.strip())

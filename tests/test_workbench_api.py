@@ -152,6 +152,29 @@ def test_database_connection_secret_is_forwarded_but_not_returned() -> None:
         assert "top-secret" not in created.text
 
 
+def test_admin_creates_real_superset_dataset() -> None:
+    class FakeSupersetClient:
+        async def create_dataset(
+            self, database_id: int, schema_name: str, table_name: str
+        ) -> dict[str, object]:
+            assert (database_id, schema_name, table_name) == (1, "public", "sales_orders")
+            return {"superset_id": 88, "name": table_name}
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        response = client.post(
+            "/api/v1/admin/superset/datasets",
+            json={"database_id": 1, "schema_name": "public", "table_name": "sales_orders"},
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+        )
+        assert response.status_code == 201
+        assert response.json()["dataset"]["superset_id"] == 88
+
+
 def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
     unsafe_settings = replace(
         settings(),

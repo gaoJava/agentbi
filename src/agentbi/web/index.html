@@ -180,9 +180,9 @@
       </section>
 
       <section id="data-sources-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>数据源</h1><p>统一管理 Superset 中真实的数据库连接与 Dataset</p></div><div><button id="open-database-editor" class="primary-small" type="button">＋ 新增数据库连接</button><button class="module-refresh" data-module="data-sources" type="button">⟳ 同步 Superset</button></div></header>
+        <header class="registry-header"><div><h1>数据源</h1><p>统一管理 Superset 中真实的数据库连接与 Dataset</p></div><div><button id="open-dataset-editor" type="button">＋ 创建 Dataset</button><button id="open-database-editor" class="primary-small" type="button">＋ 新增数据库连接</button><button class="module-refresh" data-module="data-sources" type="button">⟳ 同步 Superset</button></div></header>
         <div class="registry-content">
-          <aside class="registry-note"><strong>真实数据来源</strong><p>本页直接读取 Superset API，不展示连接 URI、用户名或密码。数据库连接和 Dataset 仍由 Superset 执行，AgentBI 负责统一入口、权限与审计。</p></aside>
+          <aside class="registry-note"><strong>真实数据来源</strong><p>本页直接读取 Superset API，不展示连接 URI、用户名或密码。当前 Superset 可用连接器：<span id="available-engine-list">正在读取…</span></p></aside>
           <section class="registry-summary"><article><span>数据库连接</span><strong id="real-database-total">0</strong><small>来自 Superset</small></article><article><span>真实 Dataset</span><strong id="real-dataset-total">0</strong><small>物理表与虚拟数据集</small></article><article><span>当前引擎</span><strong id="real-database-engines">—</strong><small>不会暴露连接密钥</small></article><article><span>同步状态</span><strong id="real-source-status" class="healthy-number">待同步</strong><small>只读元数据同步</small></article></section>
           <section class="registry-table-card"><header><div><strong>数据库连接</strong><small>Superset Database</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>连接名称</th><th>数据库引擎</th><th>Dataset 数量</th><th>SQL Lab</th><th>Superset ID</th></tr></thead><tbody id="superset-database-table-body"></tbody></table></section>
           <section class="registry-table-card"><header><div><strong>Dataset 清单</strong><small>Superset Dataset</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>Dataset</th><th>所属连接</th><th>Schema</th><th>类型</th><th>Superset ID</th></tr></thead><tbody id="data-source-table-body"></tbody></table></section>
@@ -300,6 +300,16 @@
         <div id="database-editor-error" class="form-error" hidden></div>
         <footer><button id="cancel-database-editor" type="button">取消</button><button id="test-database-connection" type="button">测试连接</button><button class="primary-button" type="submit">测试并保存</button></footer>
       </form>
+    </section>
+  </div>
+  <div id="dataset-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="dataset-editor-title">
+      <header><div><span>真实 Superset Dataset</span><h2 id="dataset-editor-title">从数据库表创建 Dataset</h2></div><button id="close-dataset-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="dataset-editor-form"><div class="wizard-grid">
+        <label>数据库连接<small>来自 Superset Database</small><select id="dataset-database" required></select></label>
+        <label>Schema<small>例如 public，可按数据库留空</small><input id="dataset-schema" maxlength="250" placeholder="public"></label>
+        <label class="wizard-full">表名<small>必须是数据库中已存在且当前账号可访问的表</small><input id="dataset-table" required maxlength="250" placeholder="sales_orders"></label>
+      </div><div id="dataset-editor-error" class="form-error" hidden></div><footer><button id="cancel-dataset-editor" type="button">取消</button><button class="primary-button" type="submit">创建 Dataset</button></footer></form>
     </section>
   </div>
   <div id="delete-asset-confirm" class="modal-backdrop" hidden>

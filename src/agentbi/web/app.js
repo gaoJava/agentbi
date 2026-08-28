@@ -17,6 +17,7 @@ let loadedDataSources = [];
 let loadedRoles = [];
 let loadedPermissions = [];
 let loadedSupersetDashboards = [];
+let loadedSupersetDatabases = [];
 let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
@@ -377,11 +378,14 @@ async function loadModuleView(view) {
       const assets = await request('/api/v1/admin/superset/data-assets');
       loadedDataSources = assets.datasets || [];
       const databases = assets.databases || [];
+      loadedSupersetDatabases = databases;
       document.querySelector('#real-database-total').textContent = String(databases.length);
       document.querySelector('#real-dataset-total').textContent = String(loadedDataSources.length);
       document.querySelector('#real-database-engines').textContent =
         [...new Set(databases.map(database => database.backend))].join('、') || '—';
       document.querySelector('#real-source-status').textContent = '已同步';
+      document.querySelector('#available-engine-list').textContent =
+        (assets.available_engines || []).map(engine => engine.name).join('、') || '未发现可用连接器';
       renderModuleRows('superset-database-table-body', databases, database => [
         database.name, database.backend, database.dataset_count,
         database.expose_in_sqllab ? '● 已开放' : '—', database.superset_id,
@@ -989,6 +993,42 @@ document.querySelector('#database-editor-form').addEventListener('submit', async
   document.querySelector('#database-uri').value = '';
   closeDatabaseEditor();
   await loadModuleView('data-sources');
+});
+
+function closeDatasetEditor() {
+  document.querySelector('#dataset-editor').hidden = true;
+  document.querySelector('#dataset-editor-error').hidden = true;
+}
+
+document.querySelector('#open-dataset-editor').addEventListener('click', () => {
+  const select = document.querySelector('#dataset-database');
+  select.replaceChildren(...loadedSupersetDatabases.map(database => {
+    const option = document.createElement('option');
+    option.value = String(database.superset_id);
+    option.textContent = `${database.name}（${database.backend}）`;
+    return option;
+  }));
+  document.querySelector('#dataset-editor-form').reset();
+  document.querySelector('#dataset-editor-error').hidden = true;
+  document.querySelector('#dataset-editor').hidden = false;
+});
+document.querySelector('#close-dataset-editor').addEventListener('click', closeDatasetEditor);
+document.querySelector('#cancel-dataset-editor').addEventListener('click', closeDatasetEditor);
+document.querySelector('#dataset-editor-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = document.querySelector('#dataset-editor-error'); errorBox.hidden = true;
+  try {
+    const body = await request('/api/v1/admin/superset/datasets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({
+        database_id: Number(document.querySelector('#dataset-database').value),
+        schema_name: document.querySelector('#dataset-schema').value.trim(),
+        table_name: document.querySelector('#dataset-table').value.trim(),
+      }),
+    });
+    closeDatasetEditor(); showManagementFeedback(body.message); await loadModuleView('data-sources');
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
 });
 
 document.querySelector('#create-report').addEventListener('click', async () => {

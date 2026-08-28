@@ -130,6 +130,14 @@ class SupersetDatabasePayload(BaseModel):
     expose_in_sqllab: bool = True
 
 
+class SupersetDatasetPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    database_id: int = Field(gt=0)
+    schema_name: str = Field(default="", max_length=250)
+    table_name: str = Field(min_length=1, max_length=250)
+
+
 class SemanticModelCreatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
@@ -811,6 +819,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_ip=request.client.host if request.client else "", detail=payload.database_name,
         )
         return {"database": database, "message": "数据库连接已保存到 Superset"}
+
+    @app.post("/api/v1/admin/superset/datasets", status_code=status.HTTP_201_CREATED)
+    async def create_superset_dataset(
+        payload: SupersetDatasetPayload,
+        request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dataset = await app.state.superset_client.create_dataset(
+                payload.database_id, payload.schema_name, payload.table_name
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_dataset_created", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"{payload.database_id}:{payload.schema_name}:{payload.table_name}",
+        )
+        return {"dataset": dataset, "message": "Dataset 已创建到 Superset"}
 
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(
