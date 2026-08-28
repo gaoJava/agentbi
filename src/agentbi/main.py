@@ -609,6 +609,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async with httpx.AsyncClient(
                 timeout=min(settings.request_timeout_seconds, 3),
                 follow_redirects=False,
+                # Internal health checks must not be diverted through a developer
+                # machine's HTTP(S)_PROXY settings. The upstream URL comes only
+                # from trusted service configuration, never from the browser.
+                trust_env=False,
             ) as client:
                 response = await client.get(f"{base_url.rstrip('/')}/health")
             if response.status_code < 500:

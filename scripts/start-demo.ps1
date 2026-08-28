@@ -1,15 +1,26 @@
 param(
     [switch]$UseBundledDemoCredentials,
+    [switch]$ReinitializeSuperset,
     [string]$SuperSonicUser = $env:SUPERSONIC_USER,
     [string]$SuperSonicPassword = $env:SUPERSONIC_PASSWORD,
-    [string]$SupersetRoot = 'D:\project\ai-coding\superset-main',
-    [string]$SuperSonicRoot = 'D:\project\ai-coding\supersonic-stable'
+    [string]$SupersetRoot = '',
+    [string]$SuperSonicRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$workspaceRoot = Split-Path -Parent $projectRoot
+if (-not $SupersetRoot) { $SupersetRoot = Join-Path $workspaceRoot 'superset-main' }
+if (-not $SuperSonicRoot) { $SuperSonicRoot = Join-Path $workspaceRoot 'supersonic-stable' }
+if (-not (Test-Path -LiteralPath (Join-Path $SupersetRoot 'docker-compose.yml'))) {
+    throw "Superset source was not found beside AgentBI: $SupersetRoot"
+}
+if (-not (Test-Path -LiteralPath $SuperSonicRoot)) {
+    throw "SuperSonic source was not found beside AgentBI: $SuperSonicRoot"
+}
 $runtimeDir = Join-Path $projectRoot '.runtime'
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+$supersetInitMarker = Join-Path $runtimeDir 'superset.initialized'
 
 function Test-HttpOk {
     param([Parameter(Mandatory)] [string]$Url)
@@ -58,7 +69,7 @@ function Show-DemoUrls {
     Write-Host '  InsightPilot login:  http://127.0.0.1:8090/app'
     Write-Host '  AgentBI API docs:    http://127.0.0.1:8090/docs'
     Write-Host '  SuperSonic backend:  http://127.0.0.1:9080'
-    Write-Host 'Open a Superset dashboard and click “AI 洞察” in the lower-right corner.'
+    Write-Host 'Open a Superset dashboard and use the AI Insight panel in the lower-right corner.'
 }
 
 if (
@@ -96,7 +107,7 @@ if (-not (Test-HttpOk 'http://127.0.0.1:9080/api/auth/user/getCurrentUser')) {
     }
     $java = (Get-Command java -ErrorAction Stop).Source
     $process = Start-Process -FilePath $java `
-        -ArgumentList '-cp', 'conf;lib/*', 'com.tencent.supersonic.StandaloneLauncher' `
+        -ArgumentList '-Dserver.address=127.0.0.1', '-cp', 'conf;lib/*', 'com.tencent.supersonic.StandaloneLauncher' `
         -WorkingDirectory $distributionDir `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $runtimeDir 'supersonic.stdout.log') `
@@ -124,13 +135,17 @@ $env:AGENTBI_API_KEY = if ($env:AGENTBI_API_KEY.Length -ge 32) {
 }
 $env:SUPERSONIC_BASE_URL = 'http://127.0.0.1:9080'
 $env:SUPERSONIC_TOKEN = "Bearer $($login.data)"
-$env:AGENTBI_ALLOWED_ORIGINS = 'http://localhost:8088,http://127.0.0.1:8088'
+$env:SUPERSET_BASE_URL = 'http://127.0.0.1:8088'
+$env:SUPERSET_DASHBOARD_PATH = '/superset/dashboard/1/'
+$env:AGENTBI_DATABASE_URL = 'sqlite:///./data/agentbi.db'
+$env:AGENTBI_SESSION_SECRET = $env:AGENTBI_API_KEY
+$env:AGENTBI_ALLOWED_ORIGINS = 'http://localhost:8088,http://127.0.0.1:8088,http://127.0.0.1:8090'
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
 
 if (-not (Test-HttpOk 'http://127.0.0.1:8090/health')) {
     $python = (Get-Command python -ErrorAction Stop).Source
     $process = Start-Process -FilePath $python `
-        -ArgumentList '-m', 'uvicorn', 'agentbi.main:app', '--host', '0.0.0.0', '--port', '8090' `
+        -ArgumentList '-m', 'uvicorn', 'agentbi.main:app', '--host', '127.0.0.1', '--port', '8090' `
         -WorkingDirectory $projectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $runtimeDir 'agentbi.stdout.log') `
@@ -142,14 +157,26 @@ Wait-HttpOk -Name 'AgentBI Orchestrator' -Url 'http://127.0.0.1:8090/health' -Ti
 
 $env:DOCKER_CONFIG = Join-Path $projectRoot 'deploy\docker-anonymous'
 $env:DOCKER_HOST = 'npipe:////./pipe/dockerDesktopLinuxEngine'
+$env:AGENTBI_PROJECT_ROOT = $projectRoot.Replace('\', '/')
+$env:SUPERSET_PORT = '127.0.0.1:8088'
+$env:CYPRESS_PORT = '127.0.0.1:8081'
 $composeOverride = Join-Path $projectRoot 'deploy\superset\compose.agentbi.yml'
 $composeBase = Join-Path $SupersetRoot 'docker-compose.yml'
-# Start only the services used by the local competition demo. The upstream
-# compose file also defines websocket/workers whose images are unnecessary here
-# and may trigger large network builds after a workspace path migration.
-& docker compose -f $composeBase -f $composeOverride up -d --no-build `
-    db redis superset-init superset-node superset
+# Start only the services used by the local competition demo. Once initialization
+# has succeeded, bypass the upstream init dependency on later runs; otherwise it
+# reinstalls the editable Superset package twice even though the database is ready.
+if ((Test-Path -LiteralPath $supersetInitMarker) -and -not $ReinitializeSuperset) {
+    Write-Host '[AgentBI] Reusing the initialized Superset database.' -ForegroundColor Cyan
+    & docker compose -f $composeBase -f $composeOverride up -d --no-build `
+        db redis superset-node
+    if ($LASTEXITCODE -ne 0) { throw 'Superset dependency startup failed.' }
+    & docker compose -f $composeBase -f $composeOverride up -d --no-build --no-deps superset
+} else {
+    & docker compose -f $composeBase -f $composeOverride up -d --no-build `
+        db redis superset-init superset-node superset
+}
 if ($LASTEXITCODE -ne 0) { throw 'Superset Docker Compose startup failed.' }
 Wait-HttpOk -Name 'Apache Superset' -Url 'http://127.0.0.1:8088/health'
+Set-Content -LiteralPath $supersetInitMarker -Value (Get-Date).ToString('o')
 
 Show-DemoUrls

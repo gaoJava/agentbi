@@ -24,6 +24,13 @@ The local profile listens on port `9080` and uses an in-memory H2 demo database.
 this profile outside a developer workstation: upstream demo seed data contains predictable
 credentials and its authentication token secret falls back to an unsafe default unless overridden.
 
+The complete demo launcher resolves `superset-main` and `supersonic-stable` as sibling directories
+of `agentbi`; `-SupersetRoot` and `-SuperSonicRoot` remain available for nonstandard layouts.
+After a successful first initialization, `.runtime/superset.initialized` enables the fast restart
+path. Pass `-ReinitializeSuperset` only when the Superset database or example data must be rebuilt.
+The launcher binds AgentBI, SuperSonic and the published Superset port to `127.0.0.1`; database
+and Redis ports are also loopback-only. Do not widen these bindings for a competition laptop.
+
 ## 2. Start AgentBI Orchestrator
 
 Obtain a short-lived SuperSonic token through its login endpoint, then set:

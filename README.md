@@ -56,6 +56,13 @@ D:\project\ai-coding\supersonic-stable
 ```
 
 这个开关只适用于本机自带演示数据，会使用 SuperSonic 的 `admin/admin` 演示账户。脚本会为本次启动生成随机 AgentBI 服务密钥，不会把密钥写进仓库。首次启动 Superset 或首次编译镜像可能需要较长时间。
+脚本默认从 `agentbi` 的同级目录查找 `superset-main` 和 `supersonic-stable`，因此项目整体
+移动到其他磁盘或目录后无需修改脚本。首次 Superset 初始化成功后会写入本地运行标记，
+后续启动跳过耗时的重复初始化；需要重建示例数据时传入 `-ReinitializeSuperset`。
+
+比赛提交包必须同时声明这两个运行依赖，但不建议把两个大型上游项目直接复制进 AgentBI
+Git 历史。源码提交采用固定版本的 Git submodule（或随包附带源码归档），离线演示包则附带
+固定版本镜像与 SuperSonic 构建产物。评审机器最终仍只需执行同一条 `start-demo.ps1`。
 
 生产式凭据启动：
 

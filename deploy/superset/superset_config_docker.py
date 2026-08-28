@@ -2,7 +2,10 @@
 
 from copy import deepcopy
 
-from superset.config import TALISMAN_CONFIG as DEFAULT_TALISMAN_CONFIG
+from superset.config import (
+    TALISMAN_CONFIG as DEFAULT_TALISMAN_CONFIG,
+    TALISMAN_DEV_CONFIG as DEFAULT_TALISMAN_DEV_CONFIG,
+)
 
 FEATURE_FLAGS = {
     "ALERT_REPORTS": True,
@@ -14,13 +17,21 @@ FEATURE_FLAGS = {
 # Keep Superset's default CSP and only allow the loopback AgentBI workbench to
 # frame dashboards. Production embedding should use Superset guest tokens and
 # replace these origins with the exact HTTPS application origin.
-TALISMAN_CONFIG = deepcopy(DEFAULT_TALISMAN_CONFIG)
-TALISMAN_CONFIG["frame_options"] = None
-TALISMAN_CONFIG["content_security_policy"]["frame-ancestors"] = [
-    "'self'",
-    "http://127.0.0.1:8090",
-    "http://localhost:8090",
-]
+def agentbi_talisman_config(default: dict) -> dict:
+    """Preserve upstream CSP while allowing only the local AgentBI origin."""
+
+    config = deepcopy(default)
+    config["frame_options"] = None
+    config["content_security_policy"]["frame-ancestors"] = [
+        "'self'",
+        "http://127.0.0.1:8090",
+        "http://localhost:8090",
+    ]
+    return config
+
+
+TALISMAN_CONFIG = agentbi_talisman_config(DEFAULT_TALISMAN_CONFIG)
+TALISMAN_DEV_CONFIG = agentbi_talisman_config(DEFAULT_TALISMAN_DEV_CONFIG)
 
 # Use Simplified Chinese for the competition demo while retaining an English
 # fallback in the profile language selector. Superset's locale key is ``zh``.
