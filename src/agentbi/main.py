@@ -10,6 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -126,8 +127,32 @@ class SupersetDatabasePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     database_name: str = Field(min_length=2, max_length=250)
-    sqlalchemy_uri: str = Field(min_length=8, max_length=1024)
+    connection_mode: Literal["form", "uri"] = "form"
+    engine: Literal["postgresql", "mysql", "doris", "trino", "presto", "druid"] = "postgresql"
+    host: str = Field(default="", max_length=253)
+    port: int | None = Field(default=None, gt=0, le=65535)
+    database: str = Field(default="", max_length=250)
+    username: str = Field(default="", max_length=250)
+    password: str = Field(default="", max_length=512)
+    sqlalchemy_uri: str = Field(default="", max_length=1024)
     expose_in_sqllab: bool = True
+
+    def resolved_uri(self, *, required: bool) -> str:
+        if self.connection_mode == "uri" or (self.sqlalchemy_uri.strip() and not self.host.strip()):
+            uri = self.sqlalchemy_uri.strip()
+        elif not any((self.host, self.database, self.username, self.password, self.port)):
+            uri = ""
+        else:
+            if not self.host.strip() or not self.database.strip() or not self.username.strip() or not self.port:
+                raise ValueError("请完整填写主机、端口、数据库和用户名")
+            scheme = "mysql" if self.engine == "doris" else self.engine
+            credentials = quote(self.username.strip(), safe="")
+            if self.password:
+                credentials += f":{quote(self.password, safe='')}"
+            uri = f"{scheme}://{credentials}@{self.host.strip()}:{self.port}/{quote(self.database.strip(), safe='')}"
+        if required and not uri:
+            raise ValueError("请填写数据库连接信息")
+        return uri
 
 
 class SupersetDatasetPayload(BaseModel):
@@ -138,12 +163,8 @@ class SupersetDatasetPayload(BaseModel):
     table_name: str = Field(min_length=1, max_length=250)
 
 
-class SupersetDatabaseUpdatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    database_name: str = Field(min_length=2, max_length=250)
-    sqlalchemy_uri: str = Field(default="", max_length=1024)
-    expose_in_sqllab: bool = True
+class SupersetDatabaseUpdatePayload(SupersetDatabasePayload):
+    """Connection update; omitted connection fields preserve Superset's secret."""
 
 
 class SupersetDatasetUpdatePayload(BaseModel):
@@ -804,10 +825,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
+            connection_uri = payload.resolved_uri(required=True)
             await app.state.superset_client.test_database_connection(
-                payload.database_name, payload.sqlalchemy_uri
+                payload.database_name, connection_uri
             )
-        except SupersetApiError as exc:
+        except (SupersetApiError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         sessions.audit(
             "superset_database_tested", "success", actor_user_id=identity.subject,
@@ -823,10 +845,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
+            connection_uri = payload.resolved_uri(required=True)
             database = await app.state.superset_client.create_database(
-                payload.database_name, payload.sqlalchemy_uri, payload.expose_in_sqllab
+                payload.database_name, connection_uri, payload.expose_in_sqllab
             )
-        except SupersetApiError as exc:
+        except (SupersetApiError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         sessions.audit(
             "superset_database_created", "success", actor_user_id=identity.subject,
@@ -902,11 +925,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
+            connection_uri = payload.resolved_uri(required=False)
             database = await app.state.superset_client.update_database(
-                database_id, payload.database_name, payload.sqlalchemy_uri,
+                database_id, payload.database_name, connection_uri,
                 payload.expose_in_sqllab,
             )
-        except SupersetApiError as exc:
+        except (SupersetApiError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         sessions.audit(
             "superset_database_updated", "success", actor_user_id=identity.subject,

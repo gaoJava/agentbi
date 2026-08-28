@@ -235,3 +235,4 @@
 | 2026-08-28 | 数据源治理继续接入 Superset：页面动态展示当前环境实际可用连接器；管理员可选择真实 Database、Schema 和物理表创建 Superset Dataset，成功后立即回读真实资产清单。 |
 | 2026-08-28 | 补齐真实资产查看与安全删除：Dataset 可查看真实字段类型、时间列、筛选能力和指标；删除前调用 Superset 关联检查，已被图表/仪表盘引用的 Dataset 与 Database 均返回 409 并保留资产。 |
 | 2026-08-28 | 补齐真实资产修改：Database 可修改名称和 SQL Lab 权限，连接串留空沿用 Superset 原密钥、填写新值则先测试后替换；Dataset 可维护业务说明，所有变更均经 RBAC、CSRF 和审计。 |
+| 2026-08-28 | 数据库连接表单产品化：默认按 PostgreSQL、MySQL、Doris、Trino、Presto、Druid 类型填写主机、端口、库名、账号和密码，服务端进行 URL 安全编码；保留高级 URI 模式，密码仍不落库、不回显。 |

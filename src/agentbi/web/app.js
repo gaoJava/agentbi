@@ -967,6 +967,13 @@ function closeDatabaseEditor() {
 function databasePayload() {
   return {
     database_name: document.querySelector('#database-name').value.trim(),
+    connection_mode: document.querySelector('#database-mode').value,
+    engine: document.querySelector('#database-engine').value,
+    host: document.querySelector('#database-host').value.trim(),
+    port: Number(document.querySelector('#database-port').value) || null,
+    database: document.querySelector('#database-catalog').value.trim(),
+    username: document.querySelector('#database-username').value.trim(),
+    password: document.querySelector('#database-password').value,
     sqlalchemy_uri: document.querySelector('#database-uri').value.trim(),
     expose_in_sqllab: document.querySelector('#database-sqllab').checked,
   };
@@ -978,11 +985,12 @@ function openDatabaseEditor(database) {
   document.querySelector('#database-editor-title').textContent = database ? '修改数据库连接' : '新增数据库连接';
   document.querySelector('#database-name').value = database?.name || '';
   document.querySelector('#database-sqllab').checked = database?.expose_in_sqllab ?? true;
-  const uri = document.querySelector('#database-uri');
-  uri.required = !database;
+  document.querySelector('#database-mode').value = database ? 'uri' : 'form';
+  document.querySelector('#database-engine').value = database?.backend === 'mysql' ? 'mysql' : 'postgresql';
   document.querySelector('#database-uri-help').textContent = database
     ? '留空则沿用 Superset 中的原连接密钥；填写后将测试并替换'
     : '仅提交给 Superset，不在 AgentBI 保存或回显';
+  renderDatabaseConnectionMode();
   document.querySelector('#database-editor-error').hidden = true;
   document.querySelector('#database-editor').hidden = false;
   document.querySelector('#database-name').focus();
@@ -1012,7 +1020,8 @@ document.querySelector('#cancel-database-editor').addEventListener('click', clos
 document.querySelector('#test-database-connection').addEventListener('click', async () => {
   const form = document.querySelector('#database-editor-form');
   if (!form.reportValidity()) return;
-  if (!document.querySelector('#database-uri').value.trim()) {
+  const payload = databasePayload();
+  if (editingSupersetDatabaseId && payload.connection_mode === 'uri' && !payload.sqlalchemy_uri) {
     showManagementFeedback('连接串未变更，将沿用 Superset 中的原密钥'); return;
   }
   await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功');
@@ -1020,7 +1029,8 @@ document.querySelector('#test-database-connection').addEventListener('click', as
 document.querySelector('#database-editor-form').addEventListener('submit', async event => {
   event.preventDefault();
   const payload = databasePayload();
-  if (payload.sqlalchemy_uri &&
+  const hasNewConnection = payload.connection_mode === 'form' || Boolean(payload.sqlalchemy_uri);
+  if (hasNewConnection &&
       !await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功')) return;
   if (!editingSupersetDatabaseId) {
     if (!await submitDatabaseAction('/api/v1/admin/superset/databases', '数据库连接创建成功')) return;
@@ -1038,6 +1048,23 @@ document.querySelector('#database-editor-form').addEventListener('submit', async
   document.querySelector('#database-uri').value = '';
   closeDatabaseEditor();
   await loadModuleView('data-sources');
+});
+
+const databaseDefaultPorts = { postgresql: 5432, mysql: 3306, doris: 9030, trino: 8080, presto: 8080, druid: 8888 };
+function renderDatabaseConnectionMode() {
+  const advanced = document.querySelector('#database-mode').value === 'uri';
+  document.querySelector('#database-form-fields').hidden = advanced;
+  document.querySelector('#database-uri-field').hidden = !advanced;
+  document.querySelector('#database-uri').required = advanced && !editingSupersetDatabaseId;
+  ['database-host', 'database-port', 'database-catalog', 'database-username'].forEach(id => {
+    document.querySelector(`#${id}`).required = !advanced;
+  });
+}
+document.querySelector('#database-mode').addEventListener('change', renderDatabaseConnectionMode);
+document.querySelector('#database-engine').addEventListener('change', event => {
+  const engine = event.currentTarget.value;
+  document.querySelector('#database-port').value = String(databaseDefaultPorts[engine]);
+  document.querySelector('#database-port-help').textContent = `${event.currentTarget.selectedOptions[0].textContent} 默认 ${databaseDefaultPorts[engine]}`;
 });
 
 function closeDatasetEditor() {

@@ -153,6 +153,33 @@ def test_database_connection_secret_is_forwarded_but_not_returned() -> None:
         assert "top-secret" not in created.text
 
 
+def test_structured_database_form_builds_encoded_uri_server_side() -> None:
+    class FakeSupersetClient:
+        received_uri = ""
+
+        async def test_database_connection(self, database_name: str, sqlalchemy_uri: str) -> None:
+            self.received_uri = sqlalchemy_uri
+
+    fake = FakeSupersetClient()
+    app = create_app(settings())
+    app.state.superset_client = fake
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        response = client.post(
+            "/api/v1/admin/superset/databases/test",
+            json={"database_name": "doris_prod", "connection_mode": "form", "engine": "doris",
+                  "host": "10.0.0.8", "port": 9030, "database": "sales warehouse",
+                  "username": "bi_user", "password": "p@ss:word", "sqlalchemy_uri": "",
+                  "expose_in_sqllab": True},
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+        )
+        assert response.status_code == 200
+        assert fake.received_uri == "mysql://bi_user:p%40ss%3Aword@10.0.0.8:9030/sales%20warehouse"
+        assert "p@ss" not in response.text
+
+
 def test_admin_creates_real_superset_dataset() -> None:
     class FakeSupersetClient:
         async def create_dataset(

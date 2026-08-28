@@ -294,7 +294,16 @@
       <form id="database-editor-form">
         <div class="wizard-grid">
           <label>连接名称<small>显示在 Superset 与 AgentBI 中</small><input id="database-name" required minlength="2" maxlength="250" placeholder="sales_prod"></label>
-          <label class="wizard-full">SQLAlchemy URI<small id="database-uri-help">仅提交给 Superset，不在 AgentBI 保存或回显</small><input id="database-uri" type="password" required minlength="8" maxlength="1024" autocomplete="new-password" placeholder="postgresql://user:password@host:5432/database"></label>
+          <label>配置方式<small>推荐使用普通表单</small><select id="database-mode"><option value="form">普通表单</option><option value="uri">高级 URI</option></select></label>
+          <div id="database-form-fields" class="wizard-grid wizard-full">
+            <label>数据源类型<small>Doris 使用 MySQL 协议</small><select id="database-engine"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="doris">Apache Doris</option><option value="trino">Trino</option><option value="presto">Presto</option><option value="druid">Apache Druid</option></select></label>
+            <label>主机地址<small>域名或 IP 地址</small><input id="database-host" maxlength="253" placeholder="192.168.1.20"></label>
+            <label>端口<small id="database-port-help">PostgreSQL 默认 5432</small><input id="database-port" type="number" min="1" max="65535" value="5432"></label>
+            <label>数据库名<small>需要访问的数据库</small><input id="database-catalog" maxlength="250" placeholder="sales"></label>
+            <label>用户名<small>建议使用只读账号</small><input id="database-username" maxlength="250" autocomplete="username"></label>
+            <label>密码<small>仅转交 Superset，不在 AgentBI 保存</small><input id="database-password" type="password" maxlength="512" autocomplete="new-password"></label>
+          </div>
+          <label id="database-uri-field" class="wizard-full" hidden>SQLAlchemy URI<small id="database-uri-help">仅提交给 Superset，不在 AgentBI 保存或回显</small><input id="database-uri" type="password" maxlength="1024" autocomplete="new-password" placeholder="postgresql://user:password@host:5432/database"></label>
           <label class="account-state wizard-full"><input id="database-sqllab" type="checkbox" checked> 允许在 Superset SQL Lab 使用</label>
         </div>
         <div id="database-editor-error" class="form-error" hidden></div>
