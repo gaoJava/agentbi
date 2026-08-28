@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -12,6 +13,10 @@ class SupersetApiError(RuntimeError):
 
 
 class SupersetClient:
+    _ALLOWED_DATABASE_SCHEMES: ClassVar[set[str]] = {
+        "postgresql", "postgresql+psycopg2", "mysql", "mysql+pymysql",
+        "clickhouse", "clickhousedb", "doris", "trino", "mssql", "oracle",
+    }
     def __init__(
         self,
         base_url: str,
@@ -144,6 +149,66 @@ class SupersetClient:
             raise
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise SupersetApiError("Superset 数据源读取失败，请检查服务和同步账号") from exc
+
+    async def test_database_connection(self, database_name: str, sqlalchemy_uri: str) -> None:
+        payload = self._database_payload(database_name, sqlalchemy_uri)
+        response = await self._authorized_request(
+            "POST", "/api/v1/database/test_connection/", json=payload
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("连接测试失败，请检查地址、驱动和账号密码")
+
+    async def create_database(
+        self, database_name: str, sqlalchemy_uri: str, expose_in_sqllab: bool
+    ) -> dict[str, object]:
+        payload = self._database_payload(database_name, sqlalchemy_uri)
+        payload["expose_in_sqllab"] = expose_in_sqllab
+        response = await self._authorized_request("POST", "/api/v1/database/", json=payload)
+        if response.status_code >= 400:
+            raise SupersetApiError("数据库连接创建失败，名称可能重复或连接参数无效")
+        body = response.json()
+        return {"superset_id": body.get("id"), "name": database_name}
+
+    def _database_payload(self, database_name: str, sqlalchemy_uri: str) -> dict[str, object]:
+        parsed = urlsplit(sqlalchemy_uri.strip())
+        if parsed.scheme.lower() not in self._ALLOWED_DATABASE_SCHEMES:
+            raise SupersetApiError("不支持该数据库驱动，请使用 PostgreSQL、MySQL、Doris 等受支持连接")
+        if not parsed.hostname:
+            raise SupersetApiError("数据库连接地址无效")
+        return {
+            "database_name": database_name.strip(),
+            "sqlalchemy_uri": sqlalchemy_uri.strip(),
+            "impersonate_user": False,
+            "server_cert": None,
+            "configuration_method": "sqlalchemy_form",
+        }
+
+    async def _authorized_request(
+        self, method: str, path: str, **kwargs: object
+    ) -> httpx.Response:
+        if not self.username or not self.password:
+            raise SupersetApiError("未配置 Superset 同步账号")
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, timeout=self.timeout_seconds,
+                follow_redirects=False, trust_env=False,
+            ) as client:
+                login = await client.post(
+                    "/api/v1/security/login",
+                    json={"username": self.username, "password": self.password,
+                          "provider": "db", "refresh": True},
+                )
+                login.raise_for_status()
+                token = login.json().get("access_token")
+                if not token:
+                    raise SupersetApiError("Superset 登录响应无效")
+                headers = dict(kwargs.pop("headers", {}) or {})
+                headers["Authorization"] = f"Bearer {token}"
+                return await client.request(method, path, headers=headers, **kwargs)
+        except SupersetApiError:
+            raise
+        except httpx.HTTPError as exc:
+            raise SupersetApiError("Superset 服务当前不可访问") from exc
 
     @staticmethod
     async def _get_data_assets(

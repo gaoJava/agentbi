@@ -117,6 +117,41 @@ def test_admin_reads_real_superset_data_assets_without_secrets() -> None:
         assert "password" not in response.text
 
 
+def test_database_connection_secret_is_forwarded_but_not_returned() -> None:
+    class FakeSupersetClient:
+        received_uri = ""
+
+        async def test_database_connection(self, database_name: str, sqlalchemy_uri: str) -> None:
+            self.received_uri = sqlalchemy_uri
+
+        async def create_database(
+            self, database_name: str, sqlalchemy_uri: str, expose_in_sqllab: bool
+        ) -> dict[str, object]:
+            self.received_uri = sqlalchemy_uri
+            return {"superset_id": 9, "name": database_name}
+
+    fake = FakeSupersetClient()
+    app = create_app(settings())
+    app.state.superset_client = fake
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        payload = {
+            "database_name": "sales_prod",
+            "sqlalchemy_uri": "postgresql://analyst:top-secret@db.local:5432/sales",
+            "expose_in_sqllab": True,
+        }
+        headers = {"X-AgentBI-CSRF": user["csrf_token"]}
+        tested = client.post("/api/v1/admin/superset/databases/test", json=payload, headers=headers)
+        created = client.post("/api/v1/admin/superset/databases", json=payload, headers=headers)
+        assert tested.status_code == 200
+        assert created.status_code == 201
+        assert fake.received_uri == payload["sqlalchemy_uri"]
+        assert "top-secret" not in tested.text
+        assert "top-secret" not in created.text
+
+
 def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
     unsafe_settings = replace(
         settings(),

@@ -940,6 +940,57 @@ document.querySelectorAll('.module-refresh').forEach(button => {
   button.addEventListener('click', () => loadModuleView(button.dataset.module));
 });
 
+function closeDatabaseEditor() {
+  document.querySelector('#database-editor').hidden = true;
+  document.querySelector('#database-editor-error').hidden = true;
+}
+
+function databasePayload() {
+  return {
+    database_name: document.querySelector('#database-name').value.trim(),
+    sqlalchemy_uri: document.querySelector('#database-uri').value.trim(),
+    expose_in_sqllab: document.querySelector('#database-sqllab').checked,
+  };
+}
+
+async function submitDatabaseAction(path, successMessage) {
+  const errorBox = document.querySelector('#database-editor-error');
+  errorBox.hidden = true;
+  try {
+    const body = await request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify(databasePayload()),
+    });
+    showManagementFeedback(body.message || successMessage);
+    return true;
+  } catch (error) {
+    errorBox.textContent = error.message; errorBox.hidden = false; return false;
+  }
+}
+
+document.querySelector('#open-database-editor').addEventListener('click', () => {
+  document.querySelector('#database-editor-form').reset();
+  document.querySelector('#database-sqllab').checked = true;
+  document.querySelector('#database-editor').hidden = false;
+  document.querySelector('#database-name').focus();
+});
+document.querySelector('#close-database-editor').addEventListener('click', closeDatabaseEditor);
+document.querySelector('#cancel-database-editor').addEventListener('click', closeDatabaseEditor);
+document.querySelector('#test-database-connection').addEventListener('click', async () => {
+  const form = document.querySelector('#database-editor-form');
+  if (!form.reportValidity()) return;
+  await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功');
+});
+document.querySelector('#database-editor-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!await submitDatabaseAction('/api/v1/admin/superset/databases/test', '连接测试成功')) return;
+  if (!await submitDatabaseAction('/api/v1/admin/superset/databases', '数据库连接创建成功')) return;
+  document.querySelector('#database-uri').value = '';
+  closeDatabaseEditor();
+  await loadModuleView('data-sources');
+});
+
 document.querySelector('#create-report').addEventListener('click', async () => {
   const button = document.querySelector('#create-report');
   button.disabled = true; button.textContent = '正在生成…';

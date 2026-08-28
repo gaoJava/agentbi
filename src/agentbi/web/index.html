@@ -180,7 +180,7 @@
       </section>
 
       <section id="data-sources-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>数据源</h1><p>统一查看 Superset 中真实的数据库连接与 Dataset</p></div><button class="module-refresh primary-small" data-module="data-sources" type="button">⟳ 同步 Superset</button></header>
+        <header class="registry-header"><div><h1>数据源</h1><p>统一管理 Superset 中真实的数据库连接与 Dataset</p></div><div><button id="open-database-editor" class="primary-small" type="button">＋ 新增数据库连接</button><button class="module-refresh" data-module="data-sources" type="button">⟳ 同步 Superset</button></div></header>
         <div class="registry-content">
           <aside class="registry-note"><strong>真实数据来源</strong><p>本页直接读取 Superset API，不展示连接 URI、用户名或密码。数据库连接和 Dataset 仍由 Superset 执行，AgentBI 负责统一入口、权限与审计。</p></aside>
           <section class="registry-summary"><article><span>数据库连接</span><strong id="real-database-total">0</strong><small>来自 Superset</small></article><article><span>真实 Dataset</span><strong id="real-dataset-total">0</strong><small>物理表与虚拟数据集</small></article><article><span>当前引擎</span><strong id="real-database-engines">—</strong><small>不会暴露连接密钥</small></article><article><span>同步状态</span><strong id="real-source-status" class="healthy-number">待同步</strong><small>只读元数据同步</small></article></section>
@@ -285,6 +285,20 @@
         </div>
         <div id="asset-editor-error" class="form-error" hidden></div>
         <footer><button id="cancel-asset-editor" type="button">取消</button><button class="primary-button" type="submit">保存资产</button></footer>
+      </form>
+    </section>
+  </div>
+  <div id="database-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="database-editor-title">
+      <header><div><span>真实 Superset Database</span><h2 id="database-editor-title">新增数据库连接</h2></div><button id="close-database-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="database-editor-form">
+        <div class="wizard-grid">
+          <label>连接名称<small>显示在 Superset 与 AgentBI 中</small><input id="database-name" required minlength="2" maxlength="250" placeholder="sales_prod"></label>
+          <label class="wizard-full">SQLAlchemy URI<small>仅提交给 Superset，不在 AgentBI 保存或回显</small><input id="database-uri" type="password" required minlength="8" maxlength="1024" autocomplete="new-password" placeholder="postgresql://user:password@host:5432/database"></label>
+          <label class="account-state wizard-full"><input id="database-sqllab" type="checkbox" checked> 允许在 Superset SQL Lab 使用</label>
+        </div>
+        <div id="database-editor-error" class="form-error" hidden></div>
+        <footer><button id="cancel-database-editor" type="button">取消</button><button id="test-database-connection" type="button">测试连接</button><button class="primary-button" type="submit">测试并保存</button></footer>
       </form>
     </section>
   </div>

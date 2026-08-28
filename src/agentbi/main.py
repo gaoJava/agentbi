@@ -120,6 +120,16 @@ class DataSourceUpdatePayload(BaseModel):
     status: Literal["active", "offline"]
 
 
+class SupersetDatabasePayload(BaseModel):
+    """A connection secret used once and forwarded only to Superset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    database_name: str = Field(min_length=2, max_length=250)
+    sqlalchemy_uri: str = Field(min_length=8, max_length=1024)
+    expose_in_sqllab: bool = True
+
+
 class SemanticModelCreatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
@@ -763,6 +773,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await app.state.superset_client.list_data_assets()
         except SupersetApiError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/superset/databases/test")
+    async def test_superset_database(
+        payload: SupersetDatabasePayload,
+        request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            await app.state.superset_client.test_database_connection(
+                payload.database_name, payload.sqlalchemy_uri
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_database_tested", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=payload.database_name,
+        )
+        return {"message": "数据库连接测试成功"}
+
+    @app.post("/api/v1/admin/superset/databases", status_code=status.HTTP_201_CREATED)
+    async def create_superset_database(
+        payload: SupersetDatabasePayload,
+        request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            database = await app.state.superset_client.create_database(
+                payload.database_name, payload.sqlalchemy_uri, payload.expose_in_sqllab
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_database_created", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=payload.database_name,
+        )
+        return {"database": database, "message": "数据库连接已保存到 Superset"}
 
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(
