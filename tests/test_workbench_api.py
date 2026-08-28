@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from agentbi.config import Settings
 from agentbi.main import create_app
+from agentbi.superset import SupersetApiError
 
 
 def settings() -> Settings:
@@ -173,6 +174,32 @@ def test_admin_creates_real_superset_dataset() -> None:
         )
         assert response.status_code == 201
         assert response.json()["dataset"]["superset_id"] == 88
+
+
+def test_superset_asset_deletion_conflicts_are_safe() -> None:
+    class FakeSupersetClient:
+        async def get_dataset(self, dataset_id: int) -> dict[str, object]:
+            return {"superset_id": dataset_id, "name": "orders", "schema": "public",
+                    "database_name": "sales", "columns": [], "metrics": []}
+
+        async def delete_dataset(self, dataset_id: int) -> None:
+            raise SupersetApiError("Dataset 正被 3 个图表引用，不能删除")
+
+        async def delete_database(self, database_id: int) -> None:
+            raise SupersetApiError("数据库仍关联 3 个图表和 1 个仪表盘，不能删除")
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        headers = {"X-AgentBI-CSRF": user["csrf_token"]}
+        assert client.get("/api/v1/admin/superset/datasets/3").status_code == 200
+        dataset = client.delete("/api/v1/admin/superset/datasets/3", headers=headers)
+        database = client.delete("/api/v1/admin/superset/databases/1", headers=headers)
+        assert dataset.status_code == 409
+        assert database.status_code == 409
 
 
 def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:

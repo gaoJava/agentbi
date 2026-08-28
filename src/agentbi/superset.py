@@ -193,6 +193,52 @@ class SupersetClient:
         body = response.json()
         return {"superset_id": body.get("id"), "name": table_name.strip()}
 
+    async def get_dataset(self, dataset_id: int) -> dict[str, object]:
+        response = await self._authorized_request("GET", f"/api/v1/dataset/{dataset_id}")
+        if response.status_code >= 400:
+            raise SupersetApiError("Dataset 不存在或无权访问")
+        item = response.json().get("result", {})
+        return {
+            "superset_id": dataset_id,
+            "name": str(item.get("table_name") or item.get("datasource_name") or dataset_id),
+            "schema": str(item.get("schema") or "—"),
+            "database_name": str((item.get("database") or {}).get("database_name") or "—"),
+            "columns": [
+                {"name": str(column.get("column_name") or ""),
+                 "type": str(column.get("type") or "未知"),
+                 "is_time": bool(column.get("is_dttm", False)),
+                 "filterable": bool(column.get("filterable", False))}
+                for column in (item.get("columns") or [])[:500]
+            ],
+            "metrics": [str(metric.get("metric_name") or "") for metric in (item.get("metrics") or [])[:200]],
+        }
+
+    async def delete_dataset(self, dataset_id: int) -> None:
+        related = await self._authorized_request("GET", f"/api/v1/dataset/{dataset_id}/related_objects")
+        if related.status_code >= 400:
+            raise SupersetApiError("无法检查 Dataset 引用关系")
+        chart_count = int((related.json().get("charts") or {}).get("count", 0))
+        if chart_count:
+            raise SupersetApiError(f"Dataset 正被 {chart_count} 个图表引用，不能删除")
+        response = await self._authorized_request("DELETE", f"/api/v1/dataset/{dataset_id}")
+        if response.status_code >= 400:
+            raise SupersetApiError("Dataset 删除失败")
+
+    async def delete_database(self, database_id: int) -> None:
+        related = await self._authorized_request("GET", f"/api/v1/database/{database_id}/related_objects/")
+        if related.status_code >= 400:
+            raise SupersetApiError("无法检查数据库连接引用关系")
+        body = related.json()
+        counts = {name: int((body.get(name) or {}).get("count", 0))
+                  for name in ("charts", "dashboards", "sqllab_tab_states")}
+        if any(counts.values()):
+            raise SupersetApiError(
+                f"数据库仍关联 {counts['charts']} 个图表和 {counts['dashboards']} 个仪表盘，不能删除"
+            )
+        response = await self._authorized_request("DELETE", f"/api/v1/database/{database_id}")
+        if response.status_code >= 400:
+            raise SupersetApiError("数据库连接删除失败")
+
     def _database_payload(self, database_name: str, sqlalchemy_uri: str) -> dict[str, object]:
         parsed = urlsplit(sqlalchemy_uri.strip())
         if parsed.scheme.lower() not in self._ALLOWED_DATABASE_SCHEMES:

@@ -233,3 +233,4 @@
 | 2026-08-28 | 数据源页面切换为真实 Superset 资产：通过服务端 API 展示 Database 与 Dataset，实测读取 `examples` PostgreSQL 连接和 21 个数据集；响应不包含连接 URI、用户名或密码，原本地演示登记不再作为主页面数据。 |
 | 2026-08-28 | 增加真实数据库连接入口：管理员可在 AgentBI 填写 SQLAlchemy URI、先测试后创建到 Superset；连接密钥只做内存转发、不落 AgentBI 数据库、不回显，写操作受 RBAC、CSRF 与审计保护。 |
 | 2026-08-28 | 数据源治理继续接入 Superset：页面动态展示当前环境实际可用连接器；管理员可选择真实 Database、Schema 和物理表创建 Superset Dataset，成功后立即回读真实资产清单。 |
+| 2026-08-28 | 补齐真实资产查看与安全删除：Dataset 可查看真实字段类型、时间列、筛选能力和指标；删除前调用 Superset 关联检查，已被图表/仪表盘引用的 Dataset 与 Database 均返回 409 并保留资产。 |

@@ -184,8 +184,8 @@
         <div class="registry-content">
           <aside class="registry-note"><strong>真实数据来源</strong><p>本页直接读取 Superset API，不展示连接 URI、用户名或密码。当前 Superset 可用连接器：<span id="available-engine-list">正在读取…</span></p></aside>
           <section class="registry-summary"><article><span>数据库连接</span><strong id="real-database-total">0</strong><small>来自 Superset</small></article><article><span>真实 Dataset</span><strong id="real-dataset-total">0</strong><small>物理表与虚拟数据集</small></article><article><span>当前引擎</span><strong id="real-database-engines">—</strong><small>不会暴露连接密钥</small></article><article><span>同步状态</span><strong id="real-source-status" class="healthy-number">待同步</strong><small>只读元数据同步</small></article></section>
-          <section class="registry-table-card"><header><div><strong>数据库连接</strong><small>Superset Database</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>连接名称</th><th>数据库引擎</th><th>Dataset 数量</th><th>SQL Lab</th><th>Superset ID</th></tr></thead><tbody id="superset-database-table-body"></tbody></table></section>
-          <section class="registry-table-card"><header><div><strong>Dataset 清单</strong><small>Superset Dataset</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>Dataset</th><th>所属连接</th><th>Schema</th><th>类型</th><th>Superset ID</th></tr></thead><tbody id="data-source-table-body"></tbody></table></section>
+          <section class="registry-table-card"><header><div><strong>数据库连接</strong><small>存在 Dataset、图表或仪表盘引用时禁止删除</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>连接名称</th><th>数据库引擎</th><th>Dataset 数量</th><th>SQL Lab</th><th>Superset ID</th><th>操作</th></tr></thead><tbody id="superset-database-table-body"></tbody></table></section>
+          <section class="registry-table-card"><header><div><strong>Dataset 清单</strong><small>可查看真实字段；存在图表引用时禁止删除</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>Dataset</th><th>所属连接</th><th>Schema</th><th>类型</th><th>Superset ID</th><th>操作</th></tr></thead><tbody id="data-source-table-body"></tbody></table></section>
         </div>
       </section>
 
@@ -310,6 +310,13 @@
         <label>Schema<small>例如 public，可按数据库留空</small><input id="dataset-schema" maxlength="250" placeholder="public"></label>
         <label class="wizard-full">表名<small>必须是数据库中已存在且当前账号可访问的表</small><input id="dataset-table" required maxlength="250" placeholder="sales_orders"></label>
       </div><div id="dataset-editor-error" class="form-error" hidden></div><footer><button id="cancel-dataset-editor" type="button">取消</button><button class="primary-button" type="submit">创建 Dataset</button></footer></form>
+    </section>
+  </div>
+  <div id="dataset-detail" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="dataset-detail-title">
+      <header><div><span>Superset Dataset 元数据</span><h2 id="dataset-detail-title">Dataset 字段</h2></div><button id="close-dataset-detail" type="button" aria-label="关闭">×</button></header>
+      <div class="registry-content"><p id="dataset-detail-meta"></p><section class="registry-table-card"><table><thead><tr><th>字段</th><th>类型</th><th>时间列</th><th>可筛选</th></tr></thead><tbody id="dataset-column-table-body"></tbody></table></section></div>
+      <footer><button id="cancel-dataset-detail" type="button">关闭</button></footer>
     </section>
   </div>
   <div id="delete-asset-confirm" class="modal-backdrop" hidden>

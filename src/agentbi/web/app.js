@@ -389,11 +389,22 @@ async function loadModuleView(view) {
       renderModuleRows('superset-database-table-body', databases, database => [
         database.name, database.backend, database.dataset_count,
         database.expose_in_sqllab ? '● 已开放' : '—', database.superset_id,
-      ]);
+      ], database => {
+        const group = document.createElement('div'); group.className = 'registry-actions';
+        const remove = actionButton('删除', 'danger-action', () => deleteSupersetAsset('databases', database));
+        remove.disabled = database.dataset_count > 0;
+        if (remove.disabled) remove.title = `仍有 ${database.dataset_count} 个 Dataset，不能删除`;
+        group.append(remove); return group;
+      });
       renderModuleRows('data-source-table-body', loadedDataSources, dataset => [
         dataset.name, dataset.database_name, dataset.schema,
         dataset.kind === 'virtual' ? '虚拟数据集' : '物理表', dataset.superset_id,
-      ]);
+      ], dataset => {
+        const group = document.createElement('div'); group.className = 'registry-actions';
+        group.append(actionButton('查看字段', '', () => openDatasetDetail(dataset)));
+        group.append(actionButton('删除', 'danger-action', () => deleteSupersetAsset('datasets', dataset)));
+        return group;
+      });
     } else if (view === 'user-roles') {
       const [userBody, roleBody, permissionBody] = await Promise.all([
         request('/api/v1/admin/users'), request('/api/v1/admin/roles'),
@@ -1030,6 +1041,34 @@ document.querySelector('#dataset-editor-form').addEventListener('submit', async 
     closeDatasetEditor(); showManagementFeedback(body.message); await loadModuleView('data-sources');
   } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
 });
+
+async function openDatasetDetail(dataset) {
+  try {
+    const detail = (await request(`/api/v1/admin/superset/datasets/${dataset.superset_id}`)).dataset;
+    document.querySelector('#dataset-detail-title').textContent = detail.name;
+    document.querySelector('#dataset-detail-meta').textContent =
+      `${detail.database_name} · ${detail.schema} · ${detail.columns.length} 个字段 · 指标：${detail.metrics.join('、') || '无'}`;
+    renderModuleRows('dataset-column-table-body', detail.columns, column => [
+      column.name, column.type, column.is_time ? '是' : '否', column.filterable ? '是' : '否',
+    ]);
+    document.querySelector('#dataset-detail').hidden = false;
+  } catch (error) { showManagementFeedback(error.message, true); }
+}
+
+async function deleteSupersetAsset(kind, asset) {
+  const label = kind === 'databases' ? '数据库连接' : 'Dataset';
+  if (!window.confirm(`确认删除${label}“${asset.name}”？系统会先检查 Superset 引用关系。`)) return;
+  try {
+    await request(`/api/v1/admin/superset/${kind}/${asset.superset_id}`, {
+      method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    showManagementFeedback(`${label}已删除`); await loadModuleView('data-sources');
+  } catch (error) { showManagementFeedback(error.message, true); }
+}
+
+function closeDatasetDetail() { document.querySelector('#dataset-detail').hidden = true; }
+document.querySelector('#close-dataset-detail').addEventListener('click', closeDatasetDetail);
+document.querySelector('#cancel-dataset-detail').addEventListener('click', closeDatasetDetail);
 
 document.querySelector('#create-report').addEventListener('click', async () => {
   const button = document.querySelector('#create-report');

@@ -840,6 +840,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"dataset": dataset, "message": "Dataset 已创建到 Superset"}
 
+    @app.get("/api/v1/admin/superset/datasets/{dataset_id}")
+    async def get_superset_dataset(
+        dataset_id: int, _: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        try:
+            return {"dataset": await app.state.superset_client.get_dataset(dataset_id)}
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @app.delete("/api/v1/admin/superset/datasets/{dataset_id}", status_code=204)
+    async def delete_superset_dataset(
+        dataset_id: int, request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            await app.state.superset_client.delete_dataset(dataset_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_dataset_deleted", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=str(dataset_id),
+        )
+        return Response(status_code=204)
+
+    @app.delete("/api/v1/admin/superset/databases/{database_id}", status_code=204)
+    async def delete_superset_database(
+        database_id: int, request: Request,
+        identity: SessionIdentity = datasource_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            await app.state.superset_client.delete_database(database_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        sessions.audit(
+            "superset_database_deleted", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=str(database_id),
+        )
+        return Response(status_code=204)
+
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(
         payload: DataSourceCreatePayload, request: Request,
