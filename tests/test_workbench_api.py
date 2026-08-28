@@ -92,6 +92,31 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
         assert selected.json()["dashboard"]["is_home"] is True
 
 
+def test_admin_reads_real_superset_data_assets_without_secrets() -> None:
+    class FakeSupersetClient:
+        async def list_data_assets(self) -> dict[str, list[dict[str, object]]]:
+            return {
+                "databases": [{"superset_id": 1, "name": "examples", "backend": "postgresql",
+                               "expose_in_sqllab": True, "allow_file_upload": True,
+                               "dataset_count": 1}],
+                "datasets": [{"superset_id": 20, "name": "video_game_sales",
+                              "database_id": 1, "database_name": "examples", "schema": "public",
+                              "kind": "physical", "description": "", "explore_url": "/explore/"}],
+            }
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    with TestClient(app) as client:
+        client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
+        response = client.get("/api/v1/admin/superset/data-assets")
+        assert response.status_code == 200
+        assert response.json()["databases"][0]["name"] == "examples"
+        assert response.json()["datasets"][0]["name"] == "video_game_sales"
+        assert "password" not in response.text
+
+
 def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
     unsafe_settings = replace(
         settings(),

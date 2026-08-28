@@ -301,7 +301,9 @@ function renderModuleRows(bodyId, items, valuesFor, actionFor) {
     valuesFor(item).forEach(value => {
       const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell);
     });
-    const action = document.createElement('td'); action.append(actionFor(item)); row.append(action);
+    if (actionFor) {
+      const action = document.createElement('td'); action.append(actionFor(item)); row.append(action);
+    }
     return row;
   }));
 }
@@ -372,11 +374,22 @@ async function loadModuleView(view) {
         model.status === 'active' ? '● 已启用' : '● 已下线',
       ], model => assetActionGroup('semantic-models', model));
     } else if (view === 'data-sources') {
-      loadedDataSources = (await request('/api/v1/admin/data-sources')).sources || [];
-      renderModuleRows('data-source-table-body', loadedDataSources, source => [
-        source.name, source.type, source.charts,
-        source.status === 'active' ? '● 已启用' : '● 已下线',
-      ], source => assetActionGroup('data-sources', source));
+      const assets = await request('/api/v1/admin/superset/data-assets');
+      loadedDataSources = assets.datasets || [];
+      const databases = assets.databases || [];
+      document.querySelector('#real-database-total').textContent = String(databases.length);
+      document.querySelector('#real-dataset-total').textContent = String(loadedDataSources.length);
+      document.querySelector('#real-database-engines').textContent =
+        [...new Set(databases.map(database => database.backend))].join('、') || '—';
+      document.querySelector('#real-source-status').textContent = '已同步';
+      renderModuleRows('superset-database-table-body', databases, database => [
+        database.name, database.backend, database.dataset_count,
+        database.expose_in_sqllab ? '● 已开放' : '—', database.superset_id,
+      ]);
+      renderModuleRows('data-source-table-body', loadedDataSources, dataset => [
+        dataset.name, dataset.database_name, dataset.schema,
+        dataset.kind === 'virtual' ? '虚拟数据集' : '物理表', dataset.superset_id,
+      ]);
     } else if (view === 'user-roles') {
       const [userBody, roleBody, permissionBody] = await Promise.all([
         request('/api/v1/admin/users'), request('/api/v1/admin/roles'),

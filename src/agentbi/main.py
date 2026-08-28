@@ -755,6 +755,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_data_sources(_: SessionIdentity = datasource_session) -> dict[str, object]:
         return {"sources": sessions.list_data_sources()}
 
+    @app.get("/api/v1/admin/superset/data-assets")
+    async def list_superset_data_assets(
+        _: SessionIdentity = datasource_session,
+    ) -> dict[str, object]:
+        try:
+            return await app.state.superset_client.list_data_assets()
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(
         payload: DataSourceCreatePayload, request: Request,
