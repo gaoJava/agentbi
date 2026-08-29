@@ -46,6 +46,14 @@ namespace AgentBI {
     databases: SupersetDatabaseAsset[]; datasets: SupersetDatasetAsset[];
     available_engines: SupersetEngineAsset[];
   }
+  export interface SavedAnalysisReport {
+    id: string; title: string; dashboard_name: string; data_scope: string;
+    summary: string; evidence_path: string; created_at: string;
+  }
+  export interface AuditEvent {
+    id: string; event_type: string; outcome: string; actor: string;
+    source_ip: string; detail: string; created_at: string;
+  }
 
   export interface SessionUser {
     subject: string;
@@ -322,6 +330,25 @@ namespace AgentBI {
       placeholder: typeof item.placeholder === 'string' ? item.placeholder : '',
     }));
     return { databases, datasets, available_engines };
+  }
+
+  export function parseSavedReports(value: unknown): SavedAnalysisReport[] {
+    return objectList(value, '报告').map(raw => ({
+      id: requiredText(raw, 'id'), title: requiredText(raw, 'title'),
+      dashboard_name: requiredText(raw, 'dashboard_name'), data_scope: requiredText(raw, 'data_scope'),
+      summary: requiredText(raw, 'summary'), evidence_path: requiredText(raw, 'evidence_path'),
+      created_at: requiredText(raw, 'created_at'),
+    }));
+  }
+
+  export function parseAuditEvents(value: unknown): AuditEvent[] {
+    return objectList(value, '审计事件').map(raw => ({
+      id: requiredText(raw, 'id'), event_type: requiredText(raw, 'event_type'),
+      outcome: requiredText(raw, 'outcome'), actor: requiredText(raw, 'actor'),
+      source_ip: typeof raw.source_ip === 'string' ? raw.source_ip : '',
+      detail: typeof raw.detail === 'string' ? raw.detail : '',
+      created_at: requiredText(raw, 'created_at'),
+    }));
   }
 
   function parseManagedChart(value: unknown): ManagedChart {

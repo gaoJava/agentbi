@@ -214,6 +214,25 @@ var AgentBI;
         return { databases, datasets, available_engines };
     }
     AgentBI.parseSupersetDataAssets = parseSupersetDataAssets;
+    function parseSavedReports(value) {
+        return objectList(value, '报告').map(raw => ({
+            id: requiredText(raw, 'id'), title: requiredText(raw, 'title'),
+            dashboard_name: requiredText(raw, 'dashboard_name'), data_scope: requiredText(raw, 'data_scope'),
+            summary: requiredText(raw, 'summary'), evidence_path: requiredText(raw, 'evidence_path'),
+            created_at: requiredText(raw, 'created_at'),
+        }));
+    }
+    AgentBI.parseSavedReports = parseSavedReports;
+    function parseAuditEvents(value) {
+        return objectList(value, '审计事件').map(raw => ({
+            id: requiredText(raw, 'id'), event_type: requiredText(raw, 'event_type'),
+            outcome: requiredText(raw, 'outcome'), actor: requiredText(raw, 'actor'),
+            source_ip: typeof raw.source_ip === 'string' ? raw.source_ip : '',
+            detail: typeof raw.detail === 'string' ? raw.detail : '',
+            created_at: requiredText(raw, 'created_at'),
+        }));
+    }
+    AgentBI.parseAuditEvents = parseAuditEvents;
     function parseManagedChart(value) {
         if (typeof value !== 'object' || value === null)
             throw new Error('图表配置响应无效');

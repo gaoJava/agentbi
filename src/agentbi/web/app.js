@@ -370,7 +370,9 @@ async function loadModuleView(view) {
     if (view === 'my-dashboards') {
       renderDashboardList((await request('/api/v1/dashboards')).dashboards || []);
     } else if (view === 'reports') {
-      renderReportList((await request('/api/v1/reports')).reports || []);
+      renderReportList(window.AgentBI.parseSavedReports(
+        (await request('/api/v1/reports')).reports,
+      ));
     } else if (view === 'semantic-models') {
       loadedSemanticModels = window.AgentBI.parseSemanticModels(
         (await request('/api/v1/admin/semantic-models')).models,
@@ -431,7 +433,9 @@ async function loadModuleView(view) {
         role.builtin ? '内置角色' : '自定义角色',
       ], role => roleActionGroup(role));
     } else if (view === 'audit-security') {
-      const events = (await request('/api/v1/admin/audit-events')).events || [];
+      const events = window.AgentBI.parseAuditEvents(
+        (await request('/api/v1/admin/audit-events')).events,
+      );
       const eventLabels = {
         login: '用户登录', logout: '用户退出', chart_created: '创建图表', chart_updated: '修改图表',
         chart_published: '上线图表', chart_offlined: '下线图表', chart_deleted: '删除图表',
