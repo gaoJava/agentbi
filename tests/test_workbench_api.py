@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260829.8" in shell.text
+        assert "app.js?v=20260829.9" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -154,6 +154,33 @@ def test_workbench_analysis_rejects_browser_supplied_actor() -> None:
             },
         )
         assert response.status_code == 422
+
+
+def test_user_reads_sanitized_live_supersonic_models() -> None:
+    class FakeSuperSonicClient:
+        async def list_semantic_models(self):
+            return [{
+                "id": 1, "key": "supersonic:1", "name": "用户部门",
+                "biz_name": "user_department", "description": "用户部门信息",
+                "domain_id": 1, "domain_name": "超音数", "status": "active",
+            }]
+
+        async def close(self) -> None:
+            return None
+
+    app = create_app(settings())
+    app.state.supersonic_client = FakeSuperSonicClient()
+    with TestClient(app) as client:
+        assert client.get("/api/v1/supersonic/models").status_code == 401
+        client.post(
+            "/api/v1/auth/login",
+            json={"username": "user", "password": "user-password"},
+        )
+        response = client.get("/api/v1/supersonic/models")
+        assert response.status_code == 200
+        assert response.json()["count"] == 1
+        assert response.json()["models"][0]["key"] == "supersonic:1"
+        assert "sql" not in str(response.json()).lower()
 
 
 def test_admin_can_sync_and_select_superset_home_dashboard() -> None:

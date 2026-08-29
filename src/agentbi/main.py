@@ -261,6 +261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.superset_client = superset_client
     app.state.orchestrator = orchestrator
+    app.state.supersonic_client = supersonic
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -300,6 +301,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     datasource_session = require_permission("datasource:manage")
     dashboard_management_session = require_permission("dashboard:manage")
     drilldown_session = require_permission("drilldown:use")
+    agent_session = require_permission("agent:ask")
 
     def enforce_csrf(request: Request, identity: SessionIdentity) -> None:
         if not hmac.compare_digest(
@@ -689,6 +691,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/admin/semantic-models")
     async def list_semantic_models(_: SessionIdentity = semantic_session) -> dict[str, object]:
         return {"models": sessions.list_semantic_models()}
+
+    @app.get("/api/v1/supersonic/models")
+    async def list_live_supersonic_models(
+        _: SessionIdentity = agent_session,
+    ) -> dict[str, object]:
+        """Expose live model metadata without SQL, viewers or upstream credentials."""
+
+        try:
+            models = await app.state.supersonic_client.list_semantic_models()
+        except UpstreamError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="SuperSonic 语义模型服务不可用",
+            ) from exc
+        return {"models": models, "count": len(models), "source": "SuperSonic"}
 
     @app.post("/api/v1/admin/semantic-models", status_code=status.HTTP_201_CREATED)
     async def create_semantic_model(

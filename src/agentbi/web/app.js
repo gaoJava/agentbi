@@ -14,6 +14,7 @@ const drillConfigurations = {};
 let managedCharts = [];
 let loadedUsers = [];
 let loadedSemanticModels = [];
+let loadedLiveSemanticModels = [];
 let loadedDataSources = [];
 let loadedRoles = [];
 let loadedPermissions = [];
@@ -173,6 +174,43 @@ function showWorkbench(user) {
   switchView('dashboard');
   selectDashboardCanvas('superset');
   loadManagedCharts();
+  loadLiveSemanticModels().catch(error => showManagementFeedback(error.message, true));
+}
+
+function populateLiveModelSelectors() {
+  const agentSelect = document.querySelector('#agent-semantic-model');
+  const chartSelect = document.querySelector('#new-chart-model');
+  const agentValue = agentSelect.value;
+  const chartValue = chartSelect.value;
+  const agentOptions = loadedLiveSemanticModels.map(model => {
+    const option = document.createElement('option');
+    option.value = String(model.id);
+    option.textContent = `${model.name}（${model.domain_name} · ID ${model.id}）`;
+    return option;
+  });
+  const chartOptions = loadedLiveSemanticModels.map(model => {
+    const option = document.createElement('option');
+    option.value = model.key;
+    option.textContent = `${model.name}（${model.domain_name} · ID ${model.id}）`;
+    return option;
+  });
+  agentSelect.replaceChildren(...agentOptions);
+  chartSelect.replaceChildren(...chartOptions);
+  if (agentValue && agentOptions.some(option => option.value === agentValue)) agentSelect.value = agentValue;
+  if (chartValue && chartOptions.some(option => option.value === chartValue)) chartSelect.value = chartValue;
+}
+
+async function loadLiveSemanticModels() {
+  const body = await request('/api/v1/supersonic/models');
+  const models = Array.isArray(body.models) ? body.models : [];
+  loadedLiveSemanticModels = models.filter(model =>
+    Number.isInteger(model?.id) && model.id > 0 && typeof model.key === 'string' &&
+    typeof model.name === 'string' && typeof model.domain_name === 'string'
+  );
+  populateLiveModelSelectors();
+  const total = document.querySelector('#live-model-total');
+  if (total) total.textContent = `${loadedLiveSemanticModels.length} 个真实模型`;
+  return loadedLiveSemanticModels;
 }
 
 function switchView(view) {
@@ -373,13 +411,11 @@ async function loadModuleView(view) {
         (await request('/api/v1/reports')).reports,
       ));
     } else if (view === 'semantic-models') {
-      loadedSemanticModels = window.AgentBI.parseSemanticModels(
-        (await request('/api/v1/admin/semantic-models')).models,
-      );
+      loadedSemanticModels = await loadLiveSemanticModels();
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
-        model.name, model.metrics.join('、'), model.charts,
+        model.id, model.name, model.domain_name, model.biz_name || '—',
         model.status === 'active' ? '● 已启用' : '● 已下线',
-      ], model => assetActionGroup('semantic-models', model));
+      ]);
     } else if (view === 'data-sources') {
       const assets = window.AgentBI.parseSupersetDataAssets(
         await request('/api/v1/admin/superset/data-assets'),
@@ -1313,7 +1349,14 @@ function openChartWizard(chart) {
     document.querySelector('#new-chart-dataset').value = chart.dataset_name;
     document.querySelector('#new-chart-metric').value = chart.metric;
     document.querySelector('#new-chart-type').value = chart.visualization_type;
-    document.querySelector('#new-chart-model').value = chart.semantic_model;
+    const modelSelect = document.querySelector('#new-chart-model');
+    if (![...modelSelect.options].some(option => option.value === chart.semantic_model)) {
+      const legacy = document.createElement('option');
+      legacy.value = chart.semantic_model;
+      legacy.textContent = `${chart.semantic_model}（旧映射，建议更换）`;
+      modelSelect.append(legacy);
+    }
+    modelSelect.value = chart.semantic_model;
     document.querySelector('#new-chart-dimensions').value = chart.dimensions.join(' → ');
   }
   chartWizard.hidden = false;

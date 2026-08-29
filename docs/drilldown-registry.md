@@ -82,7 +82,7 @@ sourceRows: [['华东一部', '326', '+18.2%']]
 只有同时具备以下元数据的图表才启用下钻：
 
 - 受治理指标 `metric`；
-- 可访问的语义模型 `semanticModel`；
+- 可访问的真实 SuperSonic 模型映射 `semanticModel`（格式为 `supersonic:<Model ID>`）；
 - 至少一个明细维度和数据行；
 - 两个可用的 Agent 推荐问题；
 - 当前用户拥有 `drilldown:use` 权限。

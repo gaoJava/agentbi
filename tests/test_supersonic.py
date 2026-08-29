@@ -38,6 +38,35 @@ def analyze_request() -> AnalyzeRequest:
 
 
 class SuperSonicClientTest(unittest.TestCase):
+    def test_lists_sanitized_live_semantic_models(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/domain/list"):
+                return httpx.Response(200, json={
+                    "code": 200,
+                    "data": [{"id": 1, "name": "超音数", "viewers": ["private-user"]}],
+                })
+            return httpx.Response(200, json={
+                "code": 200,
+                "data": [{
+                    "id": 3, "name": "停留时长统计", "bizName": "stay_time",
+                    "description": "受治理模型", "status": 1,
+                    "modelDetail": {"sqlQuery": "SELECT secret"},
+                    "viewers": ["private-user"],
+                }],
+            })
+
+        client = SuperSonicClient(settings(), httpx.MockTransport(handler))
+        models = asyncio.run(client.list_semantic_models())
+        asyncio.run(client.close())
+
+        self.assertEqual(models, [{
+            "id": 3, "key": "supersonic:3", "name": "停留时长统计",
+            "biz_name": "stay_time", "description": "受治理模型",
+            "domain_id": 1, "domain_name": "超音数", "status": "active",
+        }])
+        self.assertNotIn("sql", str(models).lower())
+        self.assertNotIn("private-user", str(models))
+
     def test_calls_parse_then_execute_and_unwraps_result_data(self):
         requests: list[tuple[str, dict]] = []
 

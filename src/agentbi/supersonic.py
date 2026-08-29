@@ -87,6 +87,39 @@ class SuperSonicClient:
         self._conversations.record(request.actor.subject, conversation_id, request.question, result)
         return result
 
+    async def list_semantic_models(self) -> list[dict[str, Any]]:
+        """Return a sanitized inventory of live SuperSonic semantic models."""
+
+        domains = await self._request_data("GET", "/api/semantic/schema/domain/list")
+        if not isinstance(domains, list):
+            raise UpstreamError("SuperSonic returned an invalid domain inventory")
+        inventory: list[dict[str, Any]] = []
+        for domain in domains[:100]:
+            if not isinstance(domain, dict) or not isinstance(domain.get("id"), int):
+                continue
+            domain_id = domain["id"]
+            models = await self._request_data(
+                "GET", f"/api/semantic/model/getModelList/{domain_id}"
+            )
+            if not isinstance(models, list):
+                continue
+            for model in models[:500]:
+                if not isinstance(model, dict) or not isinstance(model.get("id"), int):
+                    continue
+                inventory.append(
+                    {
+                        "id": model["id"],
+                        "key": f"supersonic:{model['id']}",
+                        "name": str(model.get("name") or model.get("bizName") or model["id"])[:128],
+                        "biz_name": str(model.get("bizName") or "")[:128],
+                        "description": str(model.get("description") or "")[:512],
+                        "domain_id": domain_id,
+                        "domain_name": str(domain.get("name") or domain_id)[:128],
+                        "status": "active" if model.get("status") == 1 else "offline",
+                    }
+                )
+        return inventory
+
     def _conversation(self, request: AnalyzeRequest) -> tuple[int, str, list[str]]:
         """Resolve an unguessable conversation id bound to the authenticated actor."""
         try:

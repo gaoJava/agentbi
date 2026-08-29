@@ -323,7 +323,8 @@ class IdentityRepository:
                 )
             ).all():
                 self._ensure_data_source(db, chart.dataset_name, chart.created_by)
-                self._ensure_semantic_model(db, drilldown.semantic_model, chart.created_by)
+                if not drilldown.semantic_model.startswith("supersonic:"):
+                    self._ensure_semantic_model(db, drilldown.semantic_model, chart.created_by)
 
     def create_conversation(self, conversation_id: int, actor_user_id: str) -> None:
         with Session(self.engine) as db, db.begin():
@@ -1033,7 +1034,11 @@ class IdentityRepository:
             if db.scalar(select(DashboardChart).where(DashboardChart.chart_key == normalized_key)):
                 raise ValueError("chart key already exists")
             self._ensure_data_source(db, dataset_name, actor_user_id)
-            self._ensure_semantic_model(db, semantic_model, actor_user_id)
+            # A SuperSonic mapping is an external governed model reference, not a
+            # local semantic asset. Keeping only the stable Model ID prevents an
+            # AgentBI placeholder from being mistaken for a real model definition.
+            if not semantic_model.startswith("supersonic:"):
+                self._ensure_semantic_model(db, semantic_model, actor_user_id)
             chart = DashboardChart(
                 id=str(uuid.uuid4()),
                 chart_key=normalized_key,
@@ -1090,7 +1095,8 @@ class IdentityRepository:
                 raise KeyError("chart not found")
             chart, drilldown = row
             self._ensure_data_source(db, dataset_name, chart.created_by)
-            self._ensure_semantic_model(db, semantic_model, chart.created_by)
+            if not semantic_model.startswith("supersonic:"):
+                self._ensure_semantic_model(db, semantic_model, chart.created_by)
             chart.title = title.strip()
             chart.metric = metric.strip()
             chart.dataset_name = dataset_name.strip()
