@@ -15,6 +15,7 @@ let managedCharts = [];
 let loadedUsers = [];
 let loadedSemanticModels = [];
 let loadedLiveSemanticModels = [];
+let activeSemanticDraft;
 let loadedDataSources = [];
 let loadedRoles = [];
 let loadedPermissions = [];
@@ -211,6 +212,109 @@ async function loadLiveSemanticModels() {
   const total = document.querySelector('#live-model-total');
   if (total) total.textContent = `${loadedLiveSemanticModels.length} 个真实模型`;
   return loadedLiveSemanticModels;
+}
+
+function fillSelect(select, items, label) {
+  select.replaceChildren(...items.map(item => {
+    const option = document.createElement('option');
+    option.value = String(item.id);
+    option.textContent = label(item);
+    return option;
+  }));
+}
+
+function formatDraftItems(items, suffix) {
+  return items.map(item => `${item.name}=${item.field}${suffix(item)}`).join('\n');
+}
+
+function parseDraftItems(value, kind, originals) {
+  const lines = value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  return lines.map(line => {
+    const equal = line.indexOf('=');
+    if (equal < 1) throw new Error(`“${line}”格式错误，应为：名称=字段`);
+    const name = line.slice(0, equal).trim();
+    const [field, qualifier = ''] = line.slice(equal + 1).split(':').map(item => item.trim());
+    if (!name || !field) throw new Error(`“${line}”缺少名称或字段`);
+    const original = originals.find(item => item.field === field) || {};
+    if (kind === 'identifier') return { name, field, type: 'primary', synonyms: original.synonyms || [] };
+    if (kind === 'dimension') {
+      const type = qualifier || 'categorical';
+      if (!['categorical', 'time'].includes(type)) throw new Error(`维度类型仅支持 categorical 或 time：${line}`);
+      return { name, field, type, synonyms: original.synonyms || [] };
+    }
+    const aggregation = (qualifier || 'SUM').toUpperCase();
+    if (!['SUM', 'AVG', 'MAX', 'MIN', 'COUNT'].includes(aggregation)) throw new Error(`不支持的聚合方式：${line}`);
+    return { name, field, aggregation, synonyms: original.synonyms || [] };
+  });
+}
+
+async function openSemanticDraftEditor() {
+  const error = document.querySelector('#semantic-draft-error');
+  error.hidden = true; activeSemanticDraft = undefined;
+  document.querySelector('#semantic-draft-review').hidden = true;
+  document.querySelector('#publish-semantic-draft').disabled = true;
+  document.querySelector('#semantic-generation-source').textContent = '正在读取真实 Superset Dataset 与 SuperSonic 建模目录…';
+  document.querySelector('#semantic-draft-editor').hidden = false;
+  try {
+    const [assetsBody, catalog] = await Promise.all([
+      request('/api/v1/admin/superset/data-assets'),
+      request('/api/v1/admin/semantic-drafts/catalog'),
+    ]);
+    const assets = window.AgentBI.parseSupersetDataAssets(assetsBody);
+    loadedDataSources = assets.datasets;
+    fillSelect(document.querySelector('#semantic-draft-dataset'),
+      loadedDataSources.map(item => ({...item, id: item.superset_id})),
+      item => `${item.name}（${item.database_name} · ID ${item.superset_id}）`);
+    fillSelect(document.querySelector('#semantic-draft-domain'), catalog.domains || [],
+      item => `${item.name}（ID ${item.id}）`);
+    fillSelect(document.querySelector('#semantic-draft-database'), catalog.databases || [],
+      item => `${item.name}${item.type ? ` · ${item.type}` : ''}（ID ${item.id}）`);
+    if (!loadedDataSources.length || !(catalog.domains || []).length || !(catalog.databases || []).length) {
+      throw new Error('建模前至少需要一个 Superset Dataset、SuperSonic 主题域和数据库连接');
+    }
+    document.querySelector('#semantic-generation-source').textContent = '请选择 Dataset 生成草稿。当前未配置 LLM，将使用可解释的字段元数据推断。';
+  } catch (cause) {
+    error.textContent = cause.message; error.hidden = false;
+  }
+}
+
+function closeSemanticDraftEditor() {
+  document.querySelector('#semantic-draft-editor').hidden = true;
+  activeSemanticDraft = undefined;
+}
+
+async function generateSemanticDraft() {
+  const error = document.querySelector('#semantic-draft-error');
+  const button = document.querySelector('#generate-semantic-draft');
+  error.hidden = true; button.disabled = true; button.textContent = '正在分析字段…';
+  try {
+    const datasetId = Number(document.querySelector('#semantic-draft-dataset').value);
+    const body = await request('/api/v1/admin/semantic-drafts/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({dataset_id: datasetId}),
+    });
+    activeSemanticDraft = body.draft;
+    const draft = activeSemanticDraft;
+    document.querySelector('#semantic-draft-name').value = draft.model.name;
+    document.querySelector('#semantic-draft-biz-name').value = `${draft.model.biz_name}_model`;
+    document.querySelector('#semantic-draft-description').value = draft.model.description;
+    document.querySelector('#semantic-draft-identifiers').value = formatDraftItems(draft.identifiers, () => '');
+    document.querySelector('#semantic-draft-dimensions').value = formatDraftItems(draft.dimensions, item => `:${item.type}`);
+    document.querySelector('#semantic-draft-measures').value = formatDraftItems(draft.measures, item => `:${item.aggregation}`);
+    document.querySelector('#semantic-draft-drilldown').value = draft.drilldown_path.join('，');
+    const source = document.querySelector('#semantic-generation-source');
+    source.textContent = `${draft.generation.label}。所有推荐项必须由管理员审核后才能发布。`;
+    source.classList.toggle('ai-source', Boolean(draft.generation.ai_generated));
+    const warnings = document.querySelector('#semantic-draft-warnings');
+    warnings.hidden = !draft.warnings.length;
+    warnings.textContent = draft.warnings.join(' ');
+    document.querySelector('#semantic-draft-review').hidden = false;
+    document.querySelector('#publish-semantic-draft').disabled = draft.measures.length === 0;
+  } catch (cause) {
+    error.textContent = cause.message; error.hidden = false;
+  } finally {
+    button.disabled = false; button.textContent = '生成草稿';
+  }
 }
 
 function switchView(view) {
@@ -1802,6 +1906,47 @@ async function endSession({ switchAccount = false } = {}) {
 
 document.querySelector('#switch-account-button').addEventListener('click', () => endSession({ switchAccount: true }));
 document.querySelector('#logout-button').addEventListener('click', () => endSession());
+
+document.querySelector('#open-semantic-draft').addEventListener('click', openSemanticDraftEditor);
+document.querySelector('#close-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
+document.querySelector('#cancel-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
+document.querySelector('#generate-semantic-draft').addEventListener('click', generateSemanticDraft);
+document.querySelector('#semantic-draft-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!activeSemanticDraft) return;
+  const error = document.querySelector('#semantic-draft-error');
+  const button = document.querySelector('#publish-semantic-draft');
+  error.hidden = true; button.disabled = true; button.textContent = '正在发布并校验…';
+  try {
+    const draft = activeSemanticDraft;
+    const payload = {
+      dataset_id: draft.dataset.superset_id,
+      domain_id: Number(document.querySelector('#semantic-draft-domain').value),
+      database_id: Number(document.querySelector('#semantic-draft-database').value),
+      name: document.querySelector('#semantic-draft-name').value.trim(),
+      biz_name: document.querySelector('#semantic-draft-biz-name').value.trim(),
+      description: document.querySelector('#semantic-draft-description').value.trim(),
+      identifiers: parseDraftItems(document.querySelector('#semantic-draft-identifiers').value, 'identifier', draft.identifiers),
+      dimensions: parseDraftItems(document.querySelector('#semantic-draft-dimensions').value, 'dimension', draft.dimensions),
+      measures: parseDraftItems(document.querySelector('#semantic-draft-measures').value, 'measure', draft.measures),
+      fields: draft.fields,
+      drilldown_path: document.querySelector('#semantic-draft-drilldown').value
+        .split(/[,，→>]+/).map(item => item.trim()).filter(Boolean),
+    };
+    if (!payload.identifiers.length || !payload.measures.length) throw new Error('至少保留一个标识符和一个度量');
+    await request('/api/v1/admin/semantic-drafts/publish', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify(payload),
+    });
+    closeSemanticDraftEditor();
+    await loadModuleView('semantic-models');
+    showManagementFeedback(`${payload.name} 已发布到 SuperSonic`);
+  } catch (cause) {
+    error.textContent = cause.message; error.hidden = false;
+  } finally {
+    button.disabled = false; button.textContent = '审核并发布到 SuperSonic';
+  }
+});
 
 window.AgentBI.session.restore().then(showWorkbench).catch(showLogin);
 renderDrilldown(selectedDrillChart);

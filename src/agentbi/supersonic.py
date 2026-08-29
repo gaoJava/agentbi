@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -119,6 +120,51 @@ class SuperSonicClient:
                     }
                 )
         return inventory
+
+    async def list_modeling_catalog(self) -> dict[str, list[dict[str, Any]]]:
+        """Return sanitized domains and databases needed by the review form."""
+
+        domains = await self._request_data("GET", "/api/semantic/schema/domain/list")
+        databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
+        if not isinstance(domains, list) or not isinstance(databases, list):
+            raise UpstreamError("SuperSonic returned an invalid modeling catalog")
+        return {
+            "domains": [
+                {"id": item["id"], "name": str(item.get("name") or item["id"])[:128]}
+                for item in domains[:100]
+                if isinstance(item, dict) and isinstance(item.get("id"), int)
+            ],
+            "databases": [
+                {"id": item["id"], "name": str(item.get("name") or item["id"])[:128],
+                 "type": str(item.get("type") or "")[:64]}
+                for item in databases[:100]
+                if isinstance(item, dict) and isinstance(item.get("id"), int)
+            ],
+        }
+
+    async def publish_semantic_model(self, payload: dict[str, Any]) -> None:
+        """Publish an administrator-reviewed model through SuperSonic's governed API."""
+
+        await self._request_data("POST", "/api/semantic/model/createModel", payload=payload)
+
+    async def get_database_columns(
+        self, database_id: int, schema_name: str, table_name: str
+    ) -> set[str]:
+        """Preflight the selected physical table through the target SuperSonic connection."""
+
+        data = await self._request_data(
+            "GET",
+            "/api/semantic/database/getColumns/"
+            f"{database_id}/{quote(schema_name, safe='')}/{quote(table_name, safe='')}",
+        )
+        rows = data.get("resultList") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise UpstreamError("SuperSonic returned invalid table metadata")
+        return {
+            str(item["name"])
+            for item in rows
+            if isinstance(item, dict) and item.get("name")
+        }
 
     def _conversation(self, request: AnalyzeRequest) -> tuple[int, str, list[str]]:
         """Resolve an unguessable conversation id bound to the authenticated actor."""

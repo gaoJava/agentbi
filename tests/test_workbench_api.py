@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260829.9" in shell.text
+        assert "app.js?v=20260829.10" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -719,3 +719,56 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         assert custom_login.json()["user"]["role"] == "regional_analyst"
         assert client.get("/api/v1/admin/data-sources").status_code == 200
         assert client.get("/api/v1/admin/users").status_code == 403
+def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
+    class FakeSupersetClient:
+        async def get_dataset(self, dataset_id: int):
+            assert dataset_id == 21
+            return {
+                "superset_id": 21, "name": "sales_orders", "schema": "public",
+                "database_name": "examples", "metrics": [],
+                "columns": [
+                    {"name": "order_id", "type": "BIGINT", "is_time": False, "filterable": True},
+                    {"name": "region", "type": "VARCHAR", "is_time": False, "filterable": True},
+                    {"name": "revenue", "type": "NUMERIC", "is_time": False, "filterable": False},
+                ],
+            }
+
+    class FakeSuperSonicClient:
+        published = None
+
+        async def list_modeling_catalog(self):
+            return {"domains": [{"id": 1, "name": "销售"}],
+                    "databases": [{"id": 2, "name": "业务库", "type": "postgresql"}]}
+
+        async def publish_semantic_model(self, payload):
+            self.published = payload
+
+        async def get_database_columns(self, database_id, schema_name, table_name):
+            assert (database_id, schema_name, table_name) == (2, "public", "sales_orders")
+            return {"order_id", "region", "revenue"}
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    sonic = FakeSuperSonicClient()
+    app.state.supersonic_client = sonic
+    with TestClient(app) as client:
+        assert client.post("/api/v1/admin/semantic-drafts/generate", json={"dataset_id": 21}).status_code == 401
+        login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password"})
+        csrf = login.json()["user"]["csrf_token"]
+        headers = {"X-AgentBI-CSRF": csrf}
+        generated = client.post(
+            "/api/v1/admin/semantic-drafts/generate", json={"dataset_id": 21}, headers=headers,
+        )
+        assert generated.status_code == 200
+        draft = generated.json()["draft"]
+        assert draft["generation"]["ai_generated"] is False
+        publish = client.post("/api/v1/admin/semantic-drafts/publish", headers=headers, json={
+            "dataset_id": 21, "domain_id": 1, "database_id": 2,
+            "name": "销售订单", "biz_name": "sales_orders_model", "description": "已审核",
+            "identifiers": draft["identifiers"], "dimensions": draft["dimensions"],
+            "measures": draft["measures"], "fields": draft["fields"],
+            "drilldown_path": draft["drilldown_path"],
+        })
+        assert publish.status_code == 201
+        assert sonic.published["modelDetail"]["tableQuery"] == "public.sales_orders"
+        assert sonic.published["modelDetail"]["measures"][0]["bizName"] == "revenue"

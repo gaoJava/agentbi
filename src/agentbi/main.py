@@ -24,6 +24,7 @@ from agentbi.config import Settings
 from agentbi.models import Actor, AnalyzeRequest, AnalyzeResponse, ScreenContext
 from agentbi.orchestrator import Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
+from agentbi.semantic_draft import build_semantic_draft
 from agentbi.superset import SupersetApiError, SupersetClient
 from agentbi.supersonic import SuperSonicClient, UpstreamError
 
@@ -206,6 +207,28 @@ class SemanticModelUpdatePayload(BaseModel):
     subject_area: str = Field(min_length=2, max_length=128)
     description: str = Field(default="", max_length=512)
     status: Literal["active", "offline"]
+
+
+class SemanticDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dataset_id: int = Field(gt=0)
+
+
+class SemanticDraftPublishPayload(BaseModel):
+    """Administrator-reviewed values; no SQL or credentials are accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+    dataset_id: int = Field(gt=0)
+    domain_id: int = Field(gt=0)
+    database_id: int = Field(gt=0)
+    name: str = Field(min_length=2, max_length=128)
+    biz_name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    description: str = Field(default="", max_length=512)
+    identifiers: list[dict[str, object]] = Field(min_length=1, max_length=5)
+    dimensions: list[dict[str, object]] = Field(default_factory=list, max_length=50)
+    measures: list[dict[str, object]] = Field(min_length=1, max_length=50)
+    fields: list[dict[str, str]] = Field(min_length=1, max_length=200)
+    drilldown_path: list[str] = Field(default_factory=list, max_length=5)
 
 
 class RoleCreatePayload(BaseModel):
@@ -706,6 +729,118 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="SuperSonic 语义模型服务不可用",
             ) from exc
         return {"models": models, "count": len(models), "source": "SuperSonic"}
+
+    @app.get("/api/v1/admin/semantic-drafts/catalog")
+    async def semantic_draft_catalog(
+        _: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        try:
+            return await app.state.supersonic_client.list_modeling_catalog()
+        except UpstreamError as exc:
+            raise HTTPException(status_code=502, detail="SuperSonic 建模目录不可用") from exc
+
+    @app.post("/api/v1/admin/semantic-drafts/generate")
+    async def generate_semantic_draft(
+        payload: SemanticDraftRequest, request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dataset = await app.state.superset_client.get_dataset(payload.dataset_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=502, detail="无法读取 Superset Dataset 字段") from exc
+        draft = build_semantic_draft(dataset)
+        sessions.audit(
+            "semantic_draft_generated", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"dataset:{payload.dataset_id}:metadata_inference",
+        )
+        return {"draft": draft}
+
+    @app.post("/api/v1/admin/semantic-drafts/publish", status_code=status.HTTP_201_CREATED)
+    async def publish_semantic_draft(
+        payload: SemanticDraftPublishPayload, request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dataset = await app.state.superset_client.get_dataset(payload.dataset_id)
+            catalog = await app.state.supersonic_client.list_modeling_catalog()
+        except (SupersetApiError, UpstreamError) as exc:
+            raise HTTPException(status_code=502, detail="发布前无法校验真实元数据") from exc
+        if payload.domain_id not in {item["id"] for item in catalog["domains"]}:
+            raise HTTPException(status_code=422, detail="SuperSonic 主题域不存在")
+        if payload.database_id not in {item["id"] for item in catalog["databases"]}:
+            raise HTTPException(status_code=422, detail="SuperSonic 数据库连接不存在")
+        actual_columns = {str(item["name"]): str(item["type"]) for item in dataset["columns"]}
+        reviewed_fields = {item.get("name") for item in payload.fields}
+        if not reviewed_fields or not reviewed_fields.issubset(actual_columns):
+            raise HTTPException(status_code=422, detail="草稿包含 Dataset 中不存在的字段")
+        try:
+            target_columns = await app.state.supersonic_client.get_database_columns(
+                payload.database_id, str(dataset.get("schema") or "public"), str(dataset["name"])
+            )
+        except UpstreamError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="所选 SuperSonic 数据库中找不到该 Dataset 对应的物理表，请先配置同源连接",
+            ) from exc
+        if not reviewed_fields.issubset(target_columns):
+            raise HTTPException(status_code=422, detail="Superset 与 SuperSonic 的同名表字段不一致")
+
+        def reviewed(items: list[dict[str, object]]) -> list[dict[str, object]]:
+            if any(item.get("field") not in reviewed_fields for item in items):
+                raise HTTPException(status_code=422, detail="语义项引用了不存在的字段")
+            return items
+
+        identifiers = reviewed(payload.identifiers)
+        dimensions = reviewed(payload.dimensions)
+        measures = reviewed(payload.measures)
+        model_detail = {
+            "queryType": "table_query",
+            "tableQuery": ".".join(filter(None, [str(dataset.get("schema") or ""), str(dataset["name"])])),
+            "fields": [
+                {"fieldName": str(item["name"]), "dataType": actual_columns[str(item["name"])]}
+                for item in payload.fields
+            ],
+            "identifiers": [
+                {"name": str(item.get("name") or item["field"]), "type": str(item.get("type") or "primary"),
+                 "bizName": str(item["field"]), "entityNames": item.get("synonyms") or [],
+                 "isCreateDimension": 1}
+                for item in identifiers
+            ],
+            "dimensions": [
+                {"name": str(item.get("name") or item["field"]), "bizName": str(item["field"]),
+                 "type": str(item.get("type") or "categorical"), "expr": str(item["field"]),
+                 "isCreateDimension": 1,
+                 **({"typeParams": {"isPrimary": "true", "timeGranularity": "day"}}
+                    if item.get("type") == "time" else {})}
+                for item in dimensions
+            ],
+            "measures": [
+                {"name": str(item.get("name") or item["field"]), "bizName": str(item["field"]),
+                 "expr": str(item["field"]), "agg": str(item.get("aggregation") or "SUM"),
+                 "isCreateMetric": 1}
+                for item in measures
+            ],
+        }
+        upstream_payload = {
+            "name": payload.name, "bizName": payload.biz_name,
+            "description": payload.description, "databaseId": payload.database_id,
+            "domainId": payload.domain_id, "isOpen": 1, "modelDetail": model_detail,
+            "viewers": [identity.username], "admins": [identity.username],
+            "viewOrgs": [], "adminOrgs": [],
+        }
+        try:
+            await app.state.supersonic_client.publish_semantic_model(upstream_payload)
+        except UpstreamError as exc:
+            raise HTTPException(status_code=502, detail="SuperSonic 拒绝发布语义模型") from exc
+        sessions.audit(
+            "semantic_draft_published", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"dataset:{payload.dataset_id}:model:{payload.biz_name}",
+        )
+        return {"message": "语义模型已发布到 SuperSonic", "model_key": payload.biz_name}
 
     @app.post("/api/v1/admin/semantic-models", status_code=status.HTTP_201_CREATED)
     async def create_semantic_model(

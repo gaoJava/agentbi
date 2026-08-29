@@ -176,7 +176,7 @@
       </section>
 
       <section id="semantic-models-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>语义模型</h1><p>实时读取 SuperSonic 主题域与语义模型</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button class="module-refresh" data-module="semantic-models" type="button">⟳ 同步 SuperSonic</button></div></header>
+        <header class="registry-header"><div><h1>语义模型</h1><p>实时读取 SuperSonic 主题域与语义模型</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button id="open-semantic-draft" class="primary-small" type="button">✦ 智能建模草稿</button><button class="module-refresh" data-module="semantic-models" type="button">⟳ 同步 SuperSonic</button></div></header>
         <div class="registry-content"><aside class="registry-note"><strong>真实模型来源</strong><p>本页不再展示 AgentBI 自建占位模型。模型由 SuperSonic 负责创建、指标治理和权限控制；AgentBI 只保存 Superset 图表到 Model ID 的映射。</p></aside><section class="registry-table-card"><table><thead><tr><th>Model ID</th><th>模型名称</th><th>主题域</th><th>业务标识</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
       </section>
 
@@ -332,6 +332,32 @@
   <div id="dataset-description-editor" class="modal-backdrop" hidden>
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="dataset-description-title"><header><div><span>业务元数据</span><h2 id="dataset-description-title">修改 Dataset 说明</h2></div><button id="close-dataset-description" type="button" aria-label="关闭">×</button></header><form id="dataset-description-form"><div class="wizard-grid"><label class="wizard-full">业务说明<small>用于解释数据口径、范围和负责人</small><textarea id="dataset-description" maxlength="1000"></textarea></label></div><div id="dataset-description-error" class="form-error" hidden></div><footer><button id="cancel-dataset-description" type="button">取消</button><button class="primary-button" type="submit">保存说明</button></footer></form></section>
   </div>
+
+  <div id="semantic-draft-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard semantic-draft-dialog" role="dialog" aria-modal="true" aria-labelledby="semantic-draft-title">
+      <header><div><span>Superset Dataset → SuperSonic</span><h2 id="semantic-draft-title">智能语义建模草稿</h2></div><button id="close-semantic-draft" type="button" aria-label="关闭">×</button></header>
+      <form id="semantic-draft-form">
+        <div class="draft-source-row"><label>选择真实 Dataset<select id="semantic-draft-dataset" required></select></label><button id="generate-semantic-draft" type="button">生成草稿</button></div>
+        <aside id="semantic-generation-source" class="draft-source-note">尚未生成。系统会明确区分元数据推断和真实 LLM 生成。</aside>
+        <div id="semantic-draft-review" hidden>
+          <div class="wizard-grid">
+            <label>模型名称<input id="semantic-draft-name" maxlength="128" required></label>
+            <label>业务标识<input id="semantic-draft-biz-name" maxlength="128" pattern="[A-Za-z][A-Za-z0-9_]*" required></label>
+            <label>SuperSonic 主题域<select id="semantic-draft-domain" required></select></label>
+            <label>SuperSonic 数据库<select id="semantic-draft-database" required></select></label>
+            <label class="wizard-full">模型说明<textarea id="semantic-draft-description" maxlength="512"></textarea></label>
+            <label class="wizard-full">标识符（每行：名称=字段）<textarea id="semantic-draft-identifiers" required></textarea></label>
+            <label class="wizard-full">维度（每行：名称=字段:categorical 或 time）<textarea id="semantic-draft-dimensions"></textarea></label>
+            <label class="wizard-full">度量（每行：名称=字段:SUM）<textarea id="semantic-draft-measures" required></textarea></label>
+            <label class="wizard-full">推荐下钻路径（逗号分隔）<input id="semantic-draft-drilldown"></label>
+          </div>
+          <div id="semantic-draft-warnings" class="draft-warnings" hidden></div>
+        </div>
+        <div id="semantic-draft-error" class="form-error" hidden></div>
+        <footer><button id="cancel-semantic-draft" type="button">取消</button><button id="publish-semantic-draft" class="primary-button" type="submit" disabled>审核并发布到 SuperSonic</button></footer>
+      </form>
+    </section>
+  </div>
   <div id="delete-asset-confirm" class="modal-backdrop" hidden>
     <section class="delete-confirm" role="dialog" aria-modal="true" aria-labelledby="delete-asset-title">
       <header><div><span>不可恢复操作</span><h2 id="delete-asset-title">确认删除资产</h2></div><button id="close-delete-asset" type="button" aria-label="关闭">×</button></header>
@@ -341,6 +367,6 @@
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
   <script src="/app/assets/generated/workbench-runtime.js?v=20260829.7" defer></script>
-  <script src="/app/assets/app.js?v=20260829.9" defer></script>
+  <script src="/app/assets/app.js?v=20260829.10" defer></script>
 </body>
 </html>
