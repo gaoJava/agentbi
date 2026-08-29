@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import secrets
-from collections import deque
 from typing import Any
 
 import httpx
 
 from agentbi.config import Settings
+from agentbi.conversation import ConversationContextManager
+from agentbi.database import IdentityRepository
 from agentbi.models import AnalyzeRequest
 
 
@@ -18,7 +18,12 @@ class UpstreamError(RuntimeError):
 
 
 class SuperSonicClient:
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        repository: IdentityRepository | None = None,
+    ):
         self._settings = settings
         headers = {"Accept": "application/json"}
         if settings.supersonic_token:
@@ -34,8 +39,10 @@ class SuperSonicClient:
         # by WEB_PAGE plugins. AgentBI therefore owns tenant-bound conversation history
         # and serializes access to that upstream stateless context.
         self._query_lock = asyncio.Lock()
-        self._history_lock = asyncio.Lock()
-        self._histories: dict[tuple[str, int], deque[str]] = {}
+        if repository is None:
+            repository = IdentityRepository("sqlite:///:memory:")
+            repository.initialize(seed_demo_accounts=False, user_password="", admin_password="")
+        self._conversations = ConversationContextManager(settings, repository)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -43,9 +50,9 @@ class SuperSonicClient:
     async def query(self, request: AnalyzeRequest) -> dict[str, Any]:
         """Parse the question, select the best semantic parse, then execute it."""
 
-        conversation_id, history = await self._conversation(request)
+        conversation_id, summary, history = self._conversation(request)
         parse_payload = {
-            "queryText": self._contextual_question(request, history),
+            "queryText": self._contextual_question(request, history, summary),
             "chatId": 0,
             "viewId": request.context.semantic_model_id,
             "agentId": request.agent_id,
@@ -74,27 +81,15 @@ class SuperSonicClient:
         if result.get("queryId") is None and parsed.get("queryId") is not None:
             result["queryId"] = parsed["queryId"]
         result["chatId"] = conversation_id
-        async with self._history_lock:
-            self._histories[(request.actor.subject, conversation_id)].append(request.question)
+        self._conversations.record(request.actor.subject, conversation_id, request.question, result)
         return result
 
-    async def _conversation(self, request: AnalyzeRequest) -> tuple[int, list[str]]:
+    def _conversation(self, request: AnalyzeRequest) -> tuple[int, str, list[str]]:
         """Resolve an unguessable conversation id bound to the authenticated actor."""
-
-        async with self._history_lock:
-            if request.chat_id:
-                key = (request.actor.subject, request.chat_id)
-                history = self._histories.get(key)
-                if history is None:
-                    raise UpstreamError("AgentBI conversation is unavailable")
-                return request.chat_id, list(history)
-
-            used_ids = {conversation_id for _, conversation_id in self._histories}
-            conversation_id = secrets.randbelow(2_000_000_000) + 1
-            while conversation_id in used_ids:
-                conversation_id = secrets.randbelow(2_000_000_000) + 1
-            self._histories[(request.actor.subject, conversation_id)] = deque(maxlen=4)
-            return conversation_id, []
+        try:
+            return self._conversations.resolve(request.actor.subject, request.chat_id)
+        except ValueError as exc:
+            raise UpstreamError("AgentBI conversation is unavailable") from exc
 
     @staticmethod
     def _select_governed_query(candidates: list[Any]) -> dict[str, Any]:
@@ -147,7 +142,11 @@ class SuperSonicClient:
         return body["data"]
 
     @staticmethod
-    def _contextual_question(request: AnalyzeRequest, history: list[str] | None = None) -> str:
+    def _contextual_question(
+        request: AnalyzeRequest,
+        history: list[str] | None = None,
+        summary: str = "",
+    ) -> str:
         """Render dashboard state as data context, not as executable model instructions."""
 
         parts = [request.question, f"时间范围：{request.context.time_range}"]
@@ -157,6 +156,8 @@ class SuperSonicClient:
             parts.append(
                 f"当前选中：{request.context.selected.label}={request.context.selected.value}"
             )
+        if summary:
+            parts.append(f"已压缩的历史事实与证据：{summary}")
         for previous in (history or [])[-2:]:
             parts.append(f"同一用户的历史问题：{' '.join(previous.split())[:300]}")
         return "；".join(parts)

@@ -116,6 +116,32 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
+class ConversationState(Base):
+    """Persisted compression boundary and summary for an actor-owned chat."""
+
+    __tablename__ = "conversation_states"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    compressed_through: Mapped[int] = mapped_column(Integer, default=0)
+    turn_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ConversationTurn(Base):
+    """Atomic user, tool-call, tool-result and assistant interaction."""
+
+    __tablename__ = "conversation_turns"
+    conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversation_states.id"), primary_key=True)
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_question: Mapped[str] = mapped_column(Text)
+    assistant_answer: Mapped[str] = mapped_column(Text, default="")
+    tool_call: Mapped[str] = mapped_column(Text, default="")
+    tool_result: Mapped[str] = mapped_column(Text, default="")
+    estimated_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class DashboardChart(Base):
     __tablename__ = "dashboard_charts"
 
@@ -298,6 +324,61 @@ class IdentityRepository:
             ).all():
                 self._ensure_data_source(db, chart.dataset_name, chart.created_by)
                 self._ensure_semantic_model(db, drilldown.semantic_model, chart.created_by)
+
+    def create_conversation(self, conversation_id: int, actor_user_id: str) -> None:
+        with Session(self.engine) as db, db.begin():
+            db.add(ConversationState(id=conversation_id, actor_user_id=actor_user_id))
+
+    def conversation_context(
+        self, conversation_id: int, actor_user_id: str
+    ) -> tuple[str, int, list[dict[str, object]]] | None:
+        with Session(self.engine) as db:
+            state = db.get(ConversationState, conversation_id)
+            if state is None or state.actor_user_id != actor_user_id:
+                return None
+            turns = db.scalars(
+                select(ConversationTurn)
+                .where(
+                    ConversationTurn.conversation_id == conversation_id,
+                    ConversationTurn.sequence > state.compressed_through,
+                )
+                .order_by(ConversationTurn.sequence)
+            ).all()
+            return state.summary, state.compressed_through, [
+                {
+                    "sequence": turn.sequence,
+                    "question": turn.user_question,
+                    "answer": turn.assistant_answer,
+                    "tool_call": turn.tool_call,
+                    "tool_result": turn.tool_result,
+                    "tokens": turn.estimated_tokens,
+                }
+                for turn in turns
+            ]
+
+    def append_conversation_turn(
+        self, conversation_id: int, actor_user_id: str, **values: object
+    ) -> int:
+        with Session(self.engine) as db, db.begin():
+            state = db.get(ConversationState, conversation_id)
+            if state is None or state.actor_user_id != actor_user_id:
+                raise ValueError("conversation unavailable")
+            state.turn_count += 1
+            state.updated_at = utc_now()
+            sequence = state.turn_count
+            db.add(ConversationTurn(conversation_id=conversation_id, sequence=sequence, **values))
+            return sequence
+
+    def compress_conversation(
+        self, conversation_id: int, actor_user_id: str, through: int, summary: str
+    ) -> None:
+        with Session(self.engine) as db, db.begin():
+            state = db.get(ConversationState, conversation_id)
+            if state is None or state.actor_user_id != actor_user_id:
+                raise ValueError("conversation unavailable")
+            state.summary = summary
+            state.compressed_through = max(state.compressed_through, through)
+            state.updated_at = utc_now()
 
     @staticmethod
     def _ensure_data_source(

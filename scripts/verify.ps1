@@ -19,7 +19,11 @@ function Invoke-Checked {
 
 Push-Location $projectRoot
 try {
-    Invoke-Checked 'Running Python tests' { python -m pytest -q -p no:cacheprovider }
+    # Keep pytest artifacts on D:; the Windows profile temp directory may be locked
+    # and is intentionally not part of the portable workbench.
+    Invoke-Checked 'Running Python tests' {
+        python -m pytest -q -p no:cacheprovider --basetemp .runtime/pytest
+    }
     Invoke-Checked 'Running Python static checks' {
         python -m ruff check src tests integrations\superset-extension\backend\src
     }

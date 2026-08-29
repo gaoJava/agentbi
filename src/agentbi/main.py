@@ -216,9 +216,9 @@ def validated_dimensions(items: list[str]) -> list[str]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    supersonic = SuperSonicClient(settings)
-    orchestrator = Orchestrator(settings, supersonic)
     sessions = SessionManager(settings)
+    supersonic = SuperSonicClient(settings, repository=sessions.repository)
+    orchestrator = Orchestrator(settings, supersonic)
     superset_client = SupersetClient(
         settings.superset_base_url,
         settings.superset_username,

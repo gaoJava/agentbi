@@ -27,7 +27,7 @@ its own database, which prevents metric drift between the dashboard and Agent an
 ## Workflow states
 
 The implemented flow is `AUTHORIZE -> RATE_LIMIT/IDEMPOTENCY -> SEMANTIC_QUERY ->
-VALIDATE_EVIDENCE -> SYNTHESIZE -> REPORT`. AgentBI owns actor-bound recent question history;
+VALIDATE_EVIDENCE -> SYNTHESIZE -> REPORT`. AgentBI owns actor-bound persistent conversation history;
 access to SuperSonic's stateless governed-query context is serialized because the inspected
 upstream build can route newly persisted chats to WEB_PAGE plugins. Only candidates containing
 a governed `querySQL` are executable, and the SQL text is replaced with a fingerprint at the
@@ -55,3 +55,9 @@ Superset origin behind the same TLS gateway; the local-session mode is not a dep
 - Missing answer prose: return a deterministic result-count summary with evidence.
 - Repeated client request: return the cached response during the idempotency window.
 - Excessive actor request rate: reject with HTTP 429 and a bounded retry hint.
+# 长对话上下文
+
+AgentBI 不再依赖进程内固定长度队列。每轮交互以“用户问题、语义工具调用、工具结果、
+助手结论”作为不可拆分单元持久化。上下文达到 Token 阈值或消息数阈值时，系统将较旧
+完整轮次压缩为带问题、结论和查询证据的结构化摘要，同时保留最近原始轮次。压缩边界
+写入数据库，因此服务重启后能够继续追问，其他用户也不能复用该会话编号。

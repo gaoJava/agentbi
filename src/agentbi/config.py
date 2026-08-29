@@ -36,6 +36,9 @@ class Settings:
     superset_dashboard_path: str = "/superset/dashboard/1/"
     superset_username: str | None = None
     superset_password: str | None = None
+    conversation_token_threshold: int = 6000
+    conversation_message_threshold: int = 20
+    conversation_keep_recent_turns: int = 4
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -85,4 +88,7 @@ class Settings:
             ),
             superset_username=os.getenv("SUPERSET_USER") or None,
             superset_password=os.getenv("SUPERSET_PASSWORD") or None,
+            conversation_token_threshold=_positive_int("AGENTBI_CONVERSATION_TOKEN_THRESHOLD", 6000),
+            conversation_message_threshold=_positive_int("AGENTBI_CONVERSATION_MESSAGE_THRESHOLD", 20),
+            conversation_keep_recent_turns=_positive_int("AGENTBI_CONVERSATION_KEEP_RECENT_TURNS", 4),
         )
