@@ -53,37 +53,28 @@ class SemanticDraftLlm:
             raise SemanticLlmError("LLM API Key 无法解密，请重新配置") from exc
 
     async def test_connection(self, *, base_url: str, api_key: str, model: str) -> None:
-        old = (self._base_url, self._api_key, self._model)
-        self.configure(base_url=base_url, api_key=api_key, model=model)
+        """Verify authentication and model availability without semantic validation."""
         try:
-            # Minimal schema-only probe still exercises JSON-mode compatibility.
-            await self.enrich(
-                {
-                    "dataset": {
-                        "superset_id": 1,
-                        "name": "probe",
-                        "schema": "",
-                        "database_name": "",
-                    },
-                    "model": {"name": "探测", "biz_name": "probe", "description": ""},
-                    "fields": [
-                        {"name": "id", "type": "BIGINT"},
-                        {"name": "value", "type": "NUMERIC"},
-                    ],
-                    "identifiers": [
-                        {"name": "编号", "field": "id", "type": "primary", "synonyms": []}
-                    ],
-                    "dimensions": [],
-                    "measures": [
-                        {"name": "值", "field": "value", "aggregation": "SUM", "synonyms": []}
-                    ],
-                    "drilldown_path": [],
-                    "generation": {},
-                    "warnings": [],
-                }
+            response = await self._client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "仅回复 OK"}],
+                    "temperature": 0.1,
+                    "max_tokens": 16,
+                },
             )
-        finally:
-            self._base_url, self._api_key, self._model = old
+            if response.is_error:
+                raise self._provider_error(response)
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            if not isinstance(content, str) or not content.strip():
+                raise SemanticLlmError("模型返回内容为空")
+        except SemanticLlmError:
+            raise
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            raise SemanticLlmError("LLM 接口可达，但返回的 Chat Completions 格式无效") from exc
 
     async def enrich(self, draft: dict[str, Any]) -> dict[str, Any]:
         if not self.configured:
@@ -129,7 +120,7 @@ class SemanticDraftLlm:
                 raise self._provider_error(response)
             body = response.json()
             content = body["choices"][0]["message"]["content"]
-            result = json.loads(content)
+            result = self._parse_json_content(content)
         except SemanticLlmError:
             raise
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
@@ -144,6 +135,25 @@ class SemanticDraftLlm:
         }
         result["warnings"] = []
         return result
+
+    @staticmethod
+    def _parse_json_content(content: object) -> object:
+        if not isinstance(content, str):
+            raise TypeError("message content is not text")
+        text = content.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            start, end = text.find("{"), text.rfind("}")
+            if start < 0 or end <= start:
+                raise
+            return json.loads(text[start : end + 1])
 
     @staticmethod
     def _provider_error(response: httpx.Response) -> SemanticLlmError:

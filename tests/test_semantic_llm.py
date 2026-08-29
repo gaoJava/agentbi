@@ -122,3 +122,45 @@ def test_provider_errors_are_actionable_without_echoing_response(
         asyncio.run(client.enrich(baseline()))
     assert "secret upstream detail" not in str(captured.value)
     asyncio.run(client.close())
+
+
+def test_connection_checks_chat_protocol_without_requiring_semantic_draft() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["model"] == "glm-5.3"
+        assert "response_format" not in payload
+        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    asyncio.run(
+        client.test_connection(
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            api_key="secret",
+            model="glm-5.3",
+        )
+    )
+    asyncio.run(client.close())
+
+
+def test_enrichment_accepts_json_inside_markdown_fence() -> None:
+    result = {
+        "model": {"name": "订单", "biz_name": "orders", "description": ""},
+        "identifiers": [{"name": "订单", "field": "order_id", "type": "primary"}],
+        "dimensions": [],
+        "measures": [{"name": "金额", "field": "amount", "aggregation": "SUM"}],
+        "drilldown_path": [],
+    }
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": f"```json\n{json.dumps(result)}\n```"}}
+                ]
+            },
+        )
+    )
+    client = SemanticDraftLlm(settings(), transport)
+    enriched = asyncio.run(client.enrich(baseline()))
+    assert enriched["generation"]["ai_generated"] is True
+    asyncio.run(client.close())
