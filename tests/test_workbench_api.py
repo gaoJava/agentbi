@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from agentbi.config import Settings
 from agentbi.main import create_app
+from agentbi.orchestrator import Orchestrator
 from agentbi.superset import SupersetApiError
 
 
@@ -37,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260829.7" in shell.text
+        assert "app.js?v=20260829.8" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -78,6 +79,81 @@ def test_login_rejects_wrong_password() -> None:
         )
         assert response.status_code == 401
         assert response.json()["detail"] == "用户名或密码错误"
+
+
+def test_workbench_analysis_uses_signed_session_identity() -> None:
+    class CapturingSuperSonic:
+        request = None
+
+        async def query(self, request):
+            self.request = request
+            return {
+                "queryId": 73,
+                "queryResults": [{"department": "研发", "visits": 19}],
+                "queryTimeCost": 8,
+                "querySql": "SELECT department, COUNT(*) FROM visits GROUP BY department",
+                "response": "研发部门访问次数最高。",
+            }
+
+        async def close(self) -> None:
+            return None
+
+    upstream = CapturingSuperSonic()
+    app = create_app(settings())
+    app.state.orchestrator = Orchestrator(settings(), upstream)  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login",
+            json={"username": "user", "password": "user-password"},
+        ).json()["user"]
+        payload = {
+            "question": "访问次数最高的部门",
+            "context": {
+                "dashboard_id": "sales-dashboard",
+                "chart_id": "42",
+                "dataset_id": "21",
+                "semantic_model_id": 1,
+                "time_range": "最近30天",
+                "filters": [],
+            },
+            "client_request_id": "workbench_123456",
+        }
+        missing_csrf = client.post("/api/v1/workbench/analyze", json=payload)
+        assert missing_csrf.status_code == 403
+
+        response = client.post(
+            "/api/v1/workbench/analyze",
+            json=payload,
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == [{"department": "研发", "visits": 19}]
+        assert response.json()["evidence"]["sql_fingerprint"]
+        assert upstream.request.actor.subject == user["subject"]
+        assert upstream.request.actor.roles == user["roles"]
+
+
+def test_workbench_analysis_rejects_browser_supplied_actor() -> None:
+    app = create_app(settings())
+    with TestClient(app) as client:
+        user = client.post(
+            "/api/v1/auth/login",
+            json={"username": "user", "password": "user-password"},
+        ).json()["user"]
+        response = client.post(
+            "/api/v1/workbench/analyze",
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+            json={
+                "question": "访问次数最高的部门",
+                "actor": {"subject": "admin", "roles": ["Admin"]},
+                "context": {
+                    "dashboard_id": "sales-dashboard",
+                    "semantic_model_id": 1,
+                    "time_range": "最近30天",
+                },
+            },
+        )
+        assert response.status_code == 422
 
 
 def test_admin_can_sync_and_select_superset_home_dashboard() -> None:

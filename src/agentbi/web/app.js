@@ -30,6 +30,11 @@ const managedChartKeys = new Set();
 let activeView = 'dashboard';
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
 if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = undefined;
+let workbenchAnalysis;
+let workbenchChatId;
+let workbenchSelected;
+let workbenchDrillDepth = 0;
+let workbenchPendingDrill = false;
 
 function isValidDrillConfiguration(config) {
   return Boolean(
@@ -183,8 +188,8 @@ function switchView(view) {
     if (target) target.hidden = false;
   }
   document.querySelector('#dashboard-agent').hidden = !dashboard;
-  document.querySelector('#drill-agent').hidden = !drilldown || !isValidDrillConfiguration(drillConfigurations[selectedDrillChart]);
-  document.querySelector('.agent-input').hidden = drilldown;
+  document.querySelector('#drill-agent').hidden = !drilldown || !workbenchAnalysis;
+  document.querySelector('.agent-input').hidden = drilldown && !workbenchAnalysis;
   document.querySelectorAll('.nav-item[data-view]').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
   });
@@ -693,6 +698,10 @@ function renderDrilldown(chartId) {
   const empty = document.querySelector('#drilldown-empty');
   const detail = document.querySelector('#drilldown-view .drill-scroll');
   const header = document.querySelector('#drilldown-view .drill-header');
+  if (workbenchAnalysis) {
+    renderRealDrilldownResult(empty, detail, header);
+    return;
+  }
   if (!isValidDrillConfiguration(config)) {
     empty.hidden = false;
     detail.hidden = true;
@@ -757,6 +766,108 @@ function renderDrilldown(chartId) {
     const badge = card.querySelector('.drill-ready-badge');
     if (badge) badge.hidden = card.dataset.drillChart !== chartId;
   });
+}
+
+function resultTable(rows) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'real-query-table';
+  if (!rows.length) {
+    const message = document.createElement('p');
+    message.textContent = '真实查询已执行，但没有返回数据行。';
+    wrapper.append(message);
+    return wrapper;
+  }
+  const columns = Object.keys(rows[0]).slice(0, 6);
+  const table = document.createElement('table');
+  const head = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  columns.forEach(column => {
+    const cell = document.createElement('th'); cell.textContent = column; headRow.append(cell);
+  });
+  head.append(headRow);
+  const body = document.createElement('tbody');
+  rows.slice(0, 20).forEach(row => {
+    const tableRow = document.createElement('tr');
+    columns.forEach(column => {
+      const cell = document.createElement('td');
+      const value = row[column];
+      cell.textContent = value === null || value === undefined ? '—' : String(value);
+      tableRow.append(cell);
+    });
+    body.append(tableRow);
+  });
+  table.append(head, body); wrapper.append(table);
+  return wrapper;
+}
+
+function renderRealDrilldownResult(empty, detail, header) {
+  header.hidden = true;
+  detail.hidden = true;
+  empty.hidden = false;
+  const heading = document.createElement('strong');
+  heading.textContent = `第 ${workbenchDrillDepth} 层 · 真实语义查询结果`;
+  const answer = document.createElement('p'); answer.textContent = workbenchAnalysis.answer;
+  const evidence = document.createElement('small');
+  evidence.textContent = `查询编号 ${workbenchAnalysis.evidence.query_id} · ${workbenchAnalysis.evidence.row_count} 行 · SQL 指纹 ${workbenchAnalysis.evidence.sql_fingerprint || '—'}`;
+  empty.replaceChildren(heading, answer, resultTable(workbenchAnalysis.data), evidence);
+}
+
+function workbenchContext() {
+  const semanticModel = Number(document.querySelector('#agent-semantic-model').value);
+  if (!Number.isInteger(semanticModel) || semanticModel < 1) throw new Error('请输入有效的 SuperSonic 语义模型 ID');
+  const timeRange = document.querySelector('#agent-time-range').value.trim();
+  if (!timeRange) throw new Error('请输入时间范围');
+  return {
+    dashboard_id: String(supersetWorkspace?.dashboard_id || 'workbench-home'),
+    semantic_model_id: semanticModel,
+    time_range: timeRange,
+    filters: [],
+    ...(workbenchSelected ? { selected: workbenchSelected } : {}),
+  };
+}
+
+async function analyzeFromWorkbench() {
+  const question = document.querySelector('#agent-question').value.trim();
+  const button = document.querySelector('#agent-analyze');
+  const status = document.querySelector('#agent-query-status');
+  if (question.length < 2) { status.textContent = '请输入至少 2 个字符的问题'; return; }
+  button.disabled = true; status.textContent = '正在执行 SuperSonic 真实语义查询…';
+  try {
+    const body = await request('/api/v1/workbench/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({
+        question,
+        context: workbenchContext(),
+        client_request_id: crypto.randomUUID(),
+        ...(workbenchChatId ? { chat_id: workbenchChatId } : {}),
+      }),
+    });
+    workbenchAnalysis = body;
+    workbenchChatId = body.chat_id || workbenchChatId;
+    if (workbenchPendingDrill) {
+      workbenchDrillDepth += 1;
+      workbenchPendingDrill = false;
+    }
+    document.querySelector('#agent-answer').textContent = body.answer;
+    document.querySelector('#agent-result-table').replaceChildren(resultTable(body.data));
+    document.querySelector('#agent-evidence-summary').textContent = `查询编号 ${body.evidence.query_id} · ${body.evidence.row_count} 行 · SQL 指纹 ${body.evidence.sql_fingerprint || '—'}`;
+    document.querySelector('#agent-query-result').hidden = false;
+    document.querySelector('#start-result-drilldown').hidden = !body.data.length;
+    status.textContent = body.warnings?.length ? body.warnings.join('；') : '真实查询完成';
+    if (activeView === 'drilldown') {
+      document.querySelector('#drill-agent-context').textContent = workbenchSelected
+        ? `${workbenchSelected.dimension}=${workbenchSelected.value}` : '原始查询结果';
+      document.querySelector('#drill-insight').textContent = body.answer;
+      document.querySelector('#drill-insight-source').textContent = `查询编号 ${body.evidence.query_id}`;
+      document.querySelector('#drill-evidence').textContent = `返回 ${body.evidence.row_count} 行 · SQL 指纹 ${body.evidence.sql_fingerprint || '—'}`;
+      renderDrilldown();
+    }
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderDrillSourceTable(config) {
@@ -870,6 +981,25 @@ document.querySelector('#back-local-canvas').addEventListener('click', () => sel
 document.querySelector('#retry-superset').addEventListener('click', () => loadSupersetWorkspace({ force: true }));
 document.querySelector('#superset-view-mode').addEventListener('click', () => setSupersetFrameMode('view'));
 document.querySelector('#superset-edit-mode').addEventListener('click', () => setSupersetFrameMode('edit'));
+document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
+document.querySelector('#agent-question').addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') analyzeFromWorkbench();
+});
+document.querySelector('#start-result-drilldown').addEventListener('click', () => {
+  const row = workbenchAnalysis?.data?.[0];
+  if (!row) return;
+  const dimension = Object.keys(row).find(key => ['string', 'number'].includes(typeof row[key]));
+  if (!dimension) return;
+  workbenchSelected = { label: dimension, dimension, value: row[dimension] };
+  workbenchPendingDrill = true;
+  document.querySelector('#agent-question').value = `请围绕 ${dimension}=${row[dimension]} 下钻分析，并说明主要差异`;
+  document.querySelector('#drill-agent-context').textContent = `待执行：${dimension}=${row[dimension]}`;
+  document.querySelector('#drill-insight').textContent = workbenchAnalysis.answer;
+  document.querySelector('#drill-insight-source').textContent = `查询编号 ${workbenchAnalysis.evidence.query_id}`;
+  document.querySelector('#drill-evidence').textContent = `返回 ${workbenchAnalysis.evidence.row_count} 行 · SQL 指纹 ${workbenchAnalysis.evidence.sql_fingerprint || '—'}`;
+  switchView('drilldown');
+  renderDrilldown();
+});
 document.querySelector('#refresh-dashboard').addEventListener('click', async () => {
   if (dashboardCanvasMode === 'superset') {
     await loadSupersetWorkspace({ force: true });

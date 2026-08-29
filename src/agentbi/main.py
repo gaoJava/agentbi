@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agentbi.auth import SESSION_COOKIE, AuthenticationError, SessionIdentity, SessionManager
 from agentbi.config import Settings
-from agentbi.models import AnalyzeRequest, AnalyzeResponse
+from agentbi.models import Actor, AnalyzeRequest, AnalyzeResponse, ScreenContext
 from agentbi.orchestrator import Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
 from agentbi.superset import SupersetApiError, SupersetClient
@@ -38,6 +38,27 @@ class LoginPayload(BaseModel):
 
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=256)
+
+
+class WorkbenchAnalyzePayload(BaseModel):
+    """Analysis input accepted from the standalone workbench.
+
+    Actor identity is deliberately absent: it is reconstructed from the signed
+    server-side session so callers cannot grant themselves roles or data scope.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=2, max_length=2000)
+    context: ScreenContext
+    chat_id: int | None = Field(default=None, gt=0)
+    agent_id: int | None = Field(default=None, gt=0)
+    client_request_id: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
 
 
 class ChartCreatePayload(BaseModel):
@@ -239,6 +260,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.superset_client = superset_client
+    app.state.orchestrator = orchestrator
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -277,6 +299,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     semantic_session = require_permission("semantic_model:manage")
     datasource_session = require_permission("datasource:manage")
     dashboard_management_session = require_permission("dashboard:manage")
+    drilldown_session = require_permission("drilldown:use")
 
     def enforce_csrf(request: Request, identity: SessionIdentity) -> None:
         if not hmac.compare_digest(
@@ -1145,6 +1168,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail=chart_key,
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post("/api/v1/workbench/analyze", response_model=AnalyzeResponse)
+    async def workbench_analyze(
+        payload: WorkbenchAnalyzePayload,
+        request: Request,
+        identity: SessionIdentity = drilldown_session,
+    ) -> AnalyzeResponse:
+        """Run a governed semantic query for the signed-in workbench user."""
+
+        enforce_csrf(request, identity)
+        governed_request = AnalyzeRequest(
+            question=payload.question,
+            actor=Actor(
+                subject=identity.subject,
+                display_name=identity.display_name,
+                roles=list(identity.roles),
+            ),
+            context=payload.context,
+            chat_id=payload.chat_id,
+            agent_id=payload.agent_id,
+            client_request_id=payload.client_request_id,
+        )
+        try:
+            result = await app.state.orchestrator.analyze(governed_request)
+        except RateLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="request rate limit exceeded",
+                headers={"Retry-After": "60"},
+            ) from exc
+        except PolicyViolation as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except UpstreamError as exc:
+            logger.warning("workbench semantic query failed: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="semantic query service is unavailable",
+            ) from exc
+        sessions.audit(
+            "workbench_analysis_completed",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"query={result.evidence.query_id};rows={result.evidence.row_count}",
+        )
+        return result
 
     @app.post(
         "/api/v1/analyze",

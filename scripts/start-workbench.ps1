@@ -30,6 +30,24 @@ $env:AGENTBI_DEMO_USER_PASSWORD = 'user'
 $env:AGENTBI_DEMO_ADMIN_PASSWORD = 'admin'
 $env:AGENTBI_DATABASE_URL = 'sqlite:///./data/agentbi.db'
 $env:SUPERSONIC_BASE_URL = 'http://127.0.0.1:9080'
+$superSonicUser = if ($env:SUPERSONIC_USER) { $env:SUPERSONIC_USER } else { 'admin' }
+$superSonicPassword = if ($env:SUPERSONIC_PASSWORD) { $env:SUPERSONIC_PASSWORD } else { 'admin' }
+try {
+    $loginBody = @{ name = $superSonicUser; password = $superSonicPassword } | ConvertTo-Json
+    $login = Invoke-RestMethod -Uri "$($env:SUPERSONIC_BASE_URL)/api/auth/user/login" `
+        -Method Post -ContentType 'application/json' -Body $loginBody -TimeoutSec 10
+    if ($login.code -eq 200 -and $login.data) {
+        # Keep the short-lived credential in this process environment only. It is not
+        # written to the repository, database, logs, or browser-visible responses.
+        $env:SUPERSONIC_TOKEN = "Bearer $($login.data)"
+    }
+    else {
+        Write-Warning 'SuperSonic login failed; the workbench will show a recoverable query error.'
+    }
+}
+catch {
+    Write-Warning 'SuperSonic is unavailable; the workbench will not substitute simulated data.'
+}
 $env:SUPERSET_BASE_URL = 'http://127.0.0.1:8088'
 $env:SUPERSET_DASHBOARD_PATH = '/superset/dashboard/1/'
 $env:SUPERSET_USER = 'admin'

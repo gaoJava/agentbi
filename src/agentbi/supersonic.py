@@ -33,6 +33,9 @@ class SuperSonicClient:
             headers=headers,
             timeout=httpx.Timeout(settings.request_timeout_seconds),
             transport=transport,
+            # Local governed-query traffic must not be intercepted by desktop or
+            # corporate proxy environment variables. This matches SupersetClient.
+            trust_env=False,
         )
         # The inspected SuperSonic build resolves governed metric candidates reliably
         # through its stateless chat (id 0), while newly persisted chats can be captured
@@ -133,8 +136,18 @@ class SuperSonicClient:
             response = await self._client.request(method, path, json=payload, params=params)
             response.raise_for_status()
             body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise UpstreamError("SuperSonic semantic query failed") from exc
+        except httpx.HTTPStatusError as exc:
+            # Status is safe for internal diagnostics; response bodies may contain
+            # SQL or upstream implementation details and are deliberately discarded.
+            raise UpstreamError(
+                f"SuperSonic semantic query returned HTTP {exc.response.status_code}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise UpstreamError(
+                f"SuperSonic semantic query failed ({type(exc).__name__})"
+            ) from exc
+        except ValueError as exc:
+            raise UpstreamError("SuperSonic semantic query returned invalid JSON") from exc
         if not isinstance(body, dict):
             raise UpstreamError("SuperSonic returned an unexpected response")
         if body.get("code") != 200 or "data" not in body:

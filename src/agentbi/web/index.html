@@ -203,9 +203,9 @@
 
     <aside class="agent-panel">
       <header><div><span class="agent-icon">✦</span><div><strong>AgentBI 分析助手</strong><small>可验证的经营分析 Agent</small></div></div><span class="online">● 已连接</span></header>
-      <section id="dashboard-agent"><section class="context-box"><div><strong>屏幕上下文</strong><button>设置</button></div><p>已连接真实 Superset 画布</p><div><span id="agent-dashboard-name">经营总览</span><span id="agent-scope">按账号权限过滤</span></div></section><section class="agent-welcome"><span>✦</span><h3>AgentBI 分析助手</h3><p>真实查询上下文尚未绑定。完成 Superset 图表、语义指标和查询接口映射后，才会开放问答、洞察和报告。</p></section></section>
-      <section id="drill-agent" class="drill-agent" hidden><div class="drill-context"><span>▱ 当前上下文：</span><strong id="drill-agent-context">第 2 层 · 华东产品线贡献</strong></div><section class="suggestions"><strong>💡 推荐问题</strong><button id="drill-question-one">华东增长来自哪里？ <span>›</span></button><button id="drill-question-two">哪个产品线拖累毛利？ <span>›</span></button></section><div class="ai-insight"><strong>✦ AI 洞察</strong><p id="drill-insight">消费电子贡献 <b>42%</b>，但毛利率环比下降 <b>3.2</b> 个百分点。</p><small id="drill-insight-source">洞察来源：与 2024 Q3 环比对比</small></div><div class="evidence-path"><strong>🔗 证据路径</strong><p id="drill-evidence">销售总览 → 2024 Q4 → 华东 → 产品线</p></div><button class="report-cta">▤ 生成分析报告</button></section>
-      <div class="agent-input"><textarea aria-label="向 AgentBI 提问" placeholder="针对当前仪表盘提问…"></textarea><button>开始分析</button><small>回答将遵循当前用户的数据权限</small></div>
+      <section id="dashboard-agent"><section class="context-box"><div><strong>真实查询上下文</strong></div><p>查询经 AgentBI 安全代理转发至 SuperSonic</p><div><span id="agent-dashboard-name">经营总览</span><span id="agent-scope">按账号权限过滤</span></div><label>语义模型 ID<input id="agent-semantic-model" type="number" min="1" value="1"></label><label>时间范围<input id="agent-time-range" maxlength="256" value="最近30天"></label></section><section id="agent-query-result" class="agent-welcome" hidden><h3 id="agent-answer"></h3><div id="agent-result-table"></div><small id="agent-evidence-summary"></small><button id="start-result-drilldown" type="button" hidden>基于首行真实结果继续下钻</button></section></section>
+      <section id="drill-agent" class="drill-agent" hidden><div class="drill-context"><span>真实查询层级：</span><strong id="drill-agent-context"></strong></div><div class="ai-insight"><strong>AI 分析结论</strong><p id="drill-insight"></p><small id="drill-insight-source"></small></div><div class="evidence-path"><strong>证据</strong><p id="drill-evidence"></p></div></section>
+      <div class="agent-input"><textarea id="agent-question" aria-label="向 AgentBI 提问" maxlength="2000" placeholder="请输入已在 SuperSonic 配置口径的问题…"></textarea><button id="agent-analyze" type="button">开始真实分析</button><small id="agent-query-status">回答遵循当前用户权限，只展示真实查询结果</small></div>
     </aside>
   </main>
 
@@ -341,6 +341,6 @@
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
   <script src="/app/assets/generated/workbench-runtime.js?v=20260829.7" defer></script>
-  <script src="/app/assets/app.js?v=20260829.7" defer></script>
+  <script src="/app/assets/app.js?v=20260829.8" defer></script>
 </body>
 </html>
