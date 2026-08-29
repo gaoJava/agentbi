@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from typing import Any
 
 import httpx
+from cryptography.fernet import Fernet, InvalidToken
 
 from agentbi.config import Settings
 
@@ -19,6 +22,9 @@ class SemanticDraftLlm:
         self._base_url = settings.llm_base_url
         self._api_key = settings.llm_api_key
         self._model = settings.llm_model
+        self._fernet = Fernet(
+            base64.urlsafe_b64encode(hashlib.sha256(settings.session_secret.encode()).digest())
+        )
         self._client = httpx.AsyncClient(
             transport=transport,
             timeout=settings.request_timeout_seconds,
@@ -31,6 +37,53 @@ class SemanticDraftLlm:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    def configure(self, *, base_url: str, api_key: str, model: str, enabled: bool = True) -> None:
+        self._base_url = base_url.rstrip("/") if enabled else None
+        self._api_key = api_key if enabled else None
+        self._model = model if enabled else None
+
+    def encrypt_key(self, api_key: str) -> str:
+        return self._fernet.encrypt(api_key.encode()).decode()
+
+    def decrypt_key(self, token: str) -> str:
+        try:
+            return self._fernet.decrypt(token.encode()).decode()
+        except InvalidToken as exc:
+            raise SemanticLlmError("LLM API Key 无法解密，请重新配置") from exc
+
+    async def test_connection(self, *, base_url: str, api_key: str, model: str) -> None:
+        old = (self._base_url, self._api_key, self._model)
+        self.configure(base_url=base_url, api_key=api_key, model=model)
+        try:
+            # Minimal schema-only probe still exercises JSON-mode compatibility.
+            await self.enrich(
+                {
+                    "dataset": {
+                        "superset_id": 1,
+                        "name": "probe",
+                        "schema": "",
+                        "database_name": "",
+                    },
+                    "model": {"name": "探测", "biz_name": "probe", "description": ""},
+                    "fields": [
+                        {"name": "id", "type": "BIGINT"},
+                        {"name": "value", "type": "NUMERIC"},
+                    ],
+                    "identifiers": [
+                        {"name": "编号", "field": "id", "type": "primary", "synonyms": []}
+                    ],
+                    "dimensions": [],
+                    "measures": [
+                        {"name": "值", "field": "value", "aggregation": "SUM", "synonyms": []}
+                    ],
+                    "drilldown_path": [],
+                    "generation": {},
+                    "warnings": [],
+                }
+            )
+        finally:
+            self._base_url, self._api_key, self._model = old
 
     async def enrich(self, draft: dict[str, Any]) -> dict[str, Any]:
         if not self.configured:

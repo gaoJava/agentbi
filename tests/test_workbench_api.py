@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260829.11" in shell.text
+        assert "app.js?v=20260829.12" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -940,3 +940,42 @@ def test_admin_creates_supersonic_database_without_echoing_secret() -> None:
         assert sonic.received["password"] == "secret-value"
         assert sonic.received["type"] == "postgresql"
         assert "secret-value" not in response.text
+
+
+def test_admin_saves_masked_encrypted_llm_provider_config() -> None:
+    app = create_app(settings())
+    with TestClient(app) as client:
+        assert client.get("/api/v1/admin/llm-provider").status_code == 401
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
+        headers = {"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]}
+        initial = client.get("/api/v1/admin/llm-provider")
+        assert initial.status_code == 200
+        assert initial.json()["configured"] is False
+
+        secret = "provider-secret-value"
+        payload = {
+            "base_url": "https://llm.example/v1/",
+            "model": "enterprise-model",
+            "api_key": secret,
+            "enabled": False,
+        }
+        assert client.put("/api/v1/admin/llm-provider", json=payload).status_code == 403
+        saved = client.put("/api/v1/admin/llm-provider", headers=headers, json=payload)
+        assert saved.status_code == 200
+        assert saved.json()["api_key_masked"] == "••••••••"
+        assert saved.json()["base_url"] == "https://llm.example/v1"
+        assert secret not in saved.text
+
+        masked = client.get("/api/v1/admin/llm-provider")
+        assert masked.json()["api_key_masked"] == "••••••••"
+        assert secret not in masked.text
+
+        updated = client.put(
+            "/api/v1/admin/llm-provider",
+            headers=headers,
+            json={**payload, "model": "enterprise-model-v2", "api_key": ""},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["model"] == "enterprise-model-v2"

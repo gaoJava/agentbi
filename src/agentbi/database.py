@@ -113,7 +113,9 @@ class AuditEvent(Base):
     outcome: Mapped[str] = mapped_column(String(32))
     source_ip: Mapped[str] = mapped_column(String(64), default="")
     detail: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
 
 class ConversationState(Base):
@@ -132,7 +134,9 @@ class ConversationTurn(Base):
     """Atomic user, tool-call, tool-result and assistant interaction."""
 
     __tablename__ = "conversation_turns"
-    conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversation_states.id"), primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("conversation_states.id"), primary_key=True
+    )
     sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_question: Mapped[str] = mapped_column(Text)
     assistant_answer: Mapped[str] = mapped_column(Text, default="")
@@ -201,7 +205,9 @@ class AnalysisReport(Base):
     summary: Mapped[str] = mapped_column(Text)
     evidence_path: Mapped[str] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
 
 class DataSourceAsset(Base):
@@ -233,6 +239,19 @@ class SemanticModelAsset(Base):
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LlmProviderConfig(Base):
+    """Singleton LLM provider config; the API key is stored as authenticated ciphertext."""
+
+    __tablename__ = "llm_provider_configs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    base_url: Mapped[str] = mapped_column(String(512))
+    model_name: Mapped[str] = mapped_column(String(128))
+    encrypted_api_key: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -330,6 +349,40 @@ class IdentityRepository:
         with Session(self.engine) as db, db.begin():
             db.add(ConversationState(id=conversation_id, actor_user_id=actor_user_id))
 
+    def get_llm_provider_config(self) -> dict[str, object] | None:
+        with Session(self.engine) as db:
+            item = db.get(LlmProviderConfig, 1)
+            if item is None:
+                return None
+            return {
+                "base_url": item.base_url,
+                "model": item.model_name,
+                "encrypted_api_key": item.encrypted_api_key,
+                "enabled": item.enabled,
+                "updated_at": item.updated_at.isoformat(),
+            }
+
+    def save_llm_provider_config(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        encrypted_api_key: str,
+        enabled: bool,
+        actor_user_id: str,
+    ) -> None:
+        with Session(self.engine) as db, db.begin():
+            item = db.get(LlmProviderConfig, 1)
+            if item is None:
+                item = LlmProviderConfig(id=1)
+                db.add(item)
+            item.base_url = base_url
+            item.model_name = model
+            item.encrypted_api_key = encrypted_api_key
+            item.enabled = enabled
+            item.updated_by = actor_user_id
+            item.updated_at = utc_now()
+
     def conversation_context(
         self, conversation_id: int, actor_user_id: str
     ) -> tuple[str, int, list[dict[str, object]]] | None:
@@ -345,17 +398,21 @@ class IdentityRepository:
                 )
                 .order_by(ConversationTurn.sequence)
             ).all()
-            return state.summary, state.compressed_through, [
-                {
-                    "sequence": turn.sequence,
-                    "question": turn.user_question,
-                    "answer": turn.assistant_answer,
-                    "tool_call": turn.tool_call,
-                    "tool_result": turn.tool_result,
-                    "tokens": turn.estimated_tokens,
-                }
-                for turn in turns
-            ]
+            return (
+                state.summary,
+                state.compressed_through,
+                [
+                    {
+                        "sequence": turn.sequence,
+                        "question": turn.user_question,
+                        "answer": turn.assistant_answer,
+                        "tool_call": turn.tool_call,
+                        "tool_result": turn.tool_result,
+                        "tokens": turn.estimated_tokens,
+                    }
+                    for turn in turns
+                ],
+            )
 
     def append_conversation_turn(
         self, conversation_id: int, actor_user_id: str, **values: object
@@ -388,7 +445,10 @@ class IdentityRepository:
         asset = db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name.strip()))
         if asset is None:
             asset = DataSourceAsset(
-                id=str(uuid.uuid4()), name=name.strip(), created_by=actor_user_id, is_system=is_system
+                id=str(uuid.uuid4()),
+                name=name.strip(),
+                created_by=actor_user_id,
+                is_system=is_system,
             )
             db.add(asset)
             db.flush()
@@ -398,12 +458,13 @@ class IdentityRepository:
     def _ensure_semantic_model(
         db: Session, name: str, actor_user_id: str | None, *, is_system: bool = False
     ) -> SemanticModelAsset:
-        asset = db.scalar(
-            select(SemanticModelAsset).where(SemanticModelAsset.name == name.strip())
-        )
+        asset = db.scalar(select(SemanticModelAsset).where(SemanticModelAsset.name == name.strip()))
         if asset is None:
             asset = SemanticModelAsset(
-                id=str(uuid.uuid4()), name=name.strip(), created_by=actor_user_id, is_system=is_system
+                id=str(uuid.uuid4()),
+                name=name.strip(),
+                created_by=actor_user_id,
+                is_system=is_system,
             )
             db.add(asset)
             db.flush()
@@ -611,7 +672,8 @@ class IdentityRepository:
                 raise ValueError("role already exists")
             self._validate_permissions(db, permissions)
             role = Role(code=normalized, name=name.strip(), description=description.strip())
-            db.add(role); db.flush()
+            db.add(role)
+            db.flush()
             for permission in sorted(set(permissions)):
                 db.add(RolePermission(role_code=normalized, permission_code=permission))
             db.flush()
@@ -627,7 +689,8 @@ class IdentityRepository:
             if code in {"user", "admin"}:
                 raise PermissionError("builtin role is immutable")
             self._validate_permissions(db, permissions)
-            role.name = name.strip(); role.description = description.strip()
+            role.name = name.strip()
+            role.description = description.strip()
             db.execute(delete(RolePermission).where(RolePermission.role_code == code))
             for permission in sorted(set(permissions)):
                 db.add(RolePermission(role_code=code, permission_code=permission))
@@ -667,9 +730,14 @@ class IdentityRepository:
         count = db.scalar(
             select(func.count()).select_from(UserRole).where(UserRole.role_code == role.code)
         )
-        return {"code": role.code, "name": role.name, "description": role.description,
-                "permissions": permissions, "user_count": int(count or 0),
-                "builtin": role.code in {"user", "admin"}}
+        return {
+            "code": role.code,
+            "name": role.name,
+            "description": role.description,
+            "permissions": permissions,
+            "user_count": int(count or 0),
+            "builtin": role.code in {"user", "admin"},
+        }
 
     def list_data_sources(self) -> list[dict[str, object]]:
         with Session(self.engine) as db:
@@ -683,10 +751,14 @@ class IdentityRepository:
             if db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name.strip())):
                 raise ValueError("data source already exists")
             asset = DataSourceAsset(
-                id=str(uuid.uuid4()), name=name.strip(), source_type=source_type.strip(),
-                description=description.strip(), created_by=actor_user_id,
+                id=str(uuid.uuid4()),
+                name=name.strip(),
+                source_type=source_type.strip(),
+                description=description.strip(),
+                created_by=actor_user_id,
             )
-            db.add(asset); db.flush()
+            db.add(asset)
+            db.flush()
             return self._data_source_payload(db, asset)
 
     def update_data_source(
@@ -696,8 +768,11 @@ class IdentityRepository:
             asset = db.scalar(select(DataSourceAsset).where(DataSourceAsset.name == name))
             if asset is None:
                 raise KeyError("data source not found")
-            asset.source_type = source_type.strip(); asset.description = description.strip()
-            asset.status = status; asset.updated_at = utc_now(); db.flush()
+            asset.source_type = source_type.strip()
+            asset.description = description.strip()
+            asset.status = status
+            asset.updated_at = utc_now()
+            db.flush()
             return self._data_source_payload(db, asset)
 
     def delete_data_source(self, name: str) -> None:
@@ -720,35 +795,36 @@ class IdentityRepository:
         self, *, name: str, subject_area: str, description: str, actor_user_id: str
     ) -> dict[str, object]:
         with Session(self.engine) as db, db.begin():
-            if db.scalar(
-                select(SemanticModelAsset).where(SemanticModelAsset.name == name.strip())
-            ):
+            if db.scalar(select(SemanticModelAsset).where(SemanticModelAsset.name == name.strip())):
                 raise ValueError("semantic model already exists")
             asset = SemanticModelAsset(
-                id=str(uuid.uuid4()), name=name.strip(), subject_area=subject_area.strip(),
-                description=description.strip(), created_by=actor_user_id,
+                id=str(uuid.uuid4()),
+                name=name.strip(),
+                subject_area=subject_area.strip(),
+                description=description.strip(),
+                created_by=actor_user_id,
             )
-            db.add(asset); db.flush()
+            db.add(asset)
+            db.flush()
             return self._semantic_model_payload(db, asset)
 
     def update_semantic_model(
         self, name: str, *, subject_area: str, description: str, status: str
     ) -> dict[str, object]:
         with Session(self.engine) as db, db.begin():
-            asset = db.scalar(
-                select(SemanticModelAsset).where(SemanticModelAsset.name == name)
-            )
+            asset = db.scalar(select(SemanticModelAsset).where(SemanticModelAsset.name == name))
             if asset is None:
                 raise KeyError("semantic model not found")
-            asset.subject_area = subject_area.strip(); asset.description = description.strip()
-            asset.status = status; asset.updated_at = utc_now(); db.flush()
+            asset.subject_area = subject_area.strip()
+            asset.description = description.strip()
+            asset.status = status
+            asset.updated_at = utc_now()
+            db.flush()
             return self._semantic_model_payload(db, asset)
 
     def delete_semantic_model(self, name: str) -> None:
         with Session(self.engine) as db, db.begin():
-            asset = db.scalar(
-                select(SemanticModelAsset).where(SemanticModelAsset.name == name)
-            )
+            asset = db.scalar(select(SemanticModelAsset).where(SemanticModelAsset.name == name))
             if asset is None:
                 raise KeyError("semantic model not found")
             if asset.is_system or self._semantic_model_references(db, name):
@@ -759,32 +835,38 @@ class IdentityRepository:
     def _data_source_references(db: Session, name: str) -> int:
         return int(
             db.scalar(
-                select(func.count()).select_from(DashboardChart).where(
-                    DashboardChart.dataset_name == name
-                )
-            ) or 0
+                select(func.count())
+                .select_from(DashboardChart)
+                .where(DashboardChart.dataset_name == name)
+            )
+            or 0
         )
 
     @classmethod
     def _data_source_payload(cls, db: Session, asset: DataSourceAsset) -> dict[str, object]:
         references = cls._data_source_references(db, asset.name) + (2 if asset.is_system else 0)
-        return {"name": asset.name, "type": asset.source_type, "description": asset.description,
-                "status": asset.status, "charts": references, "is_system": asset.is_system}
+        return {
+            "name": asset.name,
+            "type": asset.source_type,
+            "description": asset.description,
+            "status": asset.status,
+            "charts": references,
+            "is_system": asset.is_system,
+        }
 
     @staticmethod
     def _semantic_model_references(db: Session, name: str) -> int:
         return int(
             db.scalar(
-                select(func.count()).select_from(DrilldownDefinition).where(
-                    DrilldownDefinition.semantic_model == name
-                )
-            ) or 0
+                select(func.count())
+                .select_from(DrilldownDefinition)
+                .where(DrilldownDefinition.semantic_model == name)
+            )
+            or 0
         )
 
     @classmethod
-    def _semantic_model_payload(
-        cls, db: Session, asset: SemanticModelAsset
-    ) -> dict[str, object]:
+    def _semantic_model_payload(cls, db: Session, asset: SemanticModelAsset) -> dict[str, object]:
         rows = db.execute(
             select(DashboardChart.metric)
             .join(DrilldownDefinition, DrilldownDefinition.chart_id == DashboardChart.id)
@@ -794,9 +876,15 @@ class IdentityRepository:
         if asset.is_system:
             metrics = sorted(set(metrics) | {"销售收入"})
         references = cls._semantic_model_references(db, asset.name) + (2 if asset.is_system else 0)
-        return {"name": asset.name, "subject_area": asset.subject_area,
-                "description": asset.description, "status": asset.status,
-                "metrics": metrics, "charts": references, "is_system": asset.is_system}
+        return {
+            "name": asset.name,
+            "subject_area": asset.subject_area,
+            "description": asset.description,
+            "status": asset.status,
+            "metrics": metrics,
+            "charts": references,
+            "is_system": asset.is_system,
+        }
 
     def list_audit_events(self, *, limit: int = 100) -> list[dict[str, object]]:
         with Session(self.engine) as db:
@@ -875,7 +963,9 @@ class IdentityRepository:
             db.flush()
             return self._report_payload(report)
 
-    def list_reports(self, *, actor_user_id: str, include_all: bool = False) -> list[dict[str, object]]:
+    def list_reports(
+        self, *, actor_user_id: str, include_all: bool = False
+    ) -> list[dict[str, object]]:
         with Session(self.engine) as db:
             statement = select(AnalysisReport).order_by(AnalysisReport.created_at.desc())
             if not include_all:
@@ -1143,9 +1233,7 @@ class IdentityRepository:
             db.delete(chart)
 
     @staticmethod
-    def _chart_payload(
-        chart: DashboardChart, drilldown: DrilldownDefinition
-    ) -> dict[str, object]:
+    def _chart_payload(chart: DashboardChart, drilldown: DrilldownDefinition) -> dict[str, object]:
         return {
             "id": chart.id,
             "chart_key": chart.chart_key,

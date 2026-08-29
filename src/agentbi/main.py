@@ -220,6 +220,14 @@ class SemanticDraftRequest(BaseModel):
     dataset_id: int = Field(gt=0)
 
 
+class LlmProviderPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_url: str = Field(min_length=8, max_length=512, pattern=r"^https?://")
+    model: str = Field(min_length=1, max_length=128)
+    api_key: str = Field(default="", max_length=512)
+    enabled: bool = True
+
+
 class SuperSonicDatabasePayload(BaseModel):
     """One-shot secret forwarded to SuperSonic and never persisted by AgentBI."""
 
@@ -283,6 +291,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     sessions = SessionManager(settings)
     supersonic = SuperSonicClient(settings, repository=sessions.repository)
     semantic_llm = SemanticDraftLlm(settings)
+    stored_llm = sessions.repository.get_llm_provider_config()
+    if stored_llm and stored_llm["enabled"]:
+        try:
+            semantic_llm.configure(
+                base_url=str(stored_llm["base_url"]),
+                api_key=semantic_llm.decrypt_key(str(stored_llm["encrypted_api_key"])),
+                model=str(stored_llm["model"]),
+            )
+        except SemanticLlmError:
+            logger.warning("Stored LLM provider key cannot be decrypted; provider disabled")
     orchestrator = Orchestrator(settings, supersonic)
     superset_client = SupersetClient(
         settings.superset_base_url,
@@ -810,6 +828,77 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await app.state.supersonic_client.list_modeling_catalog()
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 建模目录不可用") from exc
+
+    @app.get("/api/v1/admin/llm-provider")
+    async def get_llm_provider(_: SessionIdentity = semantic_session) -> dict[str, object]:
+        item = sessions.repository.get_llm_provider_config()
+        if item is None:
+            return {
+                "configured": False,
+                "enabled": False,
+                "base_url": "",
+                "model": "",
+                "api_key_masked": "",
+            }
+        return {
+            "configured": True,
+            "enabled": item["enabled"],
+            "base_url": item["base_url"],
+            "model": item["model"],
+            "api_key_masked": "••••••••",
+            "updated_at": item["updated_at"],
+        }
+
+    @app.put("/api/v1/admin/llm-provider")
+    async def save_llm_provider(
+        payload: LlmProviderPayload, request: Request, identity: SessionIdentity = semantic_session
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        existing = sessions.repository.get_llm_provider_config()
+        if not payload.api_key and existing is None:
+            raise HTTPException(status_code=422, detail="首次配置必须填写 API Key")
+        api_key = payload.api_key
+        if not api_key and existing:
+            try:
+                api_key = semantic_llm.decrypt_key(str(existing["encrypted_api_key"]))
+            except SemanticLlmError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail="已保存的 API Key 无法解密，请重新填写",
+                ) from exc
+        if payload.enabled:
+            try:
+                await semantic_llm.test_connection(
+                    base_url=payload.base_url, api_key=api_key, model=payload.model
+                )
+            except SemanticLlmError as exc:
+                raise HTTPException(status_code=422, detail="LLM 连接测试失败，配置未保存") from exc
+        encrypted = semantic_llm.encrypt_key(api_key)
+        sessions.repository.save_llm_provider_config(
+            base_url=payload.base_url.rstrip("/"),
+            model=payload.model,
+            encrypted_api_key=encrypted,
+            enabled=payload.enabled,
+            actor_user_id=identity.subject,
+        )
+        semantic_llm.configure(
+            base_url=payload.base_url, api_key=api_key, model=payload.model, enabled=payload.enabled
+        )
+        sessions.audit(
+            "llm_provider_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"model:{payload.model}:enabled:{payload.enabled}",
+        )
+        return {
+            "message": "LLM 服务配置已保存并生效",
+            "configured": True,
+            "enabled": payload.enabled,
+            "base_url": payload.base_url.rstrip("/"),
+            "model": payload.model,
+            "api_key_masked": "••••••••",
+        }
 
     @app.post("/api/v1/admin/semantic-drafts/databases", status_code=status.HTTP_201_CREATED)
     async def create_supersonic_database(

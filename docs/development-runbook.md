@@ -124,7 +124,10 @@ before the competition stability and security review.
 ## Optional LLM semantic-draft enrichment
 
 The semantic draft workflow works without an LLM and labels that mode as metadata inference.
-To enable a real OpenAI-compatible provider, set these only in the AgentBI server process:
+An administrator can configure a real OpenAI-compatible provider from **语义模型 → 模型服务配置**.
+AgentBI tests the provider before enabling it, encrypts the API key at rest with a key derived from
+the server session secret, never returns the plaintext key, and applies the configuration without a
+restart. Alternatively, bootstrap a provider through server-process environment variables:
 
 ```powershell
 $env:AGENTBI_LLM_BASE_URL = 'https://your-provider.example/v1'

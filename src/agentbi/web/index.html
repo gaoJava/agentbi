@@ -176,7 +176,7 @@
       </section>
 
       <section id="semantic-models-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>语义模型</h1><p>实时读取 SuperSonic 主题域与语义模型</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button id="open-semantic-draft" class="primary-small" type="button">✦ 智能建模草稿</button><button class="module-refresh" data-module="semantic-models" type="button">⟳ 同步 SuperSonic</button></div></header>
+        <header class="registry-header"><div><h1>语义模型</h1><p>实时读取 SuperSonic 主题域与语义模型</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button id="open-llm-provider" type="button">⚙ 模型服务配置</button><button id="open-semantic-draft" class="primary-small" type="button">✦ 智能建模草稿</button><button class="module-refresh" data-module="semantic-models" type="button">⟳ 同步 SuperSonic</button></div></header>
         <div class="registry-content"><aside class="registry-note"><strong>真实模型来源</strong><p>本页不再展示 AgentBI 自建占位模型。模型由 SuperSonic 负责创建、指标治理和权限控制；AgentBI 只保存 Superset 图表到 Model ID 的映射。</p></aside><section class="registry-table-card"><table><thead><tr><th>Model ID</th><th>模型名称</th><th>主题域</th><th>业务标识</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
       </section>
 
@@ -371,6 +371,10 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="sonic-database-title"><header><div><span>一次性安全转交</span><h2 id="sonic-database-title">配置 SuperSonic 同源连接</h2></div><button id="close-sonic-database" type="button">×</button></header><form id="sonic-database-form"><div class="wizard-grid"><label>连接名称<input id="sonic-db-name" required></label><label>数据库类型<select id="sonic-db-engine"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="doris">Doris</option></select></label><label>主机<input id="sonic-db-host" required></label><label>端口<input id="sonic-db-port" type="number" value="5432" min="1" max="65535" required></label><label>数据库<input id="sonic-db-database" required></label><label>用户名<input id="sonic-db-username" autocomplete="username" required></label><label class="wizard-full">密码<small>仅用于本次测试并转交 SuperSonic，AgentBI 不保存</small><input id="sonic-db-password" type="password" autocomplete="new-password" required></label></div><div id="sonic-database-error" class="form-error" hidden></div><footer><button id="cancel-sonic-database" type="button">取消</button><button class="primary-button" type="submit">测试并保存</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260829.11" defer></script>
+  <div id="llm-provider-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">真实 LLM 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="qwen-plus" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="首次配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox" checked><span>启用真实 LLM 增强</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">测试连接并保存</button></footer></form></section>
+  </div>
+
+  <script src="/app/assets/app.js?v=20260829.12" defer></script>
 </body>
 </html>

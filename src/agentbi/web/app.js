@@ -1907,6 +1907,65 @@ async function endSession({ switchAccount = false } = {}) {
 document.querySelector('#switch-account-button').addEventListener('click', () => endSession({ switchAccount: true }));
 document.querySelector('#logout-button').addEventListener('click', () => endSession());
 
+async function openLlmProviderEditor() {
+  const error = document.querySelector('#llm-provider-error');
+  error.hidden = true;
+  try {
+    const config = await request('/api/v1/admin/llm-provider');
+    document.querySelector('#llm-base-url').value = config.base_url || '';
+    document.querySelector('#llm-model-name').value = config.model || '';
+    document.querySelector('#llm-api-key').value = '';
+    document.querySelector('#llm-api-key').placeholder = config.configured
+      ? '留空则沿用已保存密钥'
+      : '首次配置必须填写';
+    document.querySelector('#llm-key-hint').textContent = config.configured
+      ? `${config.api_key_masked} 已加密保存，留空沿用`
+      : '仅服务端加密保存';
+    document.querySelector('#llm-enabled').checked = Boolean(config.enabled);
+    document.querySelector('#llm-provider-editor').hidden = false;
+  } catch (cause) {
+    showManagementFeedback(cause.message, true);
+  }
+}
+
+function closeLlmProviderEditor() {
+  document.querySelector('#llm-api-key').value = '';
+  document.querySelector('#llm-provider-error').hidden = true;
+  document.querySelector('#llm-provider-editor').hidden = true;
+}
+
+document.querySelector('#open-llm-provider').addEventListener('click', openLlmProviderEditor);
+document.querySelector('#close-llm-provider').addEventListener('click', closeLlmProviderEditor);
+document.querySelector('#cancel-llm-provider').addEventListener('click', closeLlmProviderEditor);
+document.querySelector('#llm-provider-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const error = document.querySelector('#llm-provider-error');
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  error.hidden = true;
+  button.disabled = true;
+  button.textContent = '正在测试连接…';
+  try {
+    const body = await request('/api/v1/admin/llm-provider', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({
+        base_url: document.querySelector('#llm-base-url').value.trim(),
+        model: document.querySelector('#llm-model-name').value.trim(),
+        api_key: document.querySelector('#llm-api-key').value,
+        enabled: document.querySelector('#llm-enabled').checked,
+      }),
+    });
+    closeLlmProviderEditor();
+    showManagementFeedback(`${body.model} 模型服务已保存并立即生效`);
+  } catch (cause) {
+    error.textContent = cause.message;
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = '测试连接并保存';
+  }
+});
+
 document.querySelector('#open-semantic-draft').addEventListener('click', openSemanticDraftEditor);
 document.querySelector('#close-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
 document.querySelector('#cancel-semantic-draft').addEventListener('click', closeSemanticDraftEditor);

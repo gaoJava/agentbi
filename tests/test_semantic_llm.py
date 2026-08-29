@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -83,3 +84,17 @@ def test_rejects_hallucinated_field() -> None:
     with pytest.raises(SemanticLlmError, match="不存在"):
         asyncio.run(client.enrich(baseline()))
     asyncio.run(client.close())
+
+
+def test_api_key_is_encrypted_and_bound_to_session_secret() -> None:
+    client = SemanticDraftLlm(settings())
+    encrypted = client.encrypt_key("provider-secret")
+    assert encrypted != "provider-secret"
+    assert "provider-secret" not in encrypted
+    assert client.decrypt_key(encrypted) == "provider-secret"
+
+    other = SemanticDraftLlm(replace(settings(), session_secret="z" * 32))
+    with pytest.raises(SemanticLlmError, match="无法解密"):
+        other.decrypt_key(encrypted)
+    asyncio.run(client.close())
+    asyncio.run(other.close())
