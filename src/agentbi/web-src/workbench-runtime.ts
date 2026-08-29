@@ -2,6 +2,21 @@
 namespace AgentBI {
   export type Role = 'admin' | 'user' | string;
   export type SourceType = 'revenue' | 'structure' | 'table';
+  export type VisualizationType = 'bar' | 'line' | 'donut' | 'table';
+
+  export interface ManagedChart {
+    id: string;
+    chart_key: string;
+    title: string;
+    metric: string;
+    dataset_name: string;
+    visualization_type: VisualizationType;
+    semantic_model: string;
+    dimensions: string[];
+    status: string;
+    is_published: boolean;
+    created_at: string;
+  }
 
   export interface SessionUser {
     subject: string;
@@ -188,6 +203,73 @@ namespace AgentBI {
   }
 
   export const supersetWorkspace = new SupersetWorkspaceClient();
+
+  function requiredText(raw: Record<string, unknown>, key: string): string {
+    const value = raw[key];
+    if (typeof value !== 'string' || !value.trim()) throw new Error(`图表字段 ${key} 无效`);
+    return value.trim();
+  }
+
+  function parseManagedChart(value: unknown): ManagedChart {
+    if (typeof value !== 'object' || value === null) throw new Error('图表配置响应无效');
+    const raw = value as Record<string, unknown>;
+    const types: VisualizationType[] = ['bar', 'line', 'donut', 'table'];
+    const visualization = requiredText(raw, 'visualization_type');
+    if (!types.includes(visualization as VisualizationType)) throw new Error('图表展示类型不受支持');
+    if (!Array.isArray(raw.dimensions) || raw.dimensions.length < 2 || raw.dimensions.length > 5) {
+      throw new Error('图表下钻维度必须为 2 至 5 层');
+    }
+    const dimensions = raw.dimensions.map(item => {
+      if (typeof item !== 'string' || !item.trim()) throw new Error('图表下钻维度无效');
+      return item.trim();
+    });
+    if (new Set(dimensions).size !== dimensions.length) throw new Error('图表下钻维度不能重复');
+    if (typeof raw.is_published !== 'boolean') throw new Error('图表发布状态无效');
+    return {
+      id: requiredText(raw, 'id'), chart_key: requiredText(raw, 'chart_key'),
+      title: requiredText(raw, 'title'), metric: requiredText(raw, 'metric'),
+      dataset_name: requiredText(raw, 'dataset_name'),
+      visualization_type: visualization as VisualizationType,
+      semantic_model: requiredText(raw, 'semantic_model'), dimensions,
+      status: requiredText(raw, 'status'), is_published: raw.is_published,
+      created_at: requiredText(raw, 'created_at'),
+    };
+  }
+
+  export function parseManagedCharts(value: unknown): ManagedChart[] {
+    if (!Array.isArray(value)) throw new Error('图表配置列表无效');
+    return value.map(parseManagedChart);
+  }
+
+  export function configurationFromManagedChart(chart: ManagedChart): DrillConfiguration {
+    const [first, second] = chart.dimensions;
+    if (!first || !second) throw new Error('图表缺少基础下钻维度');
+    const sourceType: SourceType = chart.visualization_type === 'donut'
+      ? 'structure' : chart.visualization_type === 'table' ? 'table' : 'revenue';
+    const labels = ['华东', '华南', '华北', '西南'];
+    const bars: Array<[string, number, string]> = labels.map((label, index) =>
+      [label, 88 - index * 17, String(820 - index * 145)]);
+    const rows: Array<[string, string, string]> = ['第一类', '第二类', '第三类', '其他']
+      .map((label, index) => [label, String(410 - index * 75), `${42 - index * 9}%`]);
+    return {
+      published: chart.is_published, metric: chart.metric,
+      semanticModel: chart.semantic_model, dimensions: chart.dimensions, sourceType,
+      pageTitle: `${chart.metric}下钻分析`, sourceTitle: chart.title,
+      breadcrumb: `分析工作台 › ${chart.title} › ${chart.dimensions.join(' › ')}`,
+      connectorOne: `点击当前数据点，下钻维度：${first}`,
+      levelOneLabel: `第 1 层 · ${first}`, levelOneTitle: `${chart.metric}按${first}分析`, bars,
+      connectorTwo: `点击 华东，下钻维度：${second}`,
+      levelTwoLabel: `第 2 层 · ${second}`, levelTwoTitle: `华东${second}贡献`,
+      tableDimension: second, total: '820', rows,
+      sourceColumns: [first, chart.metric, '占比'],
+      sourceRows: bars.map(([label, , amount], index) => [label, amount, `${40 - index * 7}%`]),
+      context: `第 2 层 · 华东${second}贡献`,
+      questions: [`${chart.metric}主要来自哪个${first}？`, `哪个${second}表现异常？`],
+      insight: `华东是当前${chart.metric}的主要贡献区域，建议继续按${second}定位变化来源。`,
+      insightSource: `洞察来源：${chart.semantic_model} 语义模型`,
+      evidence: `分析工作台 → ${chart.title} → ${chart.dimensions.join(' → ')}`,
+    };
+  }
 
   export const drilldownRegistry = Object.freeze({
     version: 1,

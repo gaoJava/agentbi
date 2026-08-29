@@ -125,6 +125,78 @@ var AgentBI;
     }
     AgentBI.SupersetWorkspaceClient = SupersetWorkspaceClient;
     AgentBI.supersetWorkspace = new SupersetWorkspaceClient();
+    function requiredText(raw, key) {
+        const value = raw[key];
+        if (typeof value !== 'string' || !value.trim())
+            throw new Error(`图表字段 ${key} 无效`);
+        return value.trim();
+    }
+    function parseManagedChart(value) {
+        if (typeof value !== 'object' || value === null)
+            throw new Error('图表配置响应无效');
+        const raw = value;
+        const types = ['bar', 'line', 'donut', 'table'];
+        const visualization = requiredText(raw, 'visualization_type');
+        if (!types.includes(visualization))
+            throw new Error('图表展示类型不受支持');
+        if (!Array.isArray(raw.dimensions) || raw.dimensions.length < 2 || raw.dimensions.length > 5) {
+            throw new Error('图表下钻维度必须为 2 至 5 层');
+        }
+        const dimensions = raw.dimensions.map(item => {
+            if (typeof item !== 'string' || !item.trim())
+                throw new Error('图表下钻维度无效');
+            return item.trim();
+        });
+        if (new Set(dimensions).size !== dimensions.length)
+            throw new Error('图表下钻维度不能重复');
+        if (typeof raw.is_published !== 'boolean')
+            throw new Error('图表发布状态无效');
+        return {
+            id: requiredText(raw, 'id'), chart_key: requiredText(raw, 'chart_key'),
+            title: requiredText(raw, 'title'), metric: requiredText(raw, 'metric'),
+            dataset_name: requiredText(raw, 'dataset_name'),
+            visualization_type: visualization,
+            semantic_model: requiredText(raw, 'semantic_model'), dimensions,
+            status: requiredText(raw, 'status'), is_published: raw.is_published,
+            created_at: requiredText(raw, 'created_at'),
+        };
+    }
+    function parseManagedCharts(value) {
+        if (!Array.isArray(value))
+            throw new Error('图表配置列表无效');
+        return value.map(parseManagedChart);
+    }
+    AgentBI.parseManagedCharts = parseManagedCharts;
+    function configurationFromManagedChart(chart) {
+        const [first, second] = chart.dimensions;
+        if (!first || !second)
+            throw new Error('图表缺少基础下钻维度');
+        const sourceType = chart.visualization_type === 'donut'
+            ? 'structure' : chart.visualization_type === 'table' ? 'table' : 'revenue';
+        const labels = ['华东', '华南', '华北', '西南'];
+        const bars = labels.map((label, index) => [label, 88 - index * 17, String(820 - index * 145)]);
+        const rows = ['第一类', '第二类', '第三类', '其他']
+            .map((label, index) => [label, String(410 - index * 75), `${42 - index * 9}%`]);
+        return {
+            published: chart.is_published, metric: chart.metric,
+            semanticModel: chart.semantic_model, dimensions: chart.dimensions, sourceType,
+            pageTitle: `${chart.metric}下钻分析`, sourceTitle: chart.title,
+            breadcrumb: `分析工作台 › ${chart.title} › ${chart.dimensions.join(' › ')}`,
+            connectorOne: `点击当前数据点，下钻维度：${first}`,
+            levelOneLabel: `第 1 层 · ${first}`, levelOneTitle: `${chart.metric}按${first}分析`, bars,
+            connectorTwo: `点击 华东，下钻维度：${second}`,
+            levelTwoLabel: `第 2 层 · ${second}`, levelTwoTitle: `华东${second}贡献`,
+            tableDimension: second, total: '820', rows,
+            sourceColumns: [first, chart.metric, '占比'],
+            sourceRows: bars.map(([label, , amount], index) => [label, amount, `${40 - index * 7}%`]),
+            context: `第 2 层 · 华东${second}贡献`,
+            questions: [`${chart.metric}主要来自哪个${first}？`, `哪个${second}表现异常？`],
+            insight: `华东是当前${chart.metric}的主要贡献区域，建议继续按${second}定位变化来源。`,
+            insightSource: `洞察来源：${chart.semantic_model} 语义模型`,
+            evidence: `分析工作台 → ${chart.title} → ${chart.dimensions.join(' → ')}`,
+        };
+    }
+    AgentBI.configurationFromManagedChart = configurationFromManagedChart;
     AgentBI.drilldownRegistry = Object.freeze({
         version: 1,
         charts: {
