@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "outFile": "../web/generated/workbench-runtime.js",
+    "removeComments": true
+  },
+  "files": ["workbench-runtime.ts"]
+}

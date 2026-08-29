@@ -5,6 +5,8 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "webpack --stats-error-details --mode production",
+    "workbench:typecheck": "tsc -p ../../../src/agentbi/web-src/tsconfig.json --noEmit",
+    "workbench:build": "tsc -p ../../../src/agentbi/web-src/tsconfig.json",
     "start": "webpack serve --mode development",
     "typecheck": "tsc --noEmit"
   },
@@ -24,4 +26,3 @@
     "webpack-dev-server": "^5.2.0"
   }
 }
-

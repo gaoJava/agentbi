@@ -5,7 +5,7 @@ const loginError = document.querySelector('#login-error');
 const loginButton = document.querySelector('#login-button');
 let currentUser;
 
-const drillRegistry = window.AGENTBI_DRILLDOWN_REGISTRY;
+const drillRegistry = window.AgentBI.drilldownRegistry;
 if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
   throw new Error('AgentBI 下钻注册中心未加载或版本不兼容');
 }
@@ -45,10 +45,7 @@ function isValidDrillConfiguration(config) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, { credentials: 'same-origin', ...options });
-  const body = response.status === 204 ? null : await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.detail || '请求失败，请稍后重试');
-  return body;
+  return window.AgentBI.request(url, options);
 }
 
 function showLogin() {

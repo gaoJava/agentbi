@@ -34,7 +34,12 @@ def settings() -> Settings:
 
 def test_product_shell_and_user_session_flow() -> None:
     with TestClient(create_app(settings())) as client:
-        assert client.get("/app").status_code == 200
+        shell = client.get("/app")
+        assert shell.status_code == 200
+        assert "generated/workbench-runtime.js" in shell.text
+        runtime = client.get("/app/assets/generated/workbench-runtime.js")
+        assert runtime.status_code == 200
+        assert "AgentBI.request" in runtime.text
         assert client.get("/api/v1/auth/me").status_code == 401
 
         login = client.post(

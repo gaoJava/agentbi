@@ -17,6 +17,19 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-NodeChecked {
+    param(
+        [Parameter(Mandatory)] [string]$Label,
+        [Parameter(Mandatory)] [string[]]$Arguments
+    )
+    Write-Host "[AgentBI] $Label"
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    & $node @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
+    }
+}
+
 Push-Location $projectRoot
 try {
     # Keep pytest artifacts on D:; the Windows profile temp directory may be locked
@@ -31,8 +44,20 @@ try {
     if (-not $SkipFrontend) {
         Push-Location (Join-Path $projectRoot 'integrations\superset-extension\frontend')
         try {
-            Invoke-Checked 'Checking extension TypeScript' { npm run typecheck }
-            Invoke-Checked 'Building extension production assets' { npm run build }
+            Invoke-NodeChecked 'Checking extension TypeScript' @(
+                'node_modules/typescript/bin/tsc', '--noEmit'
+            )
+            Invoke-NodeChecked 'Checking workbench TypeScript' @(
+                'node_modules/typescript/bin/tsc', '-p',
+                '../../../src/agentbi/web-src/tsconfig.json', '--noEmit'
+            )
+            Invoke-NodeChecked 'Building workbench TypeScript' @(
+                'node_modules/typescript/bin/tsc', '-p',
+                '../../../src/agentbi/web-src/tsconfig.json'
+            )
+            Invoke-NodeChecked 'Building extension production assets' @(
+                'node_modules/webpack/bin/webpack.js', '--stats-error-details', '--mode', 'production'
+            )
         }
         finally {
             Pop-Location
