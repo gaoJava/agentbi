@@ -372,15 +372,19 @@ async function loadModuleView(view) {
     } else if (view === 'reports') {
       renderReportList((await request('/api/v1/reports')).reports || []);
     } else if (view === 'semantic-models') {
-      loadedSemanticModels = (await request('/api/v1/admin/semantic-models')).models || [];
+      loadedSemanticModels = window.AgentBI.parseSemanticModels(
+        (await request('/api/v1/admin/semantic-models')).models,
+      );
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
         model.name, model.metrics.join('、'), model.charts,
         model.status === 'active' ? '● 已启用' : '● 已下线',
       ], model => assetActionGroup('semantic-models', model));
     } else if (view === 'data-sources') {
-      const assets = await request('/api/v1/admin/superset/data-assets');
-      loadedDataSources = assets.datasets || [];
-      const databases = assets.databases || [];
+      const assets = window.AgentBI.parseSupersetDataAssets(
+        await request('/api/v1/admin/superset/data-assets'),
+      );
+      loadedDataSources = assets.datasets;
+      const databases = assets.databases;
       loadedSupersetDatabases = databases;
       document.querySelector('#real-database-total').textContent = String(databases.length);
       document.querySelector('#real-dataset-total').textContent = String(loadedDataSources.length);
@@ -415,9 +419,9 @@ async function loadModuleView(view) {
         request('/api/v1/admin/users'), request('/api/v1/admin/roles'),
         request('/api/v1/admin/permissions'),
       ]);
-      loadedUsers = userBody.users || [];
-      loadedRoles = roleBody.roles || [];
-      loadedPermissions = permissionBody.permissions || [];
+      loadedUsers = window.AgentBI.parseGovernedUsers(userBody.users);
+      loadedRoles = window.AgentBI.parseGovernedRoles(roleBody.roles);
+      loadedPermissions = window.AgentBI.parseGovernedPermissions(permissionBody.permissions);
       renderModuleRows('user-role-table-body', loadedUsers, user => [
         user.display_name, user.username, user.role_name,
         user.data_scope, user.is_active ? '● 正常' : '● 已停用', formatTimestamp(user.last_login_at),

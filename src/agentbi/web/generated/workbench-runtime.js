@@ -131,6 +131,89 @@ var AgentBI;
             throw new Error(`图表字段 ${key} 无效`);
         return value.trim();
     }
+    function requiredBoolean(raw, key) {
+        if (typeof raw[key] !== 'boolean')
+            throw new Error(`治理字段 ${key} 无效`);
+        return raw[key];
+    }
+    function requiredNumber(raw, key) {
+        const value = raw[key];
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+            throw new Error(`治理字段 ${key} 无效`);
+        }
+        return value;
+    }
+    function textList(value, field) {
+        if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+            throw new Error(`治理字段 ${field} 无效`);
+        }
+        return value.map(item => item.trim()).filter(Boolean);
+    }
+    function objectList(value, field) {
+        if (!Array.isArray(value) || value.some(item => typeof item !== 'object' || item === null)) {
+            throw new Error(`${field}列表响应无效`);
+        }
+        return value;
+    }
+    function parseGovernedUsers(value) {
+        return objectList(value, '用户').map(raw => ({
+            id: requiredText(raw, 'id'), username: requiredText(raw, 'username'),
+            display_name: requiredText(raw, 'display_name'), role: requiredText(raw, 'role'),
+            role_name: requiredText(raw, 'role_name'), data_scope: requiredText(raw, 'data_scope'),
+            is_active: requiredBoolean(raw, 'is_active'),
+            last_login_at: raw.last_login_at === null ? null : requiredText(raw, 'last_login_at'),
+        }));
+    }
+    AgentBI.parseGovernedUsers = parseGovernedUsers;
+    function parseGovernedRoles(value) {
+        return objectList(value, '角色').map(raw => ({
+            code: requiredText(raw, 'code'), name: requiredText(raw, 'name'),
+            description: typeof raw.description === 'string' ? raw.description : '',
+            permissions: textList(raw.permissions, 'permissions'),
+            user_count: requiredNumber(raw, 'user_count'), builtin: requiredBoolean(raw, 'builtin'),
+        }));
+    }
+    AgentBI.parseGovernedRoles = parseGovernedRoles;
+    function parseGovernedPermissions(value) {
+        return objectList(value, '权限').map(raw => ({
+            code: requiredText(raw, 'code'), name: requiredText(raw, 'name'),
+        }));
+    }
+    AgentBI.parseGovernedPermissions = parseGovernedPermissions;
+    function parseSemanticModels(value) {
+        return objectList(value, '语义模型').map(raw => ({
+            name: requiredText(raw, 'name'), subject_area: requiredText(raw, 'subject_area'),
+            description: typeof raw.description === 'string' ? raw.description : '',
+            status: requiredText(raw, 'status'), metrics: textList(raw.metrics, 'metrics'),
+            charts: requiredNumber(raw, 'charts'), is_system: requiredBoolean(raw, 'is_system'),
+        }));
+    }
+    AgentBI.parseSemanticModels = parseSemanticModels;
+    function parseSupersetDataAssets(value) {
+        if (typeof value !== 'object' || value === null)
+            throw new Error('Superset 数据资产响应无效');
+        const raw = value;
+        const databases = objectList(raw.databases, 'Database').map(item => ({
+            superset_id: requiredNumber(item, 'superset_id'), name: requiredText(item, 'name'),
+            backend: requiredText(item, 'backend'), expose_in_sqllab: requiredBoolean(item, 'expose_in_sqllab'),
+            allow_file_upload: requiredBoolean(item, 'allow_file_upload'),
+            dataset_count: requiredNumber(item, 'dataset_count'),
+        }));
+        const datasets = objectList(raw.datasets, 'Dataset').map(item => ({
+            superset_id: requiredNumber(item, 'superset_id'), name: requiredText(item, 'name'),
+            database_id: requiredNumber(item, 'database_id'), database_name: requiredText(item, 'database_name'),
+            schema: requiredText(item, 'schema'), kind: requiredText(item, 'kind'),
+            description: typeof item.description === 'string' ? item.description : '',
+            explore_url: typeof item.explore_url === 'string' ? item.explore_url : '',
+        }));
+        const available_engines = objectList(raw.available_engines, '连接器').map(item => ({
+            engine: requiredText(item, 'engine'), name: requiredText(item, 'name'),
+            drivers: textList(item.drivers, 'drivers'),
+            placeholder: typeof item.placeholder === 'string' ? item.placeholder : '',
+        }));
+        return { databases, datasets, available_engines };
+    }
+    AgentBI.parseSupersetDataAssets = parseSupersetDataAssets;
     function parseManagedChart(value) {
         if (typeof value !== 'object' || value === null)
             throw new Error('图表配置响应无效');
