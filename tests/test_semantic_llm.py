@@ -142,6 +142,33 @@ def test_connection_checks_chat_protocol_without_requiring_semantic_draft() -> N
     asyncio.run(client.close())
 
 
+def test_connection_accepts_reasoning_model_before_final_content() -> None:
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_content": "正在生成最终答案",
+                        }
+                    }
+                ]
+            },
+        )
+    )
+    client = SemanticDraftLlm(settings(), transport)
+    asyncio.run(
+        client.test_connection(
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            api_key="secret",
+            model="glm-5.3",
+        )
+    )
+    asyncio.run(client.close())
+
+
 def test_enrichment_accepts_json_inside_markdown_fence() -> None:
     result = {
         "model": {"name": "订单", "biz_name": "orders", "description": ""},

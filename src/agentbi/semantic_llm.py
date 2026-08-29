@@ -62,14 +62,17 @@ class SemanticDraftLlm:
                     "model": model,
                     "messages": [{"role": "user", "content": "仅回复 OK"}],
                     "temperature": 0.1,
-                    "max_tokens": 16,
+                    # Reasoning models may consume their first tokens before emitting content.
+                    "max_tokens": 256,
                 },
             )
             if response.is_error:
                 raise self._provider_error(response)
             body = response.json()
-            content = body["choices"][0]["message"]["content"]
-            if not isinstance(content, str) or not content.strip():
+            message = body["choices"][0]["message"]
+            content = message.get("content")
+            reasoning = message.get("reasoning_content")
+            if not any(isinstance(value, str) and value.strip() for value in (content, reasoning)):
                 raise SemanticLlmError("模型返回内容为空")
         except SemanticLlmError:
             raise
