@@ -323,6 +323,9 @@ function switchView(view) {
   const registry = view === 'drill-registry';
   const chartManagement = view === 'chart-management';
   const dashboard = view === 'dashboard';
+  const agentVisible = dashboard || drilldown;
+  workbenchView.classList.toggle('agent-hidden', !agentVisible);
+  document.querySelector('.agent-panel').hidden = !agentVisible;
   document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = !dashboard; });
   document.querySelectorAll('.drilldown-view,.registry-view').forEach(item => { item.hidden = true; });
   if (!dashboard) {

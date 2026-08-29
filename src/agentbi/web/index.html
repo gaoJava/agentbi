@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260829.4">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260829.5">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -375,6 +375,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">真实 LLM 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="qwen-plus" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="首次配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox" checked><span>启用真实 LLM 增强</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">测试连接并保存</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260829.12" defer></script>
+  <script src="/app/assets/app.js?v=20260829.13" defer></script>
 </body>
 </html>
