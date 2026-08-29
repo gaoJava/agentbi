@@ -43,6 +43,7 @@ def test_enriches_only_with_schema_constrained_real_provider_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert request.headers["Authorization"] == "Bearer secret"
+        assert payload["temperature"] == 0.1
         assert "orders" in payload["messages"][1]["content"]
         assert "password" not in payload["messages"][1]["content"].lower()
         result = {
@@ -98,3 +99,26 @@ def test_api_key_is_encrypted_and_bound_to_session_secret() -> None:
         other.decrypt_key(encrypted)
     asyncio.run(client.close())
     asyncio.run(other.close())
+
+
+@pytest.mark.parametrize(
+    ("status_code", "message"),
+    [
+        (401, "API Key 无效"),
+        (403, "没有调用该模型的权限"),
+        (404, "模型名称不存在"),
+        (429, "额度不足"),
+        (500, "暂时不可用"),
+    ],
+)
+def test_provider_errors_are_actionable_without_echoing_response(
+    status_code: int, message: str
+) -> None:
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(status_code, json={"error": {"message": "secret upstream detail"}})
+    )
+    client = SemanticDraftLlm(settings(), transport)
+    with pytest.raises(SemanticLlmError, match=message) as captured:
+        asyncio.run(client.enrich(baseline()))
+    assert "secret upstream detail" not in str(captured.value)
+    asyncio.run(client.close())

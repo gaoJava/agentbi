@@ -24,7 +24,19 @@ function New-RandomSecret {
 }
 
 $env:AGENTBI_API_KEY = New-RandomSecret
-$env:AGENTBI_SESSION_SECRET = New-RandomSecret
+$dataDir = Join-Path $projectRoot 'data'
+$secretPath = Join-Path $dataDir '.agentbi-session-secret'
+New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+if (Test-Path -LiteralPath $secretPath) {
+    $sessionSecret = (Get-Content -LiteralPath $secretPath -Raw).Trim()
+    if ($sessionSecret.Length -lt 32) { throw 'Persisted AgentBI session secret is invalid.' }
+}
+else {
+    $sessionSecret = New-RandomSecret
+    Set-Content -LiteralPath $secretPath -Value $sessionSecret -NoNewline
+}
+# This stable local secret protects persisted sessions and encrypted provider keys across restarts.
+$env:AGENTBI_SESSION_SECRET = $sessionSecret
 $env:AGENTBI_ENABLE_DEMO_LOGIN = 'true'
 $env:AGENTBI_DEMO_USER_PASSWORD = 'user'
 $env:AGENTBI_DEMO_ADMIN_PASSWORD = 'admin'

@@ -120,14 +120,18 @@ class SemanticDraftLlm:
                 json={
                     "model": self._model,
                     "messages": messages,
-                    "temperature": 0,
+                    # Some OpenAI-compatible providers (including Zhipu) reject zero.
+                    "temperature": 0.1,
                     "response_format": {"type": "json_object"},
                 },
             )
-            response.raise_for_status()
+            if response.is_error:
+                raise self._provider_error(response)
             body = response.json()
             content = body["choices"][0]["message"]["content"]
             result = json.loads(content)
+        except SemanticLlmError:
+            raise
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             raise SemanticLlmError("LLM 语义增强服务不可用或返回格式无效") from exc
         self._validate(result, field_names)
@@ -140,6 +144,23 @@ class SemanticDraftLlm:
         }
         result["warnings"] = []
         return result
+
+    @staticmethod
+    def _provider_error(response: httpx.Response) -> SemanticLlmError:
+        status_code = response.status_code
+        if status_code == 401:
+            return SemanticLlmError("API Key 无效或已过期")
+        if status_code == 403:
+            return SemanticLlmError("API Key 没有调用该模型的权限")
+        if status_code == 404:
+            return SemanticLlmError("Base URL 或模型名称不存在")
+        if status_code == 429:
+            return SemanticLlmError("模型额度不足或请求过于频繁")
+        if status_code == 400:
+            return SemanticLlmError("模型参数不兼容，请检查模型名称和服务协议")
+        if status_code >= 500:
+            return SemanticLlmError("模型供应商服务暂时不可用")
+        return SemanticLlmError(f"模型供应商拒绝请求（HTTP {status_code}）")
 
     @staticmethod
     def _validate(result: object, fields: set[str]) -> None:

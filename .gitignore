@@ -10,6 +10,7 @@ __pycache__/
 .runtime/
 data/*.db
 data/*.db-*
+data/.agentbi-session-secret
 node_modules/
 dist/
 deploy/docker-anonymous/

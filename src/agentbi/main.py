@@ -872,7 +872,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     base_url=payload.base_url, api_key=api_key, model=payload.model
                 )
             except SemanticLlmError as exc:
-                raise HTTPException(status_code=422, detail="LLM 连接测试失败，配置未保存") from exc
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"LLM 连接测试失败：{exc}；配置未保存",
+                ) from exc
         encrypted = semantic_llm.encrypt_key(api_key)
         sessions.repository.save_llm_provider_config(
             base_url=payload.base_url.rstrip("/"),
