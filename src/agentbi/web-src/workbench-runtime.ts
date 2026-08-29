@@ -17,6 +17,8 @@ namespace AgentBI {
   export interface SupersetWorkspace {
     available: boolean;
     can_edit: boolean;
+    status?: string;
+    dashboard_id?: number;
     dashboard_title?: string;
     view_url?: string;
     edit_url?: string;
@@ -59,6 +61,7 @@ namespace AgentBI {
   export interface ApiErrorBody { detail?: string }
 
   interface SessionEnvelope { user: unknown }
+  interface WorkspaceEnvelope { workspace: unknown }
 
   export async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     const response = await fetch(url, { credentials: 'same-origin', ...options });
@@ -136,6 +139,55 @@ namespace AgentBI {
   }
 
   export const session = new SessionClient();
+
+  function safeWorkspaceUrl(value: unknown, field: string): string | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value !== 'string') throw new Error(`Superset ${field} 地址无效`);
+    let parsed: URL;
+    try { parsed = new URL(value, window.location.origin); }
+    catch { throw new Error(`Superset ${field} 地址无效`); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error(`Superset ${field} 地址协议不安全`);
+    }
+    return parsed.href;
+  }
+
+  function parseSupersetWorkspace(value: unknown): SupersetWorkspace {
+    if (typeof value !== 'object' || value === null) throw new Error('Superset 工作区响应无效');
+    const raw = value as Record<string, unknown>;
+    if (typeof raw.available !== 'boolean' || typeof raw.can_edit !== 'boolean') {
+      throw new Error('Superset 工作区状态缺少必要字段');
+    }
+    const viewUrl = safeWorkspaceUrl(raw.view_url, '查看');
+    const editUrl = safeWorkspaceUrl(raw.edit_url, '编辑');
+    if (raw.available && !viewUrl) throw new Error('Superset 工作区缺少查看地址');
+    if (raw.available && raw.can_edit && !editUrl) throw new Error('Superset 工作区缺少编辑地址');
+    return {
+      available: raw.available,
+      can_edit: raw.can_edit,
+      ...(typeof raw.status === 'string' ? { status: raw.status } : {}),
+      ...(typeof raw.dashboard_id === 'number' ? { dashboard_id: raw.dashboard_id } : {}),
+      ...(typeof raw.dashboard_title === 'string' ? { dashboard_title: raw.dashboard_title } : {}),
+      ...(typeof raw.message === 'string' ? { message: raw.message } : {}),
+      ...(viewUrl ? { view_url: viewUrl } : {}),
+      ...(editUrl ? { edit_url: editUrl } : {}),
+    };
+  }
+
+  export class SupersetWorkspaceClient {
+    private cached: SupersetWorkspace | undefined;
+
+    clear(): void { this.cached = undefined; }
+
+    async load(force = false): Promise<SupersetWorkspace> {
+      if (this.cached && !force) return this.cached;
+      const body = await request<WorkspaceEnvelope>('/api/v1/superset/workspace');
+      this.cached = parseSupersetWorkspace(body.workspace);
+      return this.cached;
+    }
+  }
+
+  export const supersetWorkspace = new SupersetWorkspaceClient();
 
   export const drilldownRegistry = Object.freeze({
     version: 1,

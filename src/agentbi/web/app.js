@@ -51,6 +51,7 @@ async function request(url, options = {}) {
 function showLogin() {
   currentUser = undefined;
   window.AgentBI.session.clear();
+  window.AgentBI.supersetWorkspace.clear();
   supersetWorkspace = undefined;
   const frame = document.querySelector('#superset-frame');
   frame.removeAttribute('src');
@@ -81,6 +82,7 @@ function showSupersetUnavailable(message) {
   document.querySelector('#superset-frame').hidden = true;
   document.querySelector('#superset-unavailable-message').textContent = message;
   document.querySelector('#superset-unavailable').hidden = false;
+  document.querySelector('#superset-edit-mode').disabled = true;
 }
 
 function setSupersetFrameMode(mode) {
@@ -112,6 +114,7 @@ function setSupersetFrameMode(mode) {
 
 async function loadSupersetWorkspace({ force = false } = {}) {
   if (!currentUser || dashboardCanvasMode !== 'superset') return;
+  document.querySelector('#superset-edit-mode').disabled = true;
   document.querySelector('#superset-unavailable').hidden = true;
   document.querySelector('#superset-loading').hidden = false;
   if (supersetWorkspace?.available && !force) {
@@ -119,12 +122,12 @@ async function loadSupersetWorkspace({ force = false } = {}) {
     return;
   }
   try {
-    const body = await request('/api/v1/superset/workspace');
-    supersetWorkspace = body.workspace;
+    supersetWorkspace = await window.AgentBI.supersetWorkspace.load(force);
     if (!supersetWorkspace.available) {
       showSupersetUnavailable(supersetWorkspace.message || 'Superset 服务当前不可用，可继续使用本地降级画布。');
       return;
     }
+    document.querySelector('#superset-edit-mode').disabled = !supersetWorkspace.can_edit;
     setSupersetFrameMode(supersetFrameMode === 'edit' && supersetWorkspace.can_edit ? 'edit' : 'view');
   } catch (error) {
     showSupersetUnavailable(error.message);
@@ -569,6 +572,7 @@ function renderSupersetDashboardAssets() {
           method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
         });
         supersetWorkspace = undefined;
+        window.AgentBI.supersetWorkspace.clear();
         await loadSupersetDashboardAssets();
         showManagementFeedback(`${dashboard.title} 已设为经营总览`);
       } catch (error) { showManagementFeedback(error.message, true); }
@@ -944,6 +948,7 @@ document.querySelector('#sync-superset-dashboards').addEventListener('click', as
     loadedSupersetDashboards = body.dashboards || [];
     renderSupersetDashboardAssets();
     supersetWorkspace = undefined;
+    window.AgentBI.supersetWorkspace.clear();
     showManagementFeedback(`已同步 ${body.count} 个 Superset 仪表盘`);
   } catch (error) {
     showManagementFeedback(error.message, true);

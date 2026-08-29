@@ -36,12 +36,13 @@ def test_product_shell_and_user_session_flow() -> None:
     with TestClient(create_app(settings())) as client:
         shell = client.get("/app")
         assert shell.status_code == 200
-        assert "generated/workbench-runtime.js?v=20260829.2" in shell.text
-        assert "app.js?v=20260829.2" in shell.text
+        assert "generated/workbench-runtime.js?v=20260829.3" in shell.text
+        assert "app.js?v=20260829.3" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
         assert "AgentBI.request" in runtime.text
         assert "SessionClient" in runtime.text
+        assert "SupersetWorkspaceClient" in runtime.text
         assert client.get("/api/v1/auth/me").status_code == 401
 
         login = client.post(
