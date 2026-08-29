@@ -40,6 +40,7 @@ def test_product_shell_and_user_session_flow() -> None:
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
         assert "AgentBI.request" in runtime.text
+        assert "SessionClient" in runtime.text
         assert client.get("/api/v1/auth/me").status_code == 401
 
         login = client.post(

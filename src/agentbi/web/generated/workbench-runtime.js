@@ -15,6 +15,63 @@ var AgentBI;
         return body;
     }
     AgentBI.request = request;
+    function parseSessionUser(value) {
+        if (typeof value !== 'object' || value === null)
+            throw new Error('登录身份响应无效');
+        const user = value;
+        const requiredStrings = [
+            'subject', 'username', 'display_name', 'role', 'role_label', 'data_scope', 'csrf_token',
+        ];
+        if (requiredStrings.some(key => typeof user[key] !== 'string')) {
+            throw new Error('登录身份响应缺少必要字段');
+        }
+        if (!Array.isArray(user.permissions) || user.permissions.some(item => typeof item !== 'string')) {
+            throw new Error('登录权限响应无效');
+        }
+        return user;
+    }
+    class SessionClient {
+        get user() { return this.activeUser; }
+        accept(value) {
+            this.activeUser = parseSessionUser(value);
+            return this.activeUser;
+        }
+        clear() { this.activeUser = undefined; }
+        async login(username, password) {
+            const body = await request('/api/v1/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            return this.accept(body.user);
+        }
+        async restore() {
+            const body = await request('/api/v1/auth/me');
+            return this.accept(body.user);
+        }
+        csrfHeaders(json = false) {
+            if (!this.activeUser)
+                throw new Error('登录会话已失效');
+            return {
+                ...(json ? { 'Content-Type': 'application/json' } : {}),
+                'X-AgentBI-CSRF': this.activeUser.csrf_token,
+            };
+        }
+        async logout() {
+            if (!this.activeUser)
+                return;
+            try {
+                await request('/api/v1/auth/logout', {
+                    method: 'POST', headers: this.csrfHeaders(),
+                });
+            }
+            finally {
+                this.clear();
+            }
+        }
+    }
+    AgentBI.SessionClient = SessionClient;
+    AgentBI.session = new SessionClient();
     AgentBI.drilldownRegistry = Object.freeze({
         version: 1,
         charts: {

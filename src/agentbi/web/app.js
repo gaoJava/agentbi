@@ -50,6 +50,7 @@ async function request(url, options = {}) {
 
 function showLogin() {
   currentUser = undefined;
+  window.AgentBI.session.clear();
   supersetWorkspace = undefined;
   const frame = document.querySelector('#superset-frame');
   frame.removeAttribute('src');
@@ -137,7 +138,7 @@ function selectDashboardCanvas(mode) {
 }
 
 function showWorkbench(user) {
-  currentUser = user;
+  currentUser = window.AgentBI.session.accept(user);
   const permissions = new Set(user.permissions);
   document.querySelectorAll('[data-permission]').forEach(item => { item.hidden = !permissions.has(item.dataset.permission); });
   const hasGovernance = ['dashboard:manage', 'semantic_model:manage', 'datasource:manage', 'user:manage', 'audit:view']
@@ -1605,12 +1606,12 @@ loginForm.addEventListener('submit', async event => {
   loginButton.disabled = true;
   loginButton.textContent = '正在安全登录…';
   try {
-    const body = await request('/api/v1/auth/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: document.querySelector('#username').value, password: document.querySelector('#password').value }),
-    });
+    const user = await window.AgentBI.session.login(
+      document.querySelector('#username').value,
+      document.querySelector('#password').value,
+    );
     document.querySelector('#password').value = '';
-    showWorkbench(body.user);
+    showWorkbench(user);
   } catch (error) {
     loginError.textContent = error.message;
     loginError.hidden = false;
@@ -1662,7 +1663,7 @@ document.addEventListener('click', () => {
 
 async function endSession({ switchAccount = false } = {}) {
   if (!currentUser) return;
-  try { await request('/api/v1/auth/logout', { method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token } }); }
+  try { await window.AgentBI.session.logout(); }
   finally {
     accountMenu.hidden = true;
     document.querySelector('#password').value = '';
@@ -1675,5 +1676,5 @@ async function endSession({ switchAccount = false } = {}) {
 document.querySelector('#switch-account-button').addEventListener('click', () => endSession({ switchAccount: true }));
 document.querySelector('#logout-button').addEventListener('click', () => endSession());
 
-request('/api/v1/auth/me').then(body => showWorkbench(body.user)).catch(showLogin);
+window.AgentBI.session.restore().then(showWorkbench).catch(showLogin);
 renderDrilldown(selectedDrillChart);

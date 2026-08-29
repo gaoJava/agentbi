@@ -58,6 +58,8 @@ namespace AgentBI {
 
   export interface ApiErrorBody { detail?: string }
 
+  interface SessionEnvelope { user: unknown }
+
   export async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     const response = await fetch(url, { credentials: 'same-origin', ...options });
     const body: unknown = response.status === 204
@@ -71,6 +73,69 @@ namespace AgentBI {
     }
     return body as T;
   }
+
+  function parseSessionUser(value: unknown): SessionUser {
+    if (typeof value !== 'object' || value === null) throw new Error('登录身份响应无效');
+    const user = value as Partial<SessionUser>;
+    const requiredStrings: Array<keyof SessionUser> = [
+      'subject', 'username', 'display_name', 'role', 'role_label', 'data_scope', 'csrf_token',
+    ];
+    if (requiredStrings.some(key => typeof user[key] !== 'string')) {
+      throw new Error('登录身份响应缺少必要字段');
+    }
+    if (!Array.isArray(user.permissions) || user.permissions.some(item => typeof item !== 'string')) {
+      throw new Error('登录权限响应无效');
+    }
+    return user as SessionUser;
+  }
+
+  export class SessionClient {
+    private activeUser: SessionUser | undefined;
+
+    get user(): SessionUser | undefined { return this.activeUser; }
+
+    accept(value: unknown): SessionUser {
+      this.activeUser = parseSessionUser(value);
+      return this.activeUser;
+    }
+
+    clear(): void { this.activeUser = undefined; }
+
+    async login(username: string, password: string): Promise<SessionUser> {
+      const body = await request<SessionEnvelope>('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      return this.accept(body.user);
+    }
+
+    async restore(): Promise<SessionUser> {
+      const body = await request<SessionEnvelope>('/api/v1/auth/me');
+      return this.accept(body.user);
+    }
+
+    csrfHeaders(json = false): Record<string, string> {
+      if (!this.activeUser) throw new Error('登录会话已失效');
+      return {
+        ...(json ? { 'Content-Type': 'application/json' } : {}),
+        'X-AgentBI-CSRF': this.activeUser.csrf_token,
+      };
+    }
+
+    async logout(): Promise<void> {
+      if (!this.activeUser) return;
+      try {
+        await request<null>('/api/v1/auth/logout', {
+          method: 'POST', headers: this.csrfHeaders(),
+        });
+      } finally {
+        this.clear();
+      }
+    }
+  }
+
+  export const session = new SessionClient();
 
   export const drilldownRegistry = Object.freeze({
     version: 1,
