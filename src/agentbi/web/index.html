@@ -344,7 +344,7 @@
             <label>模型名称<input id="semantic-draft-name" maxlength="128" required></label>
             <label>业务标识<input id="semantic-draft-biz-name" maxlength="128" pattern="[A-Za-z][A-Za-z0-9_]*" required></label>
             <label>SuperSonic 主题域<select id="semantic-draft-domain" required></select></label>
-            <label>SuperSonic 数据库<select id="semantic-draft-database" required></select></label>
+            <label>SuperSonic 数据库<select id="semantic-draft-database" required></select><button id="open-sonic-database" class="inline-link" type="button">＋ 配置同源连接</button></label>
             <label class="wizard-full">模型说明<textarea id="semantic-draft-description" maxlength="512"></textarea></label>
             <label class="wizard-full">标识符（每行：名称=字段）<textarea id="semantic-draft-identifiers" required></textarea></label>
             <label class="wizard-full">维度（每行：名称=字段:categorical 或 time）<textarea id="semantic-draft-dimensions"></textarea></label>
@@ -367,6 +367,10 @@
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
   <script src="/app/assets/generated/workbench-runtime.js?v=20260829.7" defer></script>
-  <script src="/app/assets/app.js?v=20260829.10" defer></script>
+  <div id="sonic-database-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="sonic-database-title"><header><div><span>一次性安全转交</span><h2 id="sonic-database-title">配置 SuperSonic 同源连接</h2></div><button id="close-sonic-database" type="button">×</button></header><form id="sonic-database-form"><div class="wizard-grid"><label>连接名称<input id="sonic-db-name" required></label><label>数据库类型<select id="sonic-db-engine"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="doris">Doris</option></select></label><label>主机<input id="sonic-db-host" required></label><label>端口<input id="sonic-db-port" type="number" value="5432" min="1" max="65535" required></label><label>数据库<input id="sonic-db-database" required></label><label>用户名<input id="sonic-db-username" autocomplete="username" required></label><label class="wizard-full">密码<small>仅用于本次测试并转交 SuperSonic，AgentBI 不保存</small><input id="sonic-db-password" type="password" autocomplete="new-password" required></label></div><div id="sonic-database-error" class="form-error" hidden></div><footer><button id="cancel-sonic-database" type="button">取消</button><button class="primary-button" type="submit">测试并保存</button></footer></form></section>
+  </div>
+
+  <script src="/app/assets/app.js?v=20260829.11" defer></script>
 </body>
 </html>

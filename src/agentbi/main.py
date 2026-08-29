@@ -220,6 +220,20 @@ class SemanticDraftRequest(BaseModel):
     dataset_id: int = Field(gt=0)
 
 
+class SuperSonicDatabasePayload(BaseModel):
+    """One-shot secret forwarded to SuperSonic and never persisted by AgentBI."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=128)
+    engine: Literal["postgresql", "mysql", "doris"]
+    host: str = Field(min_length=1, max_length=253)
+    port: int = Field(gt=0, le=65535)
+    database: str = Field(min_length=1, max_length=250)
+    username: str = Field(min_length=1, max_length=250)
+    password: str = Field(min_length=1, max_length=512)
+    description: str = Field(default="AgentBI 同源语义连接", max_length=512)
+
+
 class SemanticDraftPublishPayload(BaseModel):
     """Administrator-reviewed values; no SQL or credentials are accepted."""
 
@@ -796,6 +810,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await app.state.supersonic_client.list_modeling_catalog()
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 建模目录不可用") from exc
+
+    @app.post("/api/v1/admin/semantic-drafts/databases", status_code=status.HTTP_201_CREATED)
+    async def create_supersonic_database(
+        payload: SuperSonicDatabasePayload,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        upstream = payload.model_dump()
+        upstream["type"] = "mysql" if upstream.pop("engine") == "doris" else payload.engine
+        upstream["port"] = str(upstream["port"])
+        upstream["admins"] = [identity.username]
+        upstream["viewers"] = [identity.username]
+        try:
+            database = await app.state.supersonic_client.create_database(upstream)
+        except UpstreamError as exc:
+            raise HTTPException(
+                status_code=422, detail="数据库连接测试失败，未保存到 SuperSonic"
+            ) from exc
+        sessions.audit(
+            "supersonic_database_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.name,
+        )
+        return {"database": database, "message": "同源连接已保存到 SuperSonic"}
 
     @app.post("/api/v1/admin/semantic-drafts/generate")
     async def generate_semantic_draft(

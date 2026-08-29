@@ -135,8 +135,11 @@ class SuperSonicClient:
                 if isinstance(item, dict) and isinstance(item.get("id"), int)
             ],
             "databases": [
-                {"id": item["id"], "name": str(item.get("name") or item["id"])[:128],
-                 "type": str(item.get("type") or "")[:64]}
+                {
+                    "id": item["id"],
+                    "name": str(item.get("name") or item["id"])[:128],
+                    "type": str(item.get("type") or "")[:64],
+                }
                 for item in databases[:100]
                 if isinstance(item, dict) and isinstance(item.get("id"), int)
             ],
@@ -160,10 +163,25 @@ class SuperSonicClient:
         rows = data.get("resultList") if isinstance(data, dict) else None
         if not isinstance(rows, list):
             raise UpstreamError("SuperSonic returned invalid table metadata")
+        return {str(item["name"]) for item in rows if isinstance(item, dict) and item.get("name")}
+
+    async def create_database(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Test a one-shot secret, then create the connection; never return credentials."""
+
+        connected = await self._request_data(
+            "POST", "/api/semantic/database/testConnect", payload=payload
+        )
+        if connected is not True:
+            raise UpstreamError("SuperSonic database connection test failed")
+        created = await self._request_data(
+            "POST", "/api/semantic/database/createOrUpdateDatabase", payload=payload
+        )
+        if not isinstance(created, dict) or not isinstance(created.get("id"), int):
+            raise UpstreamError("SuperSonic returned invalid database metadata")
         return {
-            str(item["name"])
-            for item in rows
-            if isinstance(item, dict) and item.get("name")
+            "id": created["id"],
+            "name": str(created.get("name") or payload["name"])[:128],
+            "type": str(created.get("type") or payload["type"])[:64],
         }
 
     def _conversation(self, request: AnalyzeRequest) -> tuple[int, str, list[str]]:
@@ -222,9 +240,7 @@ class SuperSonicClient:
                 f"SuperSonic semantic query returned HTTP {exc.response.status_code}"
             ) from exc
         except httpx.RequestError as exc:
-            raise UpstreamError(
-                f"SuperSonic semantic query failed ({type(exc).__name__})"
-            ) from exc
+            raise UpstreamError(f"SuperSonic semantic query failed ({type(exc).__name__})") from exc
         except ValueError as exc:
             raise UpstreamError("SuperSonic semantic query returned invalid JSON") from exc
         if not isinstance(body, dict):

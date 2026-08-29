@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260829.10" in shell.text
+        assert "app.js?v=20260829.11" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -159,11 +159,18 @@ def test_workbench_analysis_rejects_browser_supplied_actor() -> None:
 def test_user_reads_sanitized_live_supersonic_models() -> None:
     class FakeSuperSonicClient:
         async def list_semantic_models(self):
-            return [{
-                "id": 1, "key": "supersonic:1", "name": "用户部门",
-                "biz_name": "user_department", "description": "用户部门信息",
-                "domain_id": 1, "domain_name": "超音数", "status": "active",
-            }]
+            return [
+                {
+                    "id": 1,
+                    "key": "supersonic:1",
+                    "name": "用户部门",
+                    "biz_name": "user_department",
+                    "description": "用户部门信息",
+                    "domain_id": 1,
+                    "domain_name": "超音数",
+                    "status": "active",
+                }
+            ]
 
         async def close(self) -> None:
             return None
@@ -187,10 +194,22 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
     class FakeSupersetClient:
         async def list_dashboards(self) -> list[dict[str, object]]:
             return [
-                {"superset_id": 5, "title": "Sales Dashboard", "slug": None,
-                 "url_path": "/superset/dashboard/5/", "chart_count": 10, "published": True},
-                {"superset_id": 7, "title": "Executive Dashboard", "slug": "executive",
-                 "url_path": "/superset/dashboard/7/", "chart_count": 4, "published": True},
+                {
+                    "superset_id": 5,
+                    "title": "Sales Dashboard",
+                    "slug": None,
+                    "url_path": "/superset/dashboard/5/",
+                    "chart_count": 10,
+                    "published": True,
+                },
+                {
+                    "superset_id": 7,
+                    "title": "Executive Dashboard",
+                    "slug": "executive",
+                    "url_path": "/superset/dashboard/7/",
+                    "chart_count": 4,
+                    "published": True,
+                },
             ]
 
     app = create_app(settings())
@@ -203,7 +222,10 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
         synced = client.post("/api/v1/admin/superset/dashboards/sync", headers=headers)
         assert synced.status_code == 200
         assert synced.json()["count"] == 2
-        assert next(item for item in synced.json()["dashboards"] if item["is_home"])["superset_id"] == 5
+        assert (
+            next(item for item in synced.json()["dashboards"] if item["is_home"])["superset_id"]
+            == 5
+        )
 
         selected = client.post("/api/v1/admin/superset/dashboards/7/home", headers=headers)
         assert selected.status_code == 200
@@ -214,20 +236,34 @@ def test_admin_reads_real_superset_data_assets_without_secrets() -> None:
     class FakeSupersetClient:
         async def list_data_assets(self) -> dict[str, list[dict[str, object]]]:
             return {
-                "databases": [{"superset_id": 1, "name": "examples", "backend": "postgresql",
-                               "expose_in_sqllab": True, "allow_file_upload": True,
-                               "dataset_count": 1}],
-                "datasets": [{"superset_id": 20, "name": "video_game_sales",
-                              "database_id": 1, "database_name": "examples", "schema": "public",
-                              "kind": "physical", "description": "", "explore_url": "/explore/"}],
+                "databases": [
+                    {
+                        "superset_id": 1,
+                        "name": "examples",
+                        "backend": "postgresql",
+                        "expose_in_sqllab": True,
+                        "allow_file_upload": True,
+                        "dataset_count": 1,
+                    }
+                ],
+                "datasets": [
+                    {
+                        "superset_id": 20,
+                        "name": "video_game_sales",
+                        "database_id": 1,
+                        "database_name": "examples",
+                        "schema": "public",
+                        "kind": "physical",
+                        "description": "",
+                        "explore_url": "/explore/",
+                    }
+                ],
             }
 
     app = create_app(settings())
     app.state.superset_client = FakeSupersetClient()
     with TestClient(app) as client:
-        client.post(
-            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
-        )
+        client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password"})
         response = client.get("/api/v1/admin/superset/data-assets")
         assert response.status_code == 200
         assert response.json()["databases"][0]["name"] == "examples"
@@ -286,10 +322,18 @@ def test_structured_database_form_builds_encoded_uri_server_side() -> None:
         ).json()["user"]
         response = client.post(
             "/api/v1/admin/superset/databases/test",
-            json={"database_name": "doris_prod", "connection_mode": "form", "engine": "doris",
-                  "host": "10.0.0.8", "port": 9030, "database": "sales warehouse",
-                  "username": "bi_user", "password": "p@ss:word", "sqlalchemy_uri": "",
-                  "expose_in_sqllab": True},
+            json={
+                "database_name": "doris_prod",
+                "connection_mode": "form",
+                "engine": "doris",
+                "host": "10.0.0.8",
+                "port": 9030,
+                "database": "sales warehouse",
+                "username": "bi_user",
+                "password": "p@ss:word",
+                "sqlalchemy_uri": "",
+                "expose_in_sqllab": True,
+            },
             headers={"X-AgentBI-CSRF": user["csrf_token"]},
         )
         assert response.status_code == 200
@@ -323,8 +367,14 @@ def test_admin_creates_real_superset_dataset() -> None:
 def test_superset_asset_deletion_conflicts_are_safe() -> None:
     class FakeSupersetClient:
         async def get_dataset(self, dataset_id: int) -> dict[str, object]:
-            return {"superset_id": dataset_id, "name": "orders", "schema": "public",
-                    "database_name": "sales", "columns": [], "metrics": []}
+            return {
+                "superset_id": dataset_id,
+                "name": "orders",
+                "schema": "public",
+                "database_name": "sales",
+                "columns": [],
+                "metrics": [],
+            }
 
         async def delete_dataset(self, dataset_id: int) -> None:
             raise SupersetApiError("Dataset 正被 3 个图表引用，不能删除")
@@ -349,11 +399,17 @@ def test_superset_asset_deletion_conflicts_are_safe() -> None:
 def test_admin_updates_superset_database_and_dataset_metadata() -> None:
     class FakeSupersetClient:
         async def update_database(
-            self, database_id: int, database_name: str, sqlalchemy_uri: str,
+            self,
+            database_id: int,
+            database_name: str,
+            sqlalchemy_uri: str,
             expose_in_sqllab: bool,
         ) -> dict[str, object]:
             assert (database_id, database_name, sqlalchemy_uri, expose_in_sqllab) == (
-                1, "sales_prod", "", False,
+                1,
+                "sales_prod",
+                "",
+                False,
             )
             return {"superset_id": database_id, "name": database_name}
 
@@ -375,7 +431,8 @@ def test_admin_updates_superset_database_and_dataset_metadata() -> None:
         )
         dataset = client.put(
             "/api/v1/admin/superset/datasets/3",
-            json={"description": "销售订单事实表"}, headers=headers,
+            json={"description": "销售订单事实表"},
+            headers=headers,
         )
         assert database.status_code == 200
         assert dataset.status_code == 200
@@ -448,7 +505,10 @@ def test_admin_creates_governed_chart_and_drilldown() -> None:
             "semantic_model": "customer_model_v2",
             "dimensions": ["区域", "渠道", "门店"],
         }
-        assert client.put("/api/v1/admin/charts/customer_growth", json=updated_payload).status_code == 403
+        assert (
+            client.put("/api/v1/admin/charts/customer_growth", json=updated_payload).status_code
+            == 403
+        )
         updated = client.put(
             "/api/v1/admin/charts/customer_growth",
             json=updated_payload,
@@ -505,11 +565,14 @@ def test_normal_user_cannot_create_chart() -> None:
         )
         assert response.status_code == 403
         assert client.get("/api/v1/admin/charts").status_code == 403
-        assert client.patch(
-            "/api/v1/admin/charts/forbidden_chart/publication",
-            headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
-            json={"published": False},
-        ).status_code == 403
+        assert (
+            client.patch(
+                "/api/v1/admin/charts/forbidden_chart/publication",
+                headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
+                json={"published": False},
+            ).status_code
+            == 403
+        )
 
 
 def test_navigation_modules_use_session_scoped_data() -> None:
@@ -547,8 +610,12 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         roles = client.get("/api/v1/admin/roles")
         assert roles.status_code == 200
         assert {role["code"] for role in roles.json()["roles"]} == {"user", "admin"}
-        assert client.get("/api/v1/admin/semantic-models").json()["models"][0]["name"] == "sales_model"
-        assert client.get("/api/v1/admin/data-sources").json()["sources"][0]["name"] == "sales_orders"
+        assert (
+            client.get("/api/v1/admin/semantic-models").json()["models"][0]["name"] == "sales_model"
+        )
+        assert (
+            client.get("/api/v1/admin/data-sources").json()["sources"][0]["name"] == "sales_orders"
+        )
         events = client.get("/api/v1/admin/audit-events")
         assert events.status_code == 200
         assert any(event["event_type"] == "report_created" for event in events.json()["events"])
@@ -578,23 +645,34 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         }
         assert client.post("/api/v1/admin/roles", json=role_payload).status_code == 403
         role_created = client.post(
-            "/api/v1/admin/roles", json=role_payload,
+            "/api/v1/admin/roles",
+            json=role_payload,
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert role_created.status_code == 201
         role_updated = client.put(
             "/api/v1/admin/roles/regional_analyst",
-            json={"name": "区域经营分析师", "description": "区域范围",
-                  "permissions": ["workspace:view", "dashboard:view", "report:view",
-                                  "datasource:manage"]},
+            json={
+                "name": "区域经营分析师",
+                "description": "区域范围",
+                "permissions": [
+                    "workspace:view",
+                    "dashboard:view",
+                    "report:view",
+                    "datasource:manage",
+                ],
+            },
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert role_updated.status_code == 200
-        assert client.put(
-            "/api/v1/admin/roles/admin",
-            json={"name": "管理员", "description": "", "permissions": ["workspace:view"]},
-            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
-        ).status_code == 409
+        assert (
+            client.put(
+                "/api/v1/admin/roles/admin",
+                json={"name": "管理员", "description": "", "permissions": ["workspace:view"]},
+                headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+            ).status_code
+            == 409
+        )
 
         new_user = {
             "username": "analyst2",
@@ -619,21 +697,31 @@ def test_navigation_modules_use_session_scoped_data() -> None:
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert duplicate_user.status_code == 409
-        assert client.delete(
-            "/api/v1/admin/roles/regional_analyst",
-            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
-        ).status_code == 409
+        assert (
+            client.delete(
+                "/api/v1/admin/roles/regional_analyst",
+                headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+            ).status_code
+            == 409
+        )
         disposable_role = client.post(
             "/api/v1/admin/roles",
-            json={"code": "temporary", "name": "临时角色", "description": "",
-                  "permissions": ["workspace:view"]},
+            json={
+                "code": "temporary",
+                "name": "临时角色",
+                "description": "",
+                "permissions": ["workspace:view"],
+            },
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert disposable_role.status_code == 201
-        assert client.delete(
-            "/api/v1/admin/roles/temporary",
-            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
-        ).status_code == 204
+        assert (
+            client.delete(
+                "/api/v1/admin/roles/temporary",
+                headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+            ).status_code
+            == 204
+        )
 
         self_lockout = client.put(
             "/api/v1/admin/users/admin",
@@ -662,25 +750,36 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         }
         assert client.post("/api/v1/admin/data-sources", json=source_payload).status_code == 403
         source_created = client.post(
-            "/api/v1/admin/data-sources", json=source_payload,
+            "/api/v1/admin/data-sources",
+            json=source_payload,
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert source_created.status_code == 201
         source_updated = client.put(
             "/api/v1/admin/data-sources/crm_orders",
-            json={"source_type": "Superset Dataset", "description": "CRM 订单数据集", "status": "offline"},
+            json={
+                "source_type": "Superset Dataset",
+                "description": "CRM 订单数据集",
+                "status": "offline",
+            },
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert source_updated.status_code == 200
         assert source_updated.json()["source"]["status"] == "offline"
-        assert client.delete(
-            "/api/v1/admin/data-sources/sales_orders",
-            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
-        ).status_code == 409
-        assert client.delete(
-            "/api/v1/admin/data-sources/crm_orders",
-            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
-        ).status_code == 204
+        assert (
+            client.delete(
+                "/api/v1/admin/data-sources/sales_orders",
+                headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+            ).status_code
+            == 409
+        )
+        assert (
+            client.delete(
+                "/api/v1/admin/data-sources/crm_orders",
+                headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+            ).status_code
+            == 204
+        )
 
         model_payload = {
             "name": "customer_value_model",
@@ -688,20 +787,28 @@ def test_navigation_modules_use_session_scoped_data() -> None:
             "description": "客户价值分析模型",
         }
         model_created = client.post(
-            "/api/v1/admin/semantic-models", json=model_payload,
+            "/api/v1/admin/semantic-models",
+            json=model_payload,
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert model_created.status_code == 201
         model_updated = client.put(
             "/api/v1/admin/semantic-models/customer_value_model",
-            json={"subject_area": "客户价值", "description": "客户价值分析模型", "status": "offline"},
+            json={
+                "subject_area": "客户价值",
+                "description": "客户价值分析模型",
+                "status": "offline",
+            },
             headers={"X-AgentBI-CSRF": admin["csrf_token"]},
         )
         assert model_updated.status_code == 200
-        assert client.delete(
-            "/api/v1/admin/semantic-models/customer_value_model",
-            headers={"X-AgentBI-CSRF": admin["csrf_token"]},
-        ).status_code == 204
+        assert (
+            client.delete(
+                "/api/v1/admin/semantic-models/customer_value_model",
+                headers={"X-AgentBI-CSRF": admin["csrf_token"]},
+            ).status_code
+            == 204
+        )
 
         assert client.delete(f"/api/v1/reports/{report_id}").status_code == 403
         deleted = client.delete(
@@ -719,13 +826,18 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         assert custom_login.json()["user"]["role"] == "regional_analyst"
         assert client.get("/api/v1/admin/data-sources").status_code == 200
         assert client.get("/api/v1/admin/users").status_code == 403
+
+
 def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
     class FakeSupersetClient:
         async def get_dataset(self, dataset_id: int):
             assert dataset_id == 21
             return {
-                "superset_id": 21, "name": "sales_orders", "schema": "public",
-                "database_name": "examples", "metrics": [],
+                "superset_id": 21,
+                "name": "sales_orders",
+                "schema": "public",
+                "database_name": "examples",
+                "metrics": [],
                 "columns": [
                     {"name": "order_id", "type": "BIGINT", "is_time": False, "filterable": True},
                     {"name": "region", "type": "VARCHAR", "is_time": False, "filterable": True},
@@ -737,8 +849,10 @@ def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
         published = None
 
         async def list_modeling_catalog(self):
-            return {"domains": [{"id": 1, "name": "销售"}],
-                    "databases": [{"id": 2, "name": "业务库", "type": "postgresql"}]}
+            return {
+                "domains": [{"id": 1, "name": "销售"}],
+                "databases": [{"id": 2, "name": "业务库", "type": "postgresql"}],
+            }
 
         async def publish_semantic_model(self, payload):
             self.published = payload
@@ -752,23 +866,77 @@ def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
     sonic = FakeSuperSonicClient()
     app.state.supersonic_client = sonic
     with TestClient(app) as client:
-        assert client.post("/api/v1/admin/semantic-drafts/generate", json={"dataset_id": 21}).status_code == 401
-        login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-password"})
+        assert (
+            client.post(
+                "/api/v1/admin/semantic-drafts/generate", json={"dataset_id": 21}
+            ).status_code
+            == 401
+        )
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
         csrf = login.json()["user"]["csrf_token"]
         headers = {"X-AgentBI-CSRF": csrf}
         generated = client.post(
-            "/api/v1/admin/semantic-drafts/generate", json={"dataset_id": 21}, headers=headers,
+            "/api/v1/admin/semantic-drafts/generate",
+            json={"dataset_id": 21},
+            headers=headers,
         )
         assert generated.status_code == 200
         draft = generated.json()["draft"]
         assert draft["generation"]["ai_generated"] is False
-        publish = client.post("/api/v1/admin/semantic-drafts/publish", headers=headers, json={
-            "dataset_id": 21, "domain_id": 1, "database_id": 2,
-            "name": "销售订单", "biz_name": "sales_orders_model", "description": "已审核",
-            "identifiers": draft["identifiers"], "dimensions": draft["dimensions"],
-            "measures": draft["measures"], "fields": draft["fields"],
-            "drilldown_path": draft["drilldown_path"],
-        })
+        publish = client.post(
+            "/api/v1/admin/semantic-drafts/publish",
+            headers=headers,
+            json={
+                "dataset_id": 21,
+                "domain_id": 1,
+                "database_id": 2,
+                "name": "销售订单",
+                "biz_name": "sales_orders_model",
+                "description": "已审核",
+                "identifiers": draft["identifiers"],
+                "dimensions": draft["dimensions"],
+                "measures": draft["measures"],
+                "fields": draft["fields"],
+                "drilldown_path": draft["drilldown_path"],
+            },
+        )
         assert publish.status_code == 201
         assert sonic.published["modelDetail"]["tableQuery"] == "public.sales_orders"
         assert sonic.published["modelDetail"]["measures"][0]["bizName"] == "revenue"
+
+
+def test_admin_creates_supersonic_database_without_echoing_secret() -> None:
+    class FakeSuperSonicClient:
+        received = None
+
+        async def create_database(self, payload):
+            self.received = payload
+            return {"id": 9, "name": payload["name"], "type": payload["type"]}
+
+    app = create_app(settings())
+    sonic = FakeSuperSonicClient()
+    app.state.supersonic_client = sonic
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
+        headers = {"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]}
+        response = client.post(
+            "/api/v1/admin/semantic-drafts/databases",
+            headers=headers,
+            json={
+                "name": "销售同源库",
+                "engine": "postgresql",
+                "host": "db.internal",
+                "port": 5432,
+                "database": "sales",
+                "username": "readonly",
+                "password": "secret-value",
+            },
+        )
+        assert response.status_code == 201
+        assert sonic.received["password"] == "secret-value"
+        assert sonic.received["type"] == "postgresql"
+        assert "secret-value" not in response.text

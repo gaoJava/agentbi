@@ -1911,6 +1911,50 @@ document.querySelector('#open-semantic-draft').addEventListener('click', openSem
 document.querySelector('#close-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
 document.querySelector('#cancel-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
 document.querySelector('#generate-semantic-draft').addEventListener('click', generateSemanticDraft);
+document.querySelector('#open-sonic-database').addEventListener('click', () => {
+  document.querySelector('#sonic-database-error').hidden = true;
+  document.querySelector('#sonic-database-editor').hidden = false;
+});
+function closeSonicDatabaseEditor() {
+  document.querySelector('#sonic-db-password').value = '';
+  document.querySelector('#sonic-database-editor').hidden = true;
+}
+document.querySelector('#close-sonic-database').addEventListener('click', closeSonicDatabaseEditor);
+document.querySelector('#cancel-sonic-database').addEventListener('click', closeSonicDatabaseEditor);
+document.querySelector('#sonic-db-engine').addEventListener('change', event => {
+  document.querySelector('#sonic-db-port').value = event.target.value === 'postgresql' ? '5432' : '3306';
+});
+document.querySelector('#sonic-database-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const error = document.querySelector('#sonic-database-error');
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  error.hidden = true; button.disabled = true; button.textContent = '正在测试连接…';
+  try {
+    const payload = {
+      name: document.querySelector('#sonic-db-name').value.trim(),
+      engine: document.querySelector('#sonic-db-engine').value,
+      host: document.querySelector('#sonic-db-host').value.trim(),
+      port: Number(document.querySelector('#sonic-db-port').value),
+      database: document.querySelector('#sonic-db-database').value.trim(),
+      username: document.querySelector('#sonic-db-username').value.trim(),
+      password: document.querySelector('#sonic-db-password').value,
+    };
+    const body = await request('/api/v1/admin/semantic-drafts/databases', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify(payload),
+    });
+    closeSonicDatabaseEditor();
+    const catalog = await request('/api/v1/admin/semantic-drafts/catalog');
+    fillSelect(document.querySelector('#semantic-draft-database'), catalog.databases || [],
+      item => `${item.name}${item.type ? ` · ${item.type}` : ''}（ID ${item.id}）`);
+    document.querySelector('#semantic-draft-database').value = String(body.database.id);
+    showManagementFeedback(`${body.database.name} 已通过测试并保存到 SuperSonic`);
+  } catch (cause) {
+    error.textContent = cause.message; error.hidden = false;
+  } finally {
+    button.disabled = false; button.textContent = '测试并保存';
+  }
+});
 document.querySelector('#semantic-draft-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (!activeSemanticDraft) return;
