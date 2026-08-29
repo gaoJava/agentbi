@@ -99,7 +99,9 @@ export default function InsightPilotPanel() {
   );
   const compact = viewport.width <= 600;
 
-  if (!onDashboard) return null;
+  // AgentBI owns the right-side assistant when Superset is embedded. Keep this
+  // standalone panel only for users who open Superset directly.
+  if (!onDashboard || window.parent !== window) return null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();

@@ -23,6 +23,15 @@ _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 sanitize_context = _MODULE.sanitize_context
 
+_CONTEXT_BRIDGE_PATH = (
+    Path(__file__).parents[1]
+    / "integrations"
+    / "superset-extension"
+    / "frontend"
+    / "src"
+    / "supersetContextBridge.ts"
+)
+
 
 def valid_context() -> dict:
     return {
@@ -63,3 +72,12 @@ def test_sanitize_context_rejects_non_positive_model_id() -> None:
 
     with pytest.raises(ValueError, match="positive integer"):
         sanitize_context(context)
+
+
+def test_chart_selection_targets_only_the_embedding_parent_origin() -> None:
+    bridge = _CONTEXT_BRIDGE_PATH.read_text(encoding="utf-8")
+
+    assert "new URL(document.referrer).origin" in bridge
+    assert "window.parent.postMessage" in bridge
+    assert "}, targetOrigin);" in bridge
+    assert "}, '*');" not in bridge

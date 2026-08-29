@@ -1,5 +1,6 @@
 import type { ScreenContext, ScreenFilter } from './contracts';
 import {
+  CHART_SELECTED_MESSAGE,
   CONTEXT_EVENT,
   CONTEXT_REQUEST_EVENT,
   CONTEXT_SETTINGS_EVENT,
@@ -76,6 +77,53 @@ function closestAttribute(target: EventTarget | null, names: string[]): string |
   return undefined;
 }
 
+function chartContainer(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  return target.closest<HTMLElement>(
+    '[data-chart-id],[data-test-chart-id],.dashboard-component-chart-holder',
+  );
+}
+
+function attributeWithin(element: Element, names: string[]): string | undefined {
+  for (const name of names) {
+    const direct = element.getAttribute(name);
+    if (direct) return direct.slice(0, 128);
+    const child = element.querySelector(`[${name}]`);
+    const nested = child?.getAttribute(name);
+    if (nested) return nested.slice(0, 128);
+  }
+  return undefined;
+}
+
+function chartIdWithin(element: Element): string | undefined {
+  const attributeId = attributeWithin(element, ['data-chart-id', 'data-test-chart-id']);
+  if (attributeId) return attributeId;
+  const href = element.querySelector<HTMLAnchorElement>('a[href*="slice_id="]')?.href;
+  if (!href) return undefined;
+  try {
+    return positiveInteger(new URL(href, window.location.href).searchParams.get('slice_id'))?.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function chartTitle(element: Element, chartId: string): string {
+  const title = element.querySelector<HTMLElement>(
+    '[data-test="chart-title"],.chart-header .header-title,.slice-header',
+  )?.innerText.trim();
+  return (title || `图表 ${chartId}`).slice(0, 200);
+}
+
+function parentOrigin(): string | undefined {
+  if (window.parent === window || !document.referrer) return undefined;
+  try {
+    const origin = new URL(document.referrer).origin;
+    return /^https?:\/\//.test(origin) ? origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Publish only identifiers and visible filters; raw chart rows never cross this boundary. */
 export function publishScreenContext(snapshot: DashboardStateSnapshot): void {
   const detail: ScreenContext = {
@@ -98,6 +146,7 @@ export function installSupersetContextBridge(): () => void {
   let chartId: string | undefined;
   let datasetId: string | undefined;
   let lastFingerprint = '';
+  let analyzeButton: HTMLButtonElement | undefined;
 
   const publish = (force = false) => {
     const dashboardId = dashboardIdFromLocation();
@@ -123,6 +172,51 @@ export function installSupersetContextBridge(): () => void {
     datasetId = closestAttribute(event.target, ['data-dataset-id']) ?? datasetId;
     publish();
   };
+  const onChartHover = (event: MouseEvent) => {
+    const container = chartContainer(event.target);
+    if (!container || (event.target instanceof Element && event.target.closest('.agentbi-chart-analyze'))) {
+      return;
+    }
+    const hoveredChartId = chartIdWithin(container);
+    if (!hoveredChartId || analyzeButton?.parentElement === container) return;
+    analyzeButton?.remove();
+    analyzeButton = document.createElement('button');
+    analyzeButton.type = 'button';
+    analyzeButton.className = 'agentbi-chart-analyze';
+    analyzeButton.textContent = '✦ AI 分析此图';
+    analyzeButton.setAttribute('aria-label', `使用 AI 分析${chartTitle(container, hoveredChartId)}`);
+    Object.assign(analyzeButton.style, {
+      position: 'absolute', top: '10px', right: '42px', zIndex: '20', border: '1px solid #9cc0ff',
+      borderRadius: '16px', padding: '6px 11px', color: '#155eef', background: '#ffffffee',
+      boxShadow: '0 4px 14px rgba(21,94,239,.18)', cursor: 'pointer', fontWeight: '700',
+    });
+    if (window.getComputedStyle(container).position === 'static') container.style.position = 'relative';
+    analyzeButton.addEventListener('click', buttonEvent => {
+      buttonEvent.preventDefault();
+      buttonEvent.stopPropagation();
+      chartId = hoveredChartId;
+      datasetId = attributeWithin(container, ['data-dataset-id']) ?? datasetId;
+      publish(true);
+      const dashboardId = dashboardIdFromLocation();
+      const targetOrigin = parentOrigin();
+      if (!dashboardId || !targetOrigin) return;
+      const settings = readSettings(dashboardId);
+      window.parent.postMessage({
+        type: CHART_SELECTED_MESSAGE,
+        version: 1,
+        title: chartTitle(container, hoveredChartId),
+        context: {
+          dashboard_id: dashboardId,
+          chart_id: hoveredChartId,
+          dataset_id: datasetId,
+          semantic_model_id: settings.semanticModelId,
+          time_range: settings.timeRange,
+          filters: filtersFromLocation(),
+        },
+      }, targetOrigin);
+    });
+    container.appendChild(analyzeButton);
+  };
   const onSettings = () => {
     lastFingerprint = '';
     publish();
@@ -131,6 +225,7 @@ export function installSupersetContextBridge(): () => void {
   const onPopState = () => publish();
 
   document.addEventListener('click', onClick, true);
+  document.addEventListener('mouseover', onChartHover, true);
   window.addEventListener('popstate', onPopState);
   window.addEventListener(CONTEXT_REQUEST_EVENT, onContextRequest);
   window.addEventListener(CONTEXT_SETTINGS_EVENT, onSettings);
@@ -140,6 +235,8 @@ export function installSupersetContextBridge(): () => void {
 
   return () => {
     document.removeEventListener('click', onClick, true);
+    document.removeEventListener('mouseover', onChartHover, true);
+    analyzeButton?.remove();
     window.removeEventListener('popstate', onPopState);
     window.removeEventListener(CONTEXT_REQUEST_EVENT, onContextRequest);
     window.removeEventListener(CONTEXT_SETTINGS_EVENT, onSettings);

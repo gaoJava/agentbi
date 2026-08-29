@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260829.13" in shell.text
+        assert "app.js?v=20260830.15" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -50,6 +50,10 @@ def test_product_shell_and_user_session_flow() -> None:
         assert "parseSupersetDataAssets" in runtime.text
         assert "parseSavedReports" in runtime.text
         assert "parseAuditEvents" in runtime.text
+        app_script = client.get("/app/assets/app.js")
+        assert app_script.status_code == 200
+        assert "new URL(frame.src, window.location.href).origin" in app_script.text
+        assert "event.source !== frame.contentWindow" in app_script.text
         assert client.get("/api/v1/auth/me").status_code == 401
 
         login = client.post(
@@ -979,3 +983,46 @@ def test_admin_saves_masked_encrypted_llm_provider_config() -> None:
         )
         assert updated.status_code == 200
         assert updated.json()["model"] == "enterprise-model-v2"
+
+
+def test_admin_lists_switches_and_deletes_llm_provider_configs() -> None:
+    app = create_app(settings())
+
+    async def connection_ok(**_: object) -> None:
+        return None
+
+    app.state.semantic_llm.test_connection = connection_ok
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
+        headers = {"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]}
+        first = client.post(
+            "/api/v1/admin/llm-provider", headers=headers,
+            json={"base_url": "https://one.example/v1", "model": "model-one",
+                  "api_key": "secret-one", "enabled": False},
+        )
+        second = client.post(
+            "/api/v1/admin/llm-provider", headers=headers,
+            json={"base_url": "https://two.example/v1", "model": "model-two",
+                  "api_key": "secret-two", "enabled": False},
+        )
+        assert first.status_code == 201
+        assert second.status_code == 201
+        listing = client.get("/api/v1/admin/llm-provider").json()
+        assert listing["count"] == 2
+        assert all("encrypted_api_key" not in item for item in listing["items"])
+
+        activated = client.post(
+            f"/api/v1/admin/llm-provider/{second.json()['id']}/activate", headers=headers
+        )
+        assert activated.status_code == 200
+        listing = client.get("/api/v1/admin/llm-provider").json()
+        assert listing["active_id"] == second.json()["id"]
+
+        assert client.delete(
+            f"/api/v1/admin/llm-provider/{first.json()['id']}", headers=headers
+        ).status_code == 204
+        assert client.delete(
+            f"/api/v1/admin/llm-provider/{second.json()['id']}", headers=headers
+        ).status_code == 409

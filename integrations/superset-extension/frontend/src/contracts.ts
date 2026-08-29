@@ -51,3 +51,4 @@ export interface AnalyzeResult {
 export const CONTEXT_EVENT = 'agentbi:screen-context';
 export const CONTEXT_REQUEST_EVENT = 'agentbi:screen-context-request';
 export const CONTEXT_SETTINGS_EVENT = 'agentbi:context-settings';
+export const CHART_SELECTED_MESSAGE = 'agentbi:chart-selected';

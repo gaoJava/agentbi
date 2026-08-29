@@ -831,22 +831,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/admin/llm-provider")
     async def get_llm_provider(_: SessionIdentity = semantic_session) -> dict[str, object]:
-        item = sessions.repository.get_llm_provider_config()
-        if item is None:
-            return {
-                "configured": False,
-                "enabled": False,
-                "base_url": "",
-                "model": "",
-                "api_key_masked": "",
+        items = sessions.repository.list_llm_provider_configs()
+        public_items = [
+            {
+                "id": item["id"],
+                "enabled": item["enabled"],
+                "base_url": item["base_url"],
+                "model": item["model"],
+                "api_key_masked": "••••••••",
+                "updated_at": item["updated_at"],
             }
+            for item in items
+        ]
+        active = next((item for item in public_items if item["enabled"]), None)
+        selected = active or (public_items[0] if public_items else None)
         return {
+            "configured": bool(public_items),
+            "enabled": bool(active),
+            "base_url": selected["base_url"] if selected else "",
+            "model": selected["model"] if selected else "",
+            "api_key_masked": selected["api_key_masked"] if selected else "",
+            "updated_at": selected["updated_at"] if selected else None,
+            "active_id": active["id"] if active else None,
+            "items": public_items,
+            "count": len(public_items),
+        }
+
+    async def persist_llm_provider(
+        payload: LlmProviderPayload,
+        identity: SessionIdentity,
+        config_id: int | None,
+    ) -> dict[str, object]:
+        existing = sessions.repository.get_llm_provider_config(config_id) if config_id else None
+        if not payload.api_key and existing is None:
+            raise HTTPException(status_code=422, detail="新建配置必须填写 API Key")
+        api_key = payload.api_key
+        if not api_key and existing:
+            try:
+                api_key = semantic_llm.decrypt_key(str(existing["encrypted_api_key"]))
+            except SemanticLlmError as exc:
+                raise HTTPException(status_code=422, detail="已保存的 API Key 无法解密，请重新填写") from exc
+        if payload.enabled:
+            try:
+                await semantic_llm.test_connection(
+                    base_url=payload.base_url, api_key=api_key, model=payload.model
+                )
+            except SemanticLlmError as exc:
+                raise HTTPException(status_code=422, detail=f"LLM 连接测试失败：{exc}；配置未保存") from exc
+        saved_id = sessions.repository.save_llm_provider_config(
+            config_id=config_id,
+            base_url=payload.base_url.rstrip("/"),
+            model=payload.model,
+            encrypted_api_key=semantic_llm.encrypt_key(api_key),
+            enabled=payload.enabled,
+            actor_user_id=identity.subject,
+        )
+        if payload.enabled:
+            semantic_llm.configure(
+                base_url=payload.base_url, api_key=api_key, model=payload.model, enabled=True
+            )
+        elif existing and existing["enabled"]:
+            semantic_llm.configure(base_url="", api_key="", model="", enabled=False)
+        return {
+            "message": "LLM 服务配置已保存",
+            "id": saved_id,
             "configured": True,
-            "enabled": item["enabled"],
-            "base_url": item["base_url"],
-            "model": item["model"],
+            "enabled": payload.enabled,
+            "base_url": payload.base_url.rstrip("/"),
+            "model": payload.model,
             "api_key_masked": "••••••••",
-            "updated_at": item["updated_at"],
         }
 
     @app.put("/api/v1/admin/llm-provider")
@@ -855,37 +908,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         existing = sessions.repository.get_llm_provider_config()
-        if not payload.api_key and existing is None:
-            raise HTTPException(status_code=422, detail="首次配置必须填写 API Key")
-        api_key = payload.api_key
-        if not api_key and existing:
-            try:
-                api_key = semantic_llm.decrypt_key(str(existing["encrypted_api_key"]))
-            except SemanticLlmError as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail="已保存的 API Key 无法解密，请重新填写",
-                ) from exc
-        if payload.enabled:
-            try:
-                await semantic_llm.test_connection(
-                    base_url=payload.base_url, api_key=api_key, model=payload.model
-                )
-            except SemanticLlmError as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"LLM 连接测试失败：{exc}；配置未保存",
-                ) from exc
-        encrypted = semantic_llm.encrypt_key(api_key)
-        sessions.repository.save_llm_provider_config(
-            base_url=payload.base_url.rstrip("/"),
-            model=payload.model,
-            encrypted_api_key=encrypted,
-            enabled=payload.enabled,
-            actor_user_id=identity.subject,
-        )
-        semantic_llm.configure(
-            base_url=payload.base_url, api_key=api_key, model=payload.model, enabled=payload.enabled
+        result = await persist_llm_provider(
+            payload, identity, int(existing["id"]) if existing else None
         )
         sessions.audit(
             "llm_provider_updated",
@@ -894,14 +918,67 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_ip=request.client.host if request.client else "",
             detail=f"model:{payload.model}:enabled:{payload.enabled}",
         )
-        return {
-            "message": "LLM 服务配置已保存并生效",
-            "configured": True,
-            "enabled": payload.enabled,
-            "base_url": payload.base_url.rstrip("/"),
-            "model": payload.model,
-            "api_key_masked": "••••••••",
-        }
+        return result
+
+    @app.post("/api/v1/admin/llm-provider", status_code=status.HTTP_201_CREATED)
+    async def create_llm_provider(
+        payload: LlmProviderPayload, request: Request, identity: SessionIdentity = semantic_session
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        result = await persist_llm_provider(payload, identity, None)
+        sessions.audit("llm_provider_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=f"model:{payload.model}")
+        return result
+
+    @app.put("/api/v1/admin/llm-provider/{config_id}")
+    async def update_llm_provider(
+        config_id: int, payload: LlmProviderPayload, request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        if sessions.repository.get_llm_provider_config(config_id) is None:
+            raise HTTPException(status_code=404, detail="模型服务配置不存在")
+        result = await persist_llm_provider(payload, identity, config_id)
+        sessions.audit("llm_provider_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=f"id:{config_id}:model:{payload.model}")
+        return result
+
+    @app.post("/api/v1/admin/llm-provider/{config_id}/activate")
+    async def activate_llm_provider(
+        config_id: int, request: Request, identity: SessionIdentity = semantic_session
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        item = sessions.repository.get_llm_provider_config(config_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="模型服务配置不存在")
+        try:
+            api_key = semantic_llm.decrypt_key(str(item["encrypted_api_key"]))
+            await semantic_llm.test_connection(
+                base_url=str(item["base_url"]), api_key=api_key, model=str(item["model"])
+            )
+        except SemanticLlmError as exc:
+            raise HTTPException(status_code=422, detail=f"切换前连接测试失败：{exc}") from exc
+        sessions.repository.activate_llm_provider_config(config_id)
+        semantic_llm.configure(base_url=str(item["base_url"]), api_key=api_key,
+                               model=str(item["model"]), enabled=True)
+        sessions.audit("llm_provider_activated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=f"id:{config_id}:model:{item['model']}")
+        return {"message": f"已切换至 {item['model']}", "active_id": config_id}
+
+    @app.delete("/api/v1/admin/llm-provider/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_llm_provider(
+        config_id: int, request: Request, identity: SessionIdentity = semantic_session
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            sessions.repository.delete_llm_provider_config(config_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="模型服务配置不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail="当前生效模型不能删除，请先切换其他模型") from exc
+        sessions.audit("llm_provider_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=f"id:{config_id}")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/v1/admin/semantic-drafts/databases", status_code=status.HTTP_201_CREATED)
     async def create_supersonic_database(

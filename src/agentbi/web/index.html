@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260829.5">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260830.6">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -33,7 +33,7 @@
         </div>
         <label>用户名<input id="username" autocomplete="username" value="user" required></label>
         <label>密码<input id="password" type="password" autocomplete="current-password" required></label>
-        <div class="login-options"><label><input type="checkbox" checked> 记住我</label><button type="button">忘记密码</button></div>
+        <p class="login-security-note">身份、角色与数据范围由服务端验证；系统不会在浏览器保存密码。</p>
         <div id="login-error" class="form-error" role="alert" hidden></div>
         <button id="login-button" class="primary-button" type="submit">登录分析工作台</button>
         <div class="demo-hint">演示账号：user / user　admin / admin</div>
@@ -73,9 +73,9 @@
     <section class="canvas-shell">
       <header class="topbar dashboard-section">
         <div><h1 id="dashboard-title">华东销售经营分析</h1><p id="dashboard-subtitle">实时洞察关键指标与业务变化</p></div>
-        <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button>最近 30 天⌄</button><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">编辑仪表盘</button></div>
+        <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">在 Superset 中编辑</button></div>
       </header>
-      <section class="canvas-toolbar dashboard-section"><div><button id="superset-canvas-tab" class="active">经营总览</button><button id="local-canvas-tab" hidden>本地概览（已停用）</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button id="refresh-dashboard">⟳ 刷新</button></div></section>
+      <section class="canvas-toolbar dashboard-section"><div><strong>经营总览</strong><small>图表创建、布局和筛选统一由 Superset 提供</small></div><button id="refresh-dashboard" type="button">⟳ 重新加载</button></section>
       <section class="dashboard-grid dashboard-section" id="sales-dashboard">
         <article class="metric-card"><div><span>销售收入</span><strong>¥ 28,764.36万</strong><small class="up">↑ 18.6% 较上月</small></div><div class="sparkline"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
         <article class="metric-card"><div><span>毛利润</span><strong>¥ 7,362.85万</strong><small class="up">↑ 14.2% 较上月</small></div><div class="sparkline purple"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
@@ -94,7 +94,7 @@
       </section>
 
       <section id="superset-canvas" class="superset-canvas dashboard-section" hidden>
-        <header><div><span class="registry-status ready">● 受控嵌入</span><strong>Superset 分析画布</strong><small id="superset-mode-label">查看态 · 隐藏重复导航</small></div><div><button id="superset-view-mode" class="active" type="button">查看态</button><button id="superset-edit-mode" data-permission="dashboard:manage" type="button">编辑态</button></div></header>
+        <header><div><span class="registry-status ready">● 已连接 Superset</span><strong>分析画布</strong><small id="superset-mode-label">浏览模式</small></div></header>
         <div id="superset-loading" class="superset-state"><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>正在检查上游服务和仪表盘配置。</p></div>
         <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">真实分析服务当前不可用，不展示模拟业务数据。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button" hidden>本地画布已停用</button></div></div>
         <iframe id="superset-frame" title="Superset 分析画布" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" referrerpolicy="same-origin" hidden></iframe>
@@ -108,13 +108,13 @@
 
       <section id="drilldown-view" class="drilldown-view" hidden>
         <div id="drilldown-empty" class="module-empty-state"><strong>尚未绑定真实下钻数据</strong><p>下钻配置目前只登记图表、指标、语义模型和维度路径，不再生成模拟数值。请先绑定 Superset 图表与真实查询结果，验证通过后才开放下钻层级和 AgentBI 分析。</p><button data-view="drill-registry" type="button">前往下钻配置</button></div>
-        <header class="drill-header"><div><h1 id="drill-page-title">销售收入下钻分析</h1><nav id="drill-breadcrumb">销售总览　›　<span>2024 Q4</span>　›　华东　›　产品线</nav></div><div><button>▣ 2024全年</button><button>▽ 筛选</button><button>···</button></div></header>
+        <header class="drill-header"><div><h1 id="drill-page-title">真实下钻分析</h1><nav id="drill-breadcrumb">等待真实查询上下文</nav></div></header>
         <div class="drill-scroll">
           <article class="drill-level"><header><div><span>第 0 层 · 原始图</span><strong id="drill-source-title">季度销售收入趋势</strong></div><button>✦ 让 Agent 分析此层</button></header><div id="drill-source-revenue" class="drill-columns"><div style="--h:42%"><b>620</b><i></i><span>2023 Q1</span></div><div style="--h:48%"><b>680</b><i></i><span>2023 Q2</span></div><div style="--h:58%"><b>745</b><i></i><span>2023 Q3</span></div><div style="--h:66%"><b>820</b><i></i><span>2023 Q4</span></div><div style="--h:55%"><b>780</b><i></i><span>2024 Q1</span></div><div style="--h:73%"><b>860</b><i></i><span>2024 Q2</span></div><div style="--h:82%"><b>920</b><i></i><span>2024 Q3</span></div><div class="selected" style="--h:94%"><b>1,020</b><i></i><span>2024 Q4</span></div></div><div id="drill-source-structure" class="drill-source-donut" hidden><div class="donut"><div><strong>28,764</strong><span>万元</span></div></div><ul><li><i class="blue"></i>消费电子 <b>42%</b></li><li><i class="cyan"></i>家电 <b>30%</b></li><li><i class="violet"></i>数码配件 <b>18%</b></li><li><i class="gray"></i>其他 <b>10%</b></li></ul></div></article>
           <div class="drill-connector"><i>↓</i><span id="drill-connector-one">点击 2024 Q4，下钻维度：区域</span></div>
           <article class="drill-level"><header><div><span id="drill-level-one-label">第 1 层 · 区域</span><strong id="drill-level-one-title">2024 Q4 各区域销售收入</strong></div><button>✦ 让 Agent 分析此层</button></header><div id="drill-level-one-bars" class="drill-region-bars"></div></article>
           <div class="drill-connector"><i>↓</i><span id="drill-connector-two">点击 华东，下钻维度：产品线</span></div>
-          <article class="drill-level product-level"><header><div><span id="drill-level-two-label">第 2 层 · 产品线</span><strong id="drill-level-two-title">华东产品线贡献</strong></div><button>✦ 让 Agent 分析此层</button></header><div class="product-content"><div class="product-donut"><span><b id="drill-total">420</b>亿元</span></div><table><thead><tr><th id="drill-table-dimension">产品线</th><th>销售收入（亿元）</th><th>占比</th></tr></thead><tbody id="drill-table-body"></tbody></table><div class="drill-actions"><button>← 返回上一层</button><button class="continue">↓ 继续下钻</button></div></div></article>
+          <article class="drill-level product-level"><header><div><span id="drill-level-two-label">第 2 层</span><strong id="drill-level-two-title">查询结果</strong></div><button>✦ 让 Agent 分析此层</button></header><div class="product-content"><div class="product-donut"><span><b id="drill-total">—</b></span></div><table><thead><tr><th id="drill-table-dimension">维度</th><th>指标值</th><th>占比</th></tr></thead><tbody id="drill-table-body"></tbody></table></div></article>
           <div id="drill-dynamic-levels" class="dynamic-drill-levels"></div>
         </div>
       </section>
@@ -176,8 +176,8 @@
       </section>
 
       <section id="semantic-models-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>语义模型</h1><p>实时读取 SuperSonic 主题域与语义模型</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button id="open-llm-provider" type="button">⚙ 模型服务配置</button><button id="open-semantic-draft" class="primary-small" type="button">✦ 智能建模草稿</button><button class="module-refresh" data-module="semantic-models" type="button">⟳ 同步 SuperSonic</button></div></header>
-        <div class="registry-content"><aside class="registry-note"><strong>真实模型来源</strong><p>本页不再展示 AgentBI 自建占位模型。模型由 SuperSonic 负责创建、指标治理和权限控制；AgentBI 只保存 Superset 图表到 Model ID 的映射。</p></aside><section class="registry-table-card"><table><thead><tr><th>Model ID</th><th>模型名称</th><th>主题域</th><th>业务标识</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
+        <header class="registry-header"><div><h1>语义模型</h1><p>管理 AI 模型服务，并同步 SuperSonic 业务语义模型</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button id="open-llm-provider" type="button">＋ 新增模型服务</button><button id="open-semantic-draft" class="primary-small" type="button">✦ 智能建模草稿</button><button class="module-refresh" data-module="semantic-models" type="button">⟳ 同步</button></div></header>
+        <div class="registry-content"><section class="registry-table-card llm-provider-card"><header><div><strong>AI 模型服务</strong><small>可维护多个 OpenAI-compatible 服务；同一时间仅一个模型生效</small></div><span id="llm-provider-count" class="registry-version">0 个配置</span></header><table><thead><tr><th>模型</th><th>Base URL</th><th>密钥</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="llm-provider-table-body"></tbody></table></section><aside class="registry-note"><strong>真实模型来源</strong><p>业务语义模型由 SuperSonic 负责指标治理和权限控制；AI 模型仅用于基于 Superset Dataset 字段元数据生成建模草稿，不会接收数据行、SQL 或数据库凭据。</p></aside><section class="registry-table-card"><header><div><strong>SuperSonic 业务语义模型</strong><small>来自上游实时接口，不展示本地占位模型</small></div></header><table><thead><tr><th>Model ID</th><th>模型名称</th><th>主题域</th><th>业务标识</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
       </section>
 
       <section id="data-sources-view" class="registry-view module-view" hidden>
@@ -202,8 +202,8 @@
     </section>
 
     <aside class="agent-panel">
-      <header><div><span class="agent-icon">✦</span><div><strong>AgentBI 分析助手</strong><small>可验证的经营分析 Agent</small></div></div><span class="online">● 已连接</span></header>
-      <section id="dashboard-agent"><section class="context-box"><div><strong>真实查询上下文</strong></div><p>查询经 AgentBI 安全代理转发至 SuperSonic</p><div><span id="agent-dashboard-name">经营总览</span><span id="agent-scope">按账号权限过滤</span></div><label>SuperSonic 语义模型<select id="agent-semantic-model"><option value="">正在同步真实模型…</option></select></label><label>时间范围<input id="agent-time-range" maxlength="256" value="最近30天"></label></section><section id="agent-query-result" class="agent-welcome" hidden><h3 id="agent-answer"></h3><div id="agent-result-table"></div><small id="agent-evidence-summary"></small><button id="start-result-drilldown" type="button" hidden>基于首行真实结果继续下钻</button></section></section>
+      <header><div><button id="agent-panel-toggle" class="agent-panel-toggle" type="button" aria-label="收起 AgentBI 分析助手" aria-expanded="true"><span class="agent-icon">✦</span></button><div><strong>AgentBI 分析助手</strong><small>可验证的经营分析 Agent</small></div></div><span class="online">● 已连接</span></header>
+      <section id="dashboard-agent"><section class="context-box"><div><strong>真实查询上下文</strong></div><p id="agent-context-description">请在 Superset 图表上点击“AI 分析此图”以固定上下文</p><div><span id="agent-dashboard-name">经营总览</span><span id="agent-chart-context" hidden></span><span id="agent-scope">按账号权限过滤</span></div><label>SuperSonic 语义模型<select id="agent-semantic-model"><option value="">正在同步真实模型…</option></select></label><label>时间范围<input id="agent-time-range" maxlength="256" value="最近30天"></label></section><section id="agent-query-result" class="agent-welcome" hidden><h3 id="agent-answer"></h3><div id="agent-result-table"></div><small id="agent-evidence-summary"></small><button id="start-result-drilldown" type="button" hidden>基于首行真实结果继续下钻</button></section></section>
       <section id="drill-agent" class="drill-agent" hidden><div class="drill-context"><span>真实查询层级：</span><strong id="drill-agent-context"></strong></div><div class="ai-insight"><strong>AI 分析结论</strong><p id="drill-insight"></p><small id="drill-insight-source"></small></div><div class="evidence-path"><strong>证据</strong><p id="drill-evidence"></p></div></section>
       <div class="agent-input"><textarea id="agent-question" aria-label="向 AgentBI 提问" maxlength="2000" placeholder="请输入已在 SuperSonic 配置口径的问题…"></textarea><button id="agent-analyze" type="button">开始真实分析</button><small id="agent-query-status">回答遵循当前用户权限，只展示真实查询结果</small></div>
     </aside>
@@ -372,9 +372,9 @@
   </div>
 
   <div id="llm-provider-editor" class="modal-backdrop" hidden>
-    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">真实 LLM 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="qwen-plus" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="首次配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox" checked><span>启用真实 LLM 增强</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">测试连接并保存</button></footer></form></section>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260829.13" defer></script>
+  <script src="/app/assets/app.js?v=20260830.15" defer></script>
 </body>
 </html>

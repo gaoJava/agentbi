@@ -243,7 +243,7 @@ class SemanticModelAsset(Base):
 
 
 class LlmProviderConfig(Base):
-    """Singleton LLM provider config; the API key is stored as authenticated ciphertext."""
+    """Switchable LLM provider config; API keys are stored as authenticated ciphertext."""
 
     __tablename__ = "llm_provider_configs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -349,18 +349,40 @@ class IdentityRepository:
         with Session(self.engine) as db, db.begin():
             db.add(ConversationState(id=conversation_id, actor_user_id=actor_user_id))
 
-    def get_llm_provider_config(self) -> dict[str, object] | None:
+    @staticmethod
+    def _llm_provider_dict(item: LlmProviderConfig) -> dict[str, object]:
+        return {
+            "id": item.id,
+            "base_url": item.base_url,
+            "model": item.model_name,
+            "encrypted_api_key": item.encrypted_api_key,
+            "enabled": item.enabled,
+            "updated_at": item.updated_at.isoformat(),
+        }
+
+    def list_llm_provider_configs(self) -> list[dict[str, object]]:
         with Session(self.engine) as db:
-            item = db.get(LlmProviderConfig, 1)
+            items = db.scalars(
+                select(LlmProviderConfig).order_by(
+                    LlmProviderConfig.enabled.desc(), LlmProviderConfig.updated_at.desc()
+                )
+            ).all()
+            return [self._llm_provider_dict(item) for item in items]
+
+    def get_llm_provider_config(self, config_id: int | None = None) -> dict[str, object] | None:
+        with Session(self.engine) as db:
+            item = (
+                db.get(LlmProviderConfig, config_id)
+                if config_id is not None
+                else db.scalar(
+                    select(LlmProviderConfig).order_by(
+                        LlmProviderConfig.enabled.desc(), LlmProviderConfig.updated_at.desc()
+                    )
+                )
+            )
             if item is None:
                 return None
-            return {
-                "base_url": item.base_url,
-                "model": item.model_name,
-                "encrypted_api_key": item.encrypted_api_key,
-                "enabled": item.enabled,
-                "updated_at": item.updated_at.isoformat(),
-            }
+            return self._llm_provider_dict(item)
 
     def save_llm_provider_config(
         self,
@@ -370,18 +392,45 @@ class IdentityRepository:
         encrypted_api_key: str,
         enabled: bool,
         actor_user_id: str,
-    ) -> None:
+        config_id: int | None = None,
+    ) -> int:
         with Session(self.engine) as db, db.begin():
-            item = db.get(LlmProviderConfig, 1)
+            item = db.get(LlmProviderConfig, config_id) if config_id is not None else None
             if item is None:
-                item = LlmProviderConfig(id=1)
+                next_id = int(db.scalar(select(func.max(LlmProviderConfig.id))) or 0) + 1
+                item = LlmProviderConfig(id=next_id)
                 db.add(item)
+            if enabled:
+                for other in db.scalars(select(LlmProviderConfig)).all():
+                    other.enabled = False
             item.base_url = base_url
             item.model_name = model
             item.encrypted_api_key = encrypted_api_key
             item.enabled = enabled
             item.updated_by = actor_user_id
             item.updated_at = utc_now()
+            db.flush()
+            return item.id
+
+    def activate_llm_provider_config(self, config_id: int) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            item = db.get(LlmProviderConfig, config_id)
+            if item is None:
+                raise KeyError("LLM provider not found")
+            for other in db.scalars(select(LlmProviderConfig)).all():
+                other.enabled = other.id == config_id
+            item.updated_at = utc_now()
+            db.flush()
+            return self._llm_provider_dict(item)
+
+    def delete_llm_provider_config(self, config_id: int) -> None:
+        with Session(self.engine) as db, db.begin():
+            item = db.get(LlmProviderConfig, config_id)
+            if item is None:
+                raise KeyError("LLM provider not found")
+            if item.enabled:
+                raise PermissionError("active LLM provider cannot be deleted")
+            db.delete(item)
 
     def conversation_context(
         self, conversation_id: int, actor_user_id: str

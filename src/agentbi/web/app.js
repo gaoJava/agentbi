@@ -21,6 +21,8 @@ let loadedRoles = [];
 let loadedPermissions = [];
 let loadedSupersetDashboards = [];
 let loadedSupersetDatabases = [];
+let loadedLlmProviders = [];
+let editingLlmProviderId;
 let editingSupersetDatabaseId;
 let editingSupersetDataset;
 let pendingReport;
@@ -35,6 +37,8 @@ if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = undefined;
 let workbenchAnalysis;
 let workbenchChatId;
 let workbenchSelected;
+let selectedSupersetContext;
+let agentPanelExpanded = false;
 let workbenchDrillDepth = 0;
 let workbenchPendingDrill = false;
 
@@ -75,8 +79,6 @@ function renderDashboardCanvasMode() {
   document.querySelector('#admin-overview').hidden = true;
   document.querySelector('#permission-card').hidden = true;
   document.querySelector('#superset-canvas').hidden = !superset;
-  document.querySelector('#local-canvas-tab').classList.toggle('active', !superset);
-  document.querySelector('#superset-canvas-tab').classList.toggle('active', superset);
   if (dashboard && currentUser) {
     document.querySelector('#agent-dashboard-name').textContent = superset
       ? (supersetWorkspace?.dashboard_title || '经营总览')
@@ -89,7 +91,7 @@ function showSupersetUnavailable(message) {
   document.querySelector('#superset-frame').hidden = true;
   document.querySelector('#superset-unavailable-message').textContent = message;
   document.querySelector('#superset-unavailable').hidden = false;
-  document.querySelector('#superset-edit-mode').disabled = true;
+  document.querySelector('#edit-dashboard').disabled = true;
 }
 
 function setSupersetFrameMode(mode) {
@@ -102,11 +104,11 @@ function setSupersetFrameMode(mode) {
   const frame = document.querySelector('#superset-frame');
   const loading = document.querySelector('#superset-loading');
   const target = mode === 'edit' ? supersetWorkspace.edit_url : supersetWorkspace.view_url;
-  document.querySelector('#superset-view-mode').classList.toggle('active', mode === 'view');
-  document.querySelector('#superset-edit-mode').classList.toggle('active', mode === 'edit');
   document.querySelector('#superset-mode-label').textContent = mode === 'edit'
-    ? '编辑态 · 修改保存于 Superset'
-    : '查看态 · 隐藏重复导航';
+    ? '正在 Superset 中编辑，修改直接保存至上游'
+    : '浏览模式';
+  document.querySelector('#edit-dashboard').textContent = mode === 'edit'
+    ? '返回浏览模式' : '在 Superset 中编辑';
   document.querySelector('#superset-unavailable').hidden = true;
   loading.hidden = false;
   frame.hidden = true;
@@ -121,7 +123,7 @@ function setSupersetFrameMode(mode) {
 
 async function loadSupersetWorkspace({ force = false } = {}) {
   if (!currentUser || dashboardCanvasMode !== 'superset') return;
-  document.querySelector('#superset-edit-mode').disabled = true;
+  document.querySelector('#edit-dashboard').disabled = true;
   document.querySelector('#superset-unavailable').hidden = true;
   document.querySelector('#superset-loading').hidden = false;
   if (supersetWorkspace?.available && !force) {
@@ -134,7 +136,7 @@ async function loadSupersetWorkspace({ force = false } = {}) {
       showSupersetUnavailable(supersetWorkspace.message || 'Superset 服务当前不可用，可继续使用本地降级画布。');
       return;
     }
-    document.querySelector('#superset-edit-mode').disabled = !supersetWorkspace.can_edit;
+    document.querySelector('#edit-dashboard').disabled = !supersetWorkspace.can_edit;
     setSupersetFrameMode(supersetFrameMode === 'edit' && supersetWorkspace.can_edit ? 'edit' : 'view');
   } catch (error) {
     showSupersetUnavailable(error.message);
@@ -326,6 +328,8 @@ function switchView(view) {
   const agentVisible = dashboard || drilldown;
   workbenchView.classList.toggle('agent-hidden', !agentVisible);
   document.querySelector('.agent-panel').hidden = !agentVisible;
+  if (dashboard) setAgentPanelExpanded(false);
+  if (drilldown) setAgentPanelExpanded(true);
   document.querySelectorAll('.dashboard-section').forEach(item => { item.hidden = !dashboard; });
   document.querySelectorAll('.drilldown-view,.registry-view').forEach(item => { item.hidden = true; });
   if (!dashboard) {
@@ -353,6 +357,50 @@ function switchView(view) {
   }
   if (document.querySelector(`#${view}-view.module-view`)) loadModuleView(view);
 }
+
+function setAgentPanelExpanded(expanded) {
+  agentPanelExpanded = expanded;
+  const collapsible = activeView === 'dashboard';
+  workbenchView.classList.toggle('agent-collapsed', collapsible && !expanded);
+  const button = document.querySelector('#agent-panel-toggle');
+  button.setAttribute('aria-expanded', String(expanded));
+  button.setAttribute('aria-label', expanded ? '收起 AgentBI 分析助手' : '展开 AgentBI 分析助手');
+  button.title = expanded ? '收起分析助手' : '展开分析助手';
+}
+
+function receiveSupersetChartSelection(event) {
+  const frame = document.querySelector('#superset-frame');
+  let supersetOrigin;
+  try {
+    supersetOrigin = new URL(frame.src, window.location.href).origin;
+  } catch {
+    return;
+  }
+  if (event.origin !== supersetOrigin || event.source !== frame.contentWindow) return;
+  const payload = event.data;
+  if (!payload || payload.type !== 'agentbi:chart-selected' || payload.version !== 1) return;
+  const context = payload.context;
+  if (!context || typeof context.dashboard_id !== 'string' || typeof context.chart_id !== 'string') return;
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(context.chart_id)) return;
+  const datasetId = typeof context.dataset_id === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(context.dataset_id)
+    ? context.dataset_id : undefined;
+  selectedSupersetContext = {
+    dashboard_id: context.dashboard_id.slice(0, 128),
+    chart_id: context.chart_id,
+    ...(datasetId ? {dataset_id: datasetId} : {}),
+  };
+  const title = typeof payload.title === 'string' && payload.title.trim()
+    ? payload.title.trim().slice(0, 200) : `图表 ${context.chart_id}`;
+  const chartChip = document.querySelector('#agent-chart-context');
+  chartChip.textContent = `${title} · Chart ${context.chart_id}`;
+  chartChip.hidden = false;
+  document.querySelector('#agent-context-description').textContent =
+    '已固定当前 Superset 图表；问答将携带 Chart ID 与 Dataset ID';
+  document.querySelector('#agent-question').placeholder = `针对“${title}”提问…`;
+  setAgentPanelExpanded(true);
+}
+
+window.addEventListener('message', receiveSupersetChartSelection);
 
 async function loadManagedCharts() {
   if (!currentUser) return;
@@ -518,7 +566,12 @@ async function loadModuleView(view) {
         (await request('/api/v1/reports')).reports,
       ));
     } else if (view === 'semantic-models') {
-      loadedSemanticModels = await loadLiveSemanticModels();
+      const [models, providerBody] = await Promise.all([
+        loadLiveSemanticModels(), request('/api/v1/admin/llm-provider'),
+      ]);
+      loadedSemanticModels = models;
+      loadedLlmProviders = providerBody.items || [];
+      renderLlmProviderRows();
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
         model.id, model.name, model.domain_name, model.biz_name || '—',
         model.status === 'active' ? '● 已启用' : '● 已下线',
@@ -961,7 +1014,9 @@ function workbenchContext() {
   const timeRange = document.querySelector('#agent-time-range').value.trim();
   if (!timeRange) throw new Error('请输入时间范围');
   return {
-    dashboard_id: String(supersetWorkspace?.dashboard_id || 'workbench-home'),
+    dashboard_id: selectedSupersetContext?.dashboard_id || String(supersetWorkspace?.dashboard_id || 'workbench-home'),
+    ...(selectedSupersetContext?.chart_id ? {chart_id: selectedSupersetContext.chart_id} : {}),
+    ...(selectedSupersetContext?.dataset_id ? {dataset_id: selectedSupersetContext.dataset_id} : {}),
     semantic_model_id: semanticModel,
     time_range: timeRange,
     filters: [],
@@ -1118,12 +1173,11 @@ document.querySelectorAll('[data-view]').forEach(item => item.addEventListener('
   switchView(item.dataset.view);
 }));
 
-document.querySelector('#local-canvas-tab').addEventListener('click', () => selectDashboardCanvas('superset'));
-document.querySelector('#superset-canvas-tab').addEventListener('click', () => selectDashboardCanvas('superset'));
 document.querySelector('#back-local-canvas').addEventListener('click', () => selectDashboardCanvas('superset'));
 document.querySelector('#retry-superset').addEventListener('click', () => loadSupersetWorkspace({ force: true }));
-document.querySelector('#superset-view-mode').addEventListener('click', () => setSupersetFrameMode('view'));
-document.querySelector('#superset-edit-mode').addEventListener('click', () => setSupersetFrameMode('edit'));
+document.querySelector('#agent-panel-toggle').addEventListener('click', () => {
+  setAgentPanelExpanded(!agentPanelExpanded);
+});
 document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
 document.querySelector('#agent-question').addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') analyzeFromWorkbench();
@@ -1153,7 +1207,7 @@ document.querySelector('#refresh-dashboard').addEventListener('click', async () 
 });
 document.querySelector('#edit-dashboard').addEventListener('click', () => {
   if (dashboardCanvasMode === 'superset') {
-    setSupersetFrameMode('edit');
+    setSupersetFrameMode(supersetFrameMode === 'edit' ? 'view' : 'edit');
     return;
   }
   switchView('chart-management');
@@ -1586,6 +1640,14 @@ assetEditorForm.addEventListener('submit', async event => {
 
 function openAssetDeleteConfirmation(kind, asset, returnView = kind) {
   pendingAsset = { kind, asset, returnView };
+  const llmProvider = kind === 'llm-provider';
+  document.querySelector('#delete-asset-title').textContent = llmProvider
+    ? '确认删除模型服务' : '确认删除资产';
+  document.querySelector('#delete-asset-confirm p').textContent = llmProvider
+    ? '将永久删除这个非活动模型服务配置：' : '将永久删除未被图表引用的资产：';
+  document.querySelector('#delete-asset-confirm small').textContent = llmProvider
+    ? 'API Key 密文将同时删除；当前生效模型受服务端保护。'
+    : '系统内置资产或存在图表引用时，服务端会拒绝删除。';
   document.querySelector('#delete-asset-name').textContent = asset.name;
   document.querySelector('#delete-asset-confirm').hidden = false;
 }
@@ -1601,7 +1663,10 @@ document.querySelector('#confirm-delete-asset').addEventListener('click', async 
   if (!pendingAsset) return;
   const { kind, asset, returnView } = pendingAsset;
   try {
-    await request(`/api/v1/admin/${kind}/${encodeURIComponent(asset.name)}`, {
+    const endpoint = kind === 'llm-provider'
+      ? `/api/v1/admin/llm-provider/${asset.id}`
+      : `/api/v1/admin/${kind}/${encodeURIComponent(asset.name)}`;
+    await request(endpoint, {
       method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
     });
     closeAssetDeleteConfirmation(); await loadModuleView(returnView);
@@ -1910,34 +1975,62 @@ async function endSession({ switchAccount = false } = {}) {
 document.querySelector('#switch-account-button').addEventListener('click', () => endSession({ switchAccount: true }));
 document.querySelector('#logout-button').addEventListener('click', () => endSession());
 
-async function openLlmProviderEditor() {
+function renderLlmProviderRows() {
+  document.querySelector('#llm-provider-count').textContent = `${loadedLlmProviders.length} 个配置`;
+  renderModuleRows('llm-provider-table-body', loadedLlmProviders, provider => [
+    provider.model, provider.base_url, provider.api_key_masked,
+    provider.enabled ? '● 当前生效' : '待切换', formatTimestamp(provider.updated_at),
+  ], provider => {
+    const group = document.createElement('div'); group.className = 'registry-actions';
+    if (provider.enabled) {
+      const active = document.createElement('span'); active.className = 'registry-status ready';
+      active.textContent = '使用中'; group.append(active);
+    } else {
+      group.append(actionButton('测试并切换', 'primary-small', () => activateLlmProvider(provider)));
+    }
+    group.append(actionButton('修改', 'module-action', () => openLlmProviderEditor(provider)));
+    const remove = actionButton('删除', 'danger-action', () => {
+      openAssetDeleteConfirmation('llm-provider', { id: provider.id, name: provider.model }, 'semantic-models');
+    });
+    remove.disabled = provider.enabled;
+    if (remove.disabled) remove.title = '当前生效模型不能删除，请先切换其他模型';
+    group.append(remove); return group;
+  });
+}
+
+async function activateLlmProvider(provider) {
+  try {
+    await request(`/api/v1/admin/llm-provider/${provider.id}/activate`, {
+      method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    await loadModuleView('semantic-models');
+    showManagementFeedback(`已切换至 ${provider.model}`);
+  } catch (cause) { showManagementFeedback(cause.message, true); }
+}
+
+function openLlmProviderEditor(provider = null) {
   const error = document.querySelector('#llm-provider-error');
   error.hidden = true;
-  try {
-    const config = await request('/api/v1/admin/llm-provider');
-    document.querySelector('#llm-base-url').value = config.base_url || '';
-    document.querySelector('#llm-model-name').value = config.model || '';
-    document.querySelector('#llm-api-key').value = '';
-    document.querySelector('#llm-api-key').placeholder = config.configured
-      ? '留空则沿用已保存密钥'
-      : '首次配置必须填写';
-    document.querySelector('#llm-key-hint').textContent = config.configured
-      ? `${config.api_key_masked} 已加密保存，留空沿用`
-      : '仅服务端加密保存';
-    document.querySelector('#llm-enabled').checked = Boolean(config.enabled);
-    document.querySelector('#llm-provider-editor').hidden = false;
-  } catch (cause) {
-    showManagementFeedback(cause.message, true);
-  }
+  editingLlmProviderId = provider?.id;
+  document.querySelector('#llm-provider-title').textContent = provider ? '修改 AI 模型服务' : '新增 AI 模型服务';
+  document.querySelector('#llm-base-url').value = provider?.base_url || '';
+  document.querySelector('#llm-model-name').value = provider?.model || '';
+  document.querySelector('#llm-api-key').value = '';
+  document.querySelector('#llm-api-key').placeholder = provider ? '留空则沿用已保存密钥' : '新建配置必须填写';
+  document.querySelector('#llm-key-hint').textContent = provider
+    ? `${provider.api_key_masked} 已加密保存，留空沿用` : '仅服务端加密保存';
+  document.querySelector('#llm-enabled').checked = Boolean(provider?.enabled);
+  document.querySelector('#llm-provider-editor').hidden = false;
 }
 
 function closeLlmProviderEditor() {
   document.querySelector('#llm-api-key').value = '';
   document.querySelector('#llm-provider-error').hidden = true;
   document.querySelector('#llm-provider-editor').hidden = true;
+  editingLlmProviderId = undefined;
 }
 
-document.querySelector('#open-llm-provider').addEventListener('click', openLlmProviderEditor);
+document.querySelector('#open-llm-provider').addEventListener('click', () => openLlmProviderEditor());
 document.querySelector('#close-llm-provider').addEventListener('click', closeLlmProviderEditor);
 document.querySelector('#cancel-llm-provider').addEventListener('click', closeLlmProviderEditor);
 document.querySelector('#llm-provider-form').addEventListener('submit', async event => {
@@ -1948,8 +2041,9 @@ document.querySelector('#llm-provider-form').addEventListener('submit', async ev
   button.disabled = true;
   button.textContent = '正在测试连接…';
   try {
-    const body = await request('/api/v1/admin/llm-provider', {
-      method: 'PUT',
+    const editing = editingLlmProviderId;
+    const body = await request(editing ? `/api/v1/admin/llm-provider/${editing}` : '/api/v1/admin/llm-provider', {
+      method: editing ? 'PUT' : 'POST',
       headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
       body: JSON.stringify({
         base_url: document.querySelector('#llm-base-url').value.trim(),
@@ -1959,13 +2053,14 @@ document.querySelector('#llm-provider-form').addEventListener('submit', async ev
       }),
     });
     closeLlmProviderEditor();
-    showManagementFeedback(`${body.model} 模型服务已保存并立即生效`);
+    await loadModuleView('semantic-models');
+    showManagementFeedback(`${body.model} 模型服务已保存${body.enabled ? '并设为当前模型' : ''}`);
   } catch (cause) {
     error.textContent = cause.message;
     error.hidden = false;
   } finally {
     button.disabled = false;
-    button.textContent = '测试连接并保存';
+    button.textContent = '保存模型服务';
   }
 });
 
