@@ -75,7 +75,7 @@
         <div><h1 id="dashboard-title">华东销售经营分析</h1><p id="dashboard-subtitle">实时洞察关键指标与业务变化</p></div>
         <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button>最近 30 天⌄</button><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">编辑仪表盘</button></div>
       </header>
-      <section class="canvas-toolbar dashboard-section"><div><button id="superset-canvas-tab" class="active">经营总览</button><button id="local-canvas-tab">本地概览（降级）</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button id="refresh-dashboard">⟳ 刷新</button></div></section>
+      <section class="canvas-toolbar dashboard-section"><div><button id="superset-canvas-tab" class="active">经营总览</button><button id="local-canvas-tab" hidden>本地概览（已停用）</button></div><div><button data-permission="dashboard:manage">＋ 添加图表</button><button data-permission="dashboard:manage">⌘ 布局</button><button id="refresh-dashboard">⟳ 刷新</button></div></section>
       <section class="dashboard-grid dashboard-section" id="sales-dashboard">
         <article class="metric-card"><div><span>销售收入</span><strong>¥ 28,764.36万</strong><small class="up">↑ 18.6% 较上月</small></div><div class="sparkline"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
         <article class="metric-card"><div><span>毛利润</span><strong>¥ 7,362.85万</strong><small class="up">↑ 14.2% 较上月</small></div><div class="sparkline purple"><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
@@ -96,7 +96,7 @@
       <section id="superset-canvas" class="superset-canvas dashboard-section" hidden>
         <header><div><span class="registry-status ready">● 受控嵌入</span><strong>Superset 分析画布</strong><small id="superset-mode-label">查看态 · 隐藏重复导航</small></div><div><button id="superset-view-mode" class="active" type="button">查看态</button><button id="superset-edit-mode" data-permission="dashboard:manage" type="button">编辑态</button></div></header>
         <div id="superset-loading" class="superset-state"><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>正在检查上游服务和仪表盘配置。</p></div>
-        <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">可继续使用本地降级画布。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button">使用本地降级画布</button></div></div>
+        <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">真实分析服务当前不可用，不展示模拟业务数据。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button" hidden>本地画布已停用</button></div></div>
         <iframe id="superset-frame" title="Superset 分析画布" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" referrerpolicy="same-origin" hidden></iframe>
       </section>
 
@@ -107,6 +107,7 @@
       </section>
 
       <section id="drilldown-view" class="drilldown-view" hidden>
+        <div id="drilldown-empty" class="module-empty-state"><strong>尚未绑定真实下钻数据</strong><p>下钻配置目前只登记图表、指标、语义模型和维度路径，不再生成模拟数值。请先绑定 Superset 图表与真实查询结果，验证通过后才开放下钻层级和 AgentBI 分析。</p><button data-view="drill-registry" type="button">前往下钻配置</button></div>
         <header class="drill-header"><div><h1 id="drill-page-title">销售收入下钻分析</h1><nav id="drill-breadcrumb">销售总览　›　<span>2024 Q4</span>　›　华东　›　产品线</nav></div><div><button>▣ 2024全年</button><button>▽ 筛选</button><button>···</button></div></header>
         <div class="drill-scroll">
           <article class="drill-level"><header><div><span>第 0 层 · 原始图</span><strong id="drill-source-title">季度销售收入趋势</strong></div><button>✦ 让 Agent 分析此层</button></header><div id="drill-source-revenue" class="drill-columns"><div style="--h:42%"><b>620</b><i></i><span>2023 Q1</span></div><div style="--h:48%"><b>680</b><i></i><span>2023 Q2</span></div><div style="--h:58%"><b>745</b><i></i><span>2023 Q3</span></div><div style="--h:66%"><b>820</b><i></i><span>2023 Q4</span></div><div style="--h:55%"><b>780</b><i></i><span>2024 Q1</span></div><div style="--h:73%"><b>860</b><i></i><span>2024 Q2</span></div><div style="--h:82%"><b>920</b><i></i><span>2024 Q3</span></div><div class="selected" style="--h:94%"><b>1,020</b><i></i><span>2024 Q4</span></div></div><div id="drill-source-structure" class="drill-source-donut" hidden><div class="donut"><div><strong>28,764</strong><span>万元</span></div></div><ul><li><i class="blue"></i>消费电子 <b>42%</b></li><li><i class="cyan"></i>家电 <b>30%</b></li><li><i class="violet"></i>数码配件 <b>18%</b></li><li><i class="gray"></i>其他 <b>10%</b></li></ul></div></article>
@@ -137,7 +138,7 @@
               <tbody id="registry-table-body"></tbody>
             </table>
           </section>
-          <aside class="registry-note"><strong>新增图表如何获得下钻能力？</strong><p>为图表声明稳定的 Chart ID，并注册指标、语义模型和维度路径。校验通过后，系统自动生成“三点菜单 → 设为下钻起点 → 进入下钻分析”。</p><code>data-drill-chart="customer_growth"</code></aside>
+          <aside class="registry-note"><strong>新增图表如何获得真实下钻能力？</strong><p>登记 Chart ID、指标、语义模型和维度路径只是治理配置；还必须绑定 Superset 图表与真实查询接口并校验通过，系统才开放下钻入口。</p><code>状态：待绑定真实查询</code></aside>
         </div>
       </section>
 
@@ -152,9 +153,9 @@
             <table><thead><tr><th>仪表盘</th><th>Superset ID</th><th>图表数</th><th>发布状态</th><th>经营总览</th><th>操作</th></tr></thead><tbody id="superset-dashboard-table-body"></tbody></table>
           </section>
           <section class="registry-summary">
-            <article><span>内置图表</span><strong>2</strong><small>随演示工作台发布</small></article>
+            <article><span>内置模拟图表</span><strong>0</strong><small>模拟资产已全部停用</small></article>
             <article><span>新增图表</span><strong id="dynamic-chart-total">0</strong><small>保存在 AgentBI 数据库</small></article>
-            <article><span>已配置下钻</span><strong id="managed-drill-total">0</strong><small>发布后自动开放入口</small></article>
+            <article><span>真实下钻可用</span><strong id="managed-drill-total">0</strong><small>真实查询验证后开放</small></article>
             <article><span>数据连接</span><strong class="healthy-number">正常</strong><small>本地 SQLite 已连接</small></article>
           </section>
           <section class="registry-table-card">
@@ -202,7 +203,7 @@
 
     <aside class="agent-panel">
       <header><div><span class="agent-icon">✦</span><div><strong>AgentBI 分析助手</strong><small>可验证的经营分析 Agent</small></div></div><span class="online">● 已连接</span></header>
-      <section id="dashboard-agent"><section class="context-box"><div><strong>屏幕上下文</strong><button>设置</button></div><p>已识别当前经营分析仪表盘</p><div><span id="agent-dashboard-name">华东销售经营分析</span><span id="agent-scope">华东区域</span><span>最近30天</span></div></section><section class="agent-welcome"><span>✦</span><h3>你好，我是你的分析助手</h3><p>我已经理解当前屏幕内容，可以帮你发现异常、下钻原因并生成报告。</p></section><section class="suggestions"><strong>推荐问题</strong><button>华东增长主要来自哪里？ <span>→</span></button><button>哪个产品线拖累毛利？ <span>→</span></button><button>最近 30 天有什么异常？ <span>→</span></button></section></section>
+      <section id="dashboard-agent"><section class="context-box"><div><strong>屏幕上下文</strong><button>设置</button></div><p>已连接真实 Superset 画布</p><div><span id="agent-dashboard-name">经营总览</span><span id="agent-scope">按账号权限过滤</span></div></section><section class="agent-welcome"><span>✦</span><h3>AgentBI 分析助手</h3><p>真实查询上下文尚未绑定。完成 Superset 图表、语义指标和查询接口映射后，才会开放问答、洞察和报告。</p></section></section>
       <section id="drill-agent" class="drill-agent" hidden><div class="drill-context"><span>▱ 当前上下文：</span><strong id="drill-agent-context">第 2 层 · 华东产品线贡献</strong></div><section class="suggestions"><strong>💡 推荐问题</strong><button id="drill-question-one">华东增长来自哪里？ <span>›</span></button><button id="drill-question-two">哪个产品线拖累毛利？ <span>›</span></button></section><div class="ai-insight"><strong>✦ AI 洞察</strong><p id="drill-insight">消费电子贡献 <b>42%</b>，但毛利率环比下降 <b>3.2</b> 个百分点。</p><small id="drill-insight-source">洞察来源：与 2024 Q3 环比对比</small></div><div class="evidence-path"><strong>🔗 证据路径</strong><p id="drill-evidence">销售总览 → 2024 Q4 → 华东 → 产品线</p></div><button class="report-cta">▤ 生成分析报告</button></section>
       <div class="agent-input"><textarea aria-label="向 AgentBI 提问" placeholder="针对当前仪表盘提问…"></textarea><button>开始分析</button><small>回答将遵循当前用户的数据权限</small></div>
     </aside>
@@ -339,7 +340,7 @@
     </section>
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
-  <script src="/app/assets/generated/workbench-runtime.js?v=20260829.6" defer></script>
-  <script src="/app/assets/app.js?v=20260829.6" defer></script>
+  <script src="/app/assets/generated/workbench-runtime.js?v=20260829.7" defer></script>
+  <script src="/app/assets/app.js?v=20260829.7" defer></script>
 </body>
 </html>

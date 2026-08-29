@@ -9,7 +9,8 @@ const drillRegistry = window.AgentBI.drilldownRegistry;
 if (!drillRegistry || drillRegistry.version !== 1 || !drillRegistry.charts) {
   throw new Error('AgentBI 下钻注册中心未加载或版本不兼容');
 }
-const drillConfigurations = drillRegistry.charts;
+// 下钻结果必须来自真实查询。旧演示注册表不再注入运行时，避免把模拟值当作业务结果。
+const drillConfigurations = {};
 let managedCharts = [];
 let loadedUsers = [];
 let loadedSemanticModels = [];
@@ -28,7 +29,7 @@ let supersetFrameMode = 'view';
 const managedChartKeys = new Set();
 let activeView = 'dashboard';
 let selectedDrillChart = sessionStorage.getItem('agentbi.drillSource');
-if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = 'revenue';
+if (!drillConfigurations[selectedDrillChart]) selectedDrillChart = undefined;
 
 function isValidDrillConfiguration(config) {
   return Boolean(
@@ -62,11 +63,10 @@ function showLogin() {
 
 function renderDashboardCanvasMode() {
   const dashboard = activeView === 'dashboard';
-  const superset = dashboard && dashboardCanvasMode === 'superset';
-  const admin = currentUser?.role === 'admin';
-  document.querySelector('#sales-dashboard').hidden = !dashboard || superset || admin;
-  document.querySelector('#admin-overview').hidden = !dashboard || superset || !admin;
-  document.querySelector('#permission-card').hidden = !dashboard || superset;
+  const superset = dashboard;
+  document.querySelector('#sales-dashboard').hidden = true;
+  document.querySelector('#admin-overview').hidden = true;
+  document.querySelector('#permission-card').hidden = true;
   document.querySelector('#superset-canvas').hidden = !superset;
   document.querySelector('#local-canvas-tab').classList.toggle('active', !superset);
   document.querySelector('#superset-canvas-tab').classList.toggle('active', superset);
@@ -135,9 +135,9 @@ async function loadSupersetWorkspace({ force = false } = {}) {
 }
 
 function selectDashboardCanvas(mode) {
-  dashboardCanvasMode = mode;
+  dashboardCanvasMode = 'superset';
   renderDashboardCanvasMode();
-  if (mode === 'superset') loadSupersetWorkspace();
+  loadSupersetWorkspace();
 }
 
 function showWorkbench(user) {
@@ -182,8 +182,8 @@ function switchView(view) {
     const target = document.querySelector(`#${view}-view`);
     if (target) target.hidden = false;
   }
-  document.querySelector('#dashboard-agent').hidden = drilldown;
-  document.querySelector('#drill-agent').hidden = !drilldown;
+  document.querySelector('#dashboard-agent').hidden = !dashboard;
+  document.querySelector('#drill-agent').hidden = !drilldown || !isValidDrillConfiguration(drillConfigurations[selectedDrillChart]);
   document.querySelector('.agent-input').hidden = drilldown;
   document.querySelectorAll('.nav-item[data-view]').forEach(item => {
     item.classList.toggle('active', item.dataset.view === view);
@@ -212,15 +212,9 @@ async function loadManagedCharts() {
     const endpoint = currentUser.role === 'admin' ? '/api/v1/admin/charts' : '/api/v1/charts';
     const body = await request(endpoint);
     managedCharts = window.AgentBI.parseManagedCharts(body.charts);
-    managedCharts.forEach(chart => {
-      managedChartKeys.add(chart.chart_key);
-      drillConfigurations[chart.chart_key] = configurationFromManagedChart(chart);
-    });
-    if (!isValidDrillConfiguration(drillConfigurations[selectedDrillChart])) {
-      selectedDrillChart = 'revenue';
-      sessionStorage.setItem('agentbi.drillSource', selectedDrillChart);
-    }
-    renderManagedDashboardCharts();
+    managedCharts.forEach(chart => managedChartKeys.add(chart.chart_key));
+    selectedDrillChart = undefined;
+    sessionStorage.removeItem('agentbi.drillSource');
     initializeDrillableCharts();
     bindChartMenuEvents();
   } catch (error) {
@@ -460,47 +454,16 @@ async function loadModuleView(view) {
   }
 }
 
-function configurationFromManagedChart(chart) {
-  return window.AgentBI.configurationFromManagedChart(chart);
-}
-
 function renderManagedDashboardCharts() {
   document.querySelectorAll('.managed-dashboard-chart').forEach(card => card.remove());
-  const dashboard = document.querySelector('#sales-dashboard');
-  managedCharts.filter(chart => chart.is_published).forEach(chart => {
-    const card = document.createElement('article');
-    card.className = 'chart-card managed-dashboard-chart revenue-chart';
-    card.dataset.drillChart = chart.chart_key;
-    const header = document.createElement('header');
-    const titleGroup = document.createElement('div');
-    const title = document.createElement('strong'); title.textContent = chart.title;
-    const subtitle = document.createElement('small'); subtitle.textContent = `${chart.metric} · ${chart.dataset_name}`;
-    titleGroup.append(title, subtitle); header.append(titleGroup); card.append(header);
-    const preview = document.createElement('div');
-    preview.className = `managed-chart-preview ${chart.visualization_type}`;
-    if (chart.visualization_type === 'table') {
-      preview.innerHTML = '<table><thead><tr><th>维度</th><th>指标值</th><th>同比</th></tr></thead><tbody><tr><td>华东</td><td>820</td><td>+18.6%</td></tr><tr><td>华南</td><td>675</td><td>+12.4%</td></tr><tr><td>华北</td><td>530</td><td>+8.2%</td></tr></tbody></table>';
-    } else if (chart.visualization_type === 'donut') {
-      preview.innerHTML = '<div class="managed-donut"><strong>42%</strong></div><p>华东 42%　华南 30%　其他 28%</p>';
-    } else {
-      preview.innerHTML = '<i style="--h:42%"></i><i style="--h:58%"></i><i style="--h:51%"></i><i style="--h:72%"></i><i style="--h:88%"></i><i style="--h:76%"></i>';
-    }
-    card.append(preview); dashboard.append(card);
-  });
 }
 
 function renderChartManagement() {
   document.querySelector('#dynamic-chart-total').textContent = String(managedCharts.length);
-  document.querySelector('#managed-drill-total').textContent = String(
-    managedCharts.filter(chart => chart.is_published).length + 2
-  );
+  document.querySelector('#managed-drill-total').textContent = '0';
   const body = document.querySelector('#managed-chart-table-body');
-  const builtin = [
-    { title: '季度销售收入趋势', chart_key: 'revenue', dataset_name: 'sales_orders', metric: '销售收入', visualization_type: 'bar', dimensions: ['区域', '产品线'], status: 'published' },
-    { title: '销售结构（按产品大类）', chart_key: 'structure', dataset_name: 'sales_orders', metric: '销售收入', visualization_type: 'donut', dimensions: ['区域', '渠道'], status: 'published' },
-  ];
   const typeLabels = { bar: '柱状图', line: '折线图', donut: '环图', table: '指标表格' };
-  body.replaceChildren(...[...builtin.map(chart => ({ ...chart, builtin: true, is_published: true })), ...managedCharts].map(chart => {
+  body.replaceChildren(...managedCharts.map(chart => {
     const row = document.createElement('tr');
     const values = [chart.title, chart.dataset_name, chart.metric, typeLabels[chart.visualization_type], chart.dimensions.join(' → ')];
     values.forEach((value, index) => {
@@ -518,7 +481,7 @@ function renderChartManagement() {
       : '<span class="registry-status offline">● 已下线</span>';
     row.append(status);
     const action = document.createElement('td');
-    appendGovernanceActions(action, chart, true);
+    appendGovernanceActions(action, chart, false);
     row.append(action);
     return row;
   }));
@@ -618,9 +581,9 @@ function showManagementFeedback(message, isError = false) {
 }
 
 function renderRegistryCenter() {
-  const entries = Object.entries(drillConfigurations);
-  const validEntries = entries.filter(([, config]) => isValidDrillConfiguration(config));
-  const models = new Set(entries.map(([, config]) => config.semanticModel).filter(Boolean));
+  const entries = managedCharts.map(chart => [chart.chart_key, chart]);
+  const validEntries = [];
+  const models = new Set(managedCharts.map(chart => chart.semantic_model).filter(Boolean));
   document.querySelector('#registry-count').textContent = `${entries.length} 个已注册图表`;
   document.querySelector('#registry-chart-total').textContent = String(entries.length);
   document.querySelector('#registry-model-total').textContent = String(models.size);
@@ -631,19 +594,19 @@ function renderRegistryCenter() {
   body.replaceChildren(...entries.map(([chartId, config]) => {
     const row = document.createElement('tr');
     const chart = document.createElement('td');
-    const title = document.createElement('strong'); title.textContent = config.sourceTitle || chartId;
+    const title = document.createElement('strong'); title.textContent = config.title || chartId;
     const metric = document.createElement('small'); metric.textContent = `Chart ID：${chartId} · 指标：${config.metric || '未配置'}`;
     chart.append(title, metric);
-    const model = document.createElement('td'); model.textContent = config.semanticModel || '未配置';
-    const type = document.createElement('td'); type.textContent = typeLabels[config.sourceType] || '未知类型';
-    const path = document.createElement('td'); path.textContent = config.evidence || config.breadcrumb || '未配置';
+    const model = document.createElement('td'); model.textContent = config.semantic_model || '未配置';
+    const type = document.createElement('td'); type.textContent = config.visualization_type || '未知类型';
+    const path = document.createElement('td'); path.textContent = config.dimensions?.join(' → ') || '未配置';
     const status = document.createElement('td');
     const badge = document.createElement('span');
     const managed = managedCharts.find(item => item.chart_key === chartId);
-    const valid = isValidDrillConfiguration(config);
+    const valid = false;
     const offline = managed?.is_published === false;
     badge.className = offline ? 'registry-status offline' : valid ? 'registry-status ready' : 'registry-status invalid';
-    badge.textContent = offline ? '● 已下线' : valid ? '● 可用' : '● 待完善';
+    badge.textContent = offline ? '● 已下线' : '● 待绑定真实查询';
     status.append(badge);
     const action = document.createElement('td');
     appendGovernanceActions(action, managed || { chart_key: chartId, builtin: true, is_published: true }, valid);
@@ -727,6 +690,18 @@ function renderDynamicDrillLevels(config) {
 
 function renderDrilldown(chartId) {
   const config = drillConfigurations[chartId];
+  const empty = document.querySelector('#drilldown-empty');
+  const detail = document.querySelector('#drilldown-view .drill-scroll');
+  const header = document.querySelector('#drilldown-view .drill-header');
+  if (!isValidDrillConfiguration(config)) {
+    empty.hidden = false;
+    detail.hidden = true;
+    header.hidden = true;
+    return;
+  }
+  empty.hidden = true;
+  detail.hidden = false;
+  header.hidden = false;
   document.querySelector('#drill-page-title').textContent = config.pageTitle;
   document.querySelector('#drill-breadcrumb').textContent = config.breadcrumb;
   document.querySelector('#drill-source-title').textContent = config.sourceTitle;
@@ -889,9 +864,9 @@ document.querySelectorAll('[data-view]').forEach(item => item.addEventListener('
   switchView(item.dataset.view);
 }));
 
-document.querySelector('#local-canvas-tab').addEventListener('click', () => selectDashboardCanvas('local'));
+document.querySelector('#local-canvas-tab').addEventListener('click', () => selectDashboardCanvas('superset'));
 document.querySelector('#superset-canvas-tab').addEventListener('click', () => selectDashboardCanvas('superset'));
-document.querySelector('#back-local-canvas').addEventListener('click', () => selectDashboardCanvas('local'));
+document.querySelector('#back-local-canvas').addEventListener('click', () => selectDashboardCanvas('superset'));
 document.querySelector('#retry-superset').addEventListener('click', () => loadSupersetWorkspace({ force: true }));
 document.querySelector('#superset-view-mode').addEventListener('click', () => setSupersetFrameMode('view'));
 document.querySelector('#superset-edit-mode').addEventListener('click', () => setSupersetFrameMode('edit'));
