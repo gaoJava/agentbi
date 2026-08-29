@@ -39,6 +39,9 @@ class Settings:
     conversation_token_threshold: int = 6000
     conversation_message_threshold: int = 20
     conversation_keep_recent_turns: int = 4
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -65,9 +68,9 @@ class Settings:
             raise ValueError("demo login passwords must be configured when demo login is enabled")
         return cls(
             api_key=api_key,
-            supersonic_base_url=os.getenv(
-                "SUPERSONIC_BASE_URL", "http://localhost:9080"
-            ).rstrip("/"),
+            supersonic_base_url=os.getenv("SUPERSONIC_BASE_URL", "http://localhost:9080").rstrip(
+                "/"
+            ),
             supersonic_token=os.getenv("SUPERSONIC_TOKEN") or None,
             request_timeout_seconds=_positive_int("AGENTBI_REQUEST_TIMEOUT_SECONDS", 20),
             max_result_rows=_positive_int("AGENTBI_MAX_RESULT_ROWS", 500),
@@ -80,15 +83,20 @@ class Settings:
             demo_user_password=demo_user_password,
             demo_admin_password=demo_admin_password,
             database_url=os.getenv("AGENTBI_DATABASE_URL", "sqlite:///:memory:"),
-            superset_base_url=os.getenv(
-                "SUPERSET_BASE_URL", "http://127.0.0.1:8088"
-            ).rstrip("/"),
-            superset_dashboard_path=os.getenv(
-                "SUPERSET_DASHBOARD_PATH", "/superset/dashboard/1/"
-            ),
+            superset_base_url=os.getenv("SUPERSET_BASE_URL", "http://127.0.0.1:8088").rstrip("/"),
+            superset_dashboard_path=os.getenv("SUPERSET_DASHBOARD_PATH", "/superset/dashboard/1/"),
             superset_username=os.getenv("SUPERSET_USER") or None,
             superset_password=os.getenv("SUPERSET_PASSWORD") or None,
-            conversation_token_threshold=_positive_int("AGENTBI_CONVERSATION_TOKEN_THRESHOLD", 6000),
-            conversation_message_threshold=_positive_int("AGENTBI_CONVERSATION_MESSAGE_THRESHOLD", 20),
-            conversation_keep_recent_turns=_positive_int("AGENTBI_CONVERSATION_KEEP_RECENT_TURNS", 4),
+            conversation_token_threshold=_positive_int(
+                "AGENTBI_CONVERSATION_TOKEN_THRESHOLD", 6000
+            ),
+            conversation_message_threshold=_positive_int(
+                "AGENTBI_CONVERSATION_MESSAGE_THRESHOLD", 20
+            ),
+            conversation_keep_recent_turns=_positive_int(
+                "AGENTBI_CONVERSATION_KEEP_RECENT_TURNS", 4
+            ),
+            llm_base_url=(os.getenv("AGENTBI_LLM_BASE_URL") or "").rstrip("/") or None,
+            llm_api_key=os.getenv("AGENTBI_LLM_API_KEY") or None,
+            llm_model=os.getenv("AGENTBI_LLM_MODEL") or None,
         )

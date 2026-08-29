@@ -25,6 +25,7 @@ from agentbi.models import Actor, AnalyzeRequest, AnalyzeResponse, ScreenContext
 from agentbi.orchestrator import Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
 from agentbi.semantic_draft import build_semantic_draft
+from agentbi.semantic_llm import SemanticDraftLlm, SemanticLlmError
 from agentbi.superset import SupersetApiError, SupersetClient
 from agentbi.supersonic import SuperSonicClient, UpstreamError
 
@@ -165,7 +166,12 @@ class SupersetDatabasePayload(BaseModel):
         elif not any((self.host, self.database, self.username, self.password, self.port)):
             uri = ""
         else:
-            if not self.host.strip() or not self.database.strip() or not self.username.strip() or not self.port:
+            if (
+                not self.host.strip()
+                or not self.database.strip()
+                or not self.username.strip()
+                or not self.port
+            ):
                 raise ValueError("请完整填写主机、端口、数据库和用户名")
             scheme = "mysql" if self.engine == "doris" else self.engine
             credentials = quote(self.username.strip(), safe="")
@@ -262,6 +268,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     sessions = SessionManager(settings)
     supersonic = SuperSonicClient(settings, repository=sessions.repository)
+    semantic_llm = SemanticDraftLlm(settings)
     orchestrator = Orchestrator(settings, supersonic)
     superset_client = SupersetClient(
         settings.superset_base_url,
@@ -274,6 +281,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(_: FastAPI):
         yield
         await supersonic.close()
+        await semantic_llm.close()
 
     app = FastAPI(
         title="AgentBI Orchestrator",
@@ -285,6 +293,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.superset_client = superset_client
     app.state.orchestrator = orchestrator
     app.state.supersonic_client = supersonic
+    app.state.semantic_llm = semantic_llm
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -301,7 +310,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             return sessions.decode(token)
         except AuthenticationError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated") from exc
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated"
+            ) from exc
 
     current_session = Depends(current_identity)
 
@@ -327,9 +338,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     agent_session = require_permission("agent:ask")
 
     def enforce_csrf(request: Request, identity: SessionIdentity) -> None:
-        if not hmac.compare_digest(
-            request.headers.get("X-AgentBI-CSRF", ""), identity.csrf_token
-        ):
+        if not hmac.compare_digest(request.headers.get("X-AgentBI-CSRF", ""), identity.csrf_token):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid CSRF token")
 
     @app.middleware("http")
@@ -376,7 +385,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(web_root / "index.html")
 
     @app.post("/api/v1/auth/login")
-    async def login(payload: LoginPayload, response: Response, request: Request) -> dict[str, object]:
+    async def login(
+        payload: LoginPayload, response: Response, request: Request
+    ) -> dict[str, object]:
         try:
             identity = sessions.authenticate(payload.username, payload.password)
         except AuthenticationError as exc:
@@ -450,9 +461,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 is_active=payload.is_active,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="登录账号已存在") from exc
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="登录账号已存在"
+            ) from exc
         except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色不存在") from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色不存在"
+            ) from exc
         sessions.audit(
             "user_created",
             "success",
@@ -472,31 +487,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/v1/admin/roles", status_code=status.HTTP_201_CREATED)
     async def create_role(
-        payload: RoleCreatePayload, request: Request,
+        payload: RoleCreatePayload,
+        request: Request,
         identity: SessionIdentity = admin_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             role = sessions.create_role(
-                code=payload.code, name=payload.name, description=payload.description,
+                code=payload.code,
+                name=payload.name,
+                description=payload.description,
                 permissions=payload.permissions,
             )
         except ValueError as exc:
             detail = "角色代码已存在" if "exists" in str(exc) else "权限配置无效"
-            raise HTTPException(status_code=409 if "exists" in str(exc) else 422, detail=detail) from exc
-        sessions.audit("role_created", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=payload.code)
+            raise HTTPException(
+                status_code=409 if "exists" in str(exc) else 422, detail=detail
+            ) from exc
+        sessions.audit(
+            "role_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.code,
+        )
         return {"role": role}
 
     @app.put("/api/v1/admin/roles/{role_code}")
     async def update_role(
-        role_code: str, payload: RoleUpdatePayload, request: Request,
+        role_code: str,
+        payload: RoleUpdatePayload,
+        request: Request,
         identity: SessionIdentity = admin_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             role = sessions.update_role(
-                role_code, name=payload.name, description=payload.description,
+                role_code,
+                name=payload.name,
+                description=payload.description,
                 permissions=payload.permissions,
             )
         except KeyError as exc:
@@ -505,13 +534,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="内置角色不可修改") from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="权限配置无效") from exc
-        sessions.audit("role_updated", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=role_code)
+        sessions.audit(
+            "role_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=role_code,
+        )
         return {"role": role}
 
     @app.delete("/api/v1/admin/roles/{role_code}", status_code=204)
     async def delete_role(
-        role_code: str, request: Request, identity: SessionIdentity = admin_session,
+        role_code: str,
+        request: Request,
+        identity: SessionIdentity = admin_session,
     ) -> Response:
         enforce_csrf(request, identity)
         try:
@@ -520,8 +556,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="角色不存在") from exc
         except PermissionError as exc:
             raise HTTPException(status_code=409, detail="内置角色或已分配角色不能删除") from exc
-        sessions.audit("role_deleted", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=role_code)
+        sessions.audit(
+            "role_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=role_code,
+        )
         return Response(status_code=204)
 
     @app.put("/api/v1/admin/users/{username}")
@@ -594,16 +635,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for asset in sessions.list_superset_dashboards():
             if not asset["available"] or not asset["published"]:
                 continue
-            dashboards.insert(0, {
-                "id": f"superset-{asset['superset_id']}",
-                "title": asset["title"],
-                "description": f"Superset 真实仪表盘 · {asset['chart_count']} 个图表",
-                "data_scope": identity.data_scope,
-                "chart_count": asset["chart_count"],
-                "role": "系统管理员" if identity.is_admin else "数据分析师",
-                "source": "superset",
-                "is_home": asset["is_home"],
-            })
+            dashboards.insert(
+                0,
+                {
+                    "id": f"superset-{asset['superset_id']}",
+                    "title": asset["title"],
+                    "description": f"Superset 真实仪表盘 · {asset['chart_count']} 个图表",
+                    "data_scope": identity.data_scope,
+                    "chart_count": asset["chart_count"],
+                    "role": "系统管理员" if identity.is_admin else "数据分析师",
+                    "source": "superset",
+                    "is_home": asset["is_home"],
+                },
+            )
         return {"dashboards": dashboards}
 
     @app.get("/api/v1/admin/superset/dashboards")
@@ -624,10 +668,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         dashboards = sessions.sync_superset_dashboards(inventory)
         sessions.audit(
-            "superset_dashboards_synced", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=str(len(inventory)),
+            "superset_dashboards_synced",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=str(len(inventory)),
         )
-        return {"dashboards": dashboards, "count": len(inventory), "message": "Superset 仪表盘同步完成"}
+        return {
+            "dashboards": dashboards,
+            "count": len(inventory),
+            "message": "Superset 仪表盘同步完成",
+        }
 
     @app.post("/api/v1/admin/superset/dashboards/{superset_id}/home")
     async def set_home_superset_dashboard(
@@ -639,10 +690,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             dashboard = sessions.set_home_superset_dashboard(superset_id)
         except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="仪表盘不存在或未发布") from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="仪表盘不存在或未发布"
+            ) from exc
         sessions.audit(
-            "superset_home_dashboard_changed", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=str(superset_id),
+            "superset_home_dashboard_changed",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=str(superset_id),
         )
         return {"dashboard": dashboard}
 
@@ -701,7 +757,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="报告不存在") from exc
         except PermissionError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权删除该报告") from exc
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="无权删除该报告"
+            ) from exc
         sessions.audit(
             "report_deleted",
             "success",
@@ -741,7 +799,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/v1/admin/semantic-drafts/generate")
     async def generate_semantic_draft(
-        payload: SemanticDraftRequest, request: Request,
+        payload: SemanticDraftRequest,
+        request: Request,
         identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
@@ -750,16 +809,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SupersetApiError as exc:
             raise HTTPException(status_code=502, detail="无法读取 Superset Dataset 字段") from exc
         draft = build_semantic_draft(dataset)
+        if app.state.semantic_llm.configured:
+            try:
+                draft = await app.state.semantic_llm.enrich(draft)
+            except SemanticLlmError:
+                draft["warnings"].append("LLM 增强失败，已安全降级为字段元数据推断。")
         sessions.audit(
-            "semantic_draft_generated", "success", actor_user_id=identity.subject,
+            "semantic_draft_generated",
+            "success",
+            actor_user_id=identity.subject,
             source_ip=request.client.host if request.client else "",
-            detail=f"dataset:{payload.dataset_id}:metadata_inference",
+            detail=f"dataset:{payload.dataset_id}:{draft['generation']['source']}",
         )
         return {"draft": draft}
 
     @app.post("/api/v1/admin/semantic-drafts/publish", status_code=status.HTTP_201_CREATED)
     async def publish_semantic_draft(
-        payload: SemanticDraftPublishPayload, request: Request,
+        payload: SemanticDraftPublishPayload,
+        request: Request,
         identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
@@ -798,45 +865,70 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         measures = reviewed(payload.measures)
         model_detail = {
             "queryType": "table_query",
-            "tableQuery": ".".join(filter(None, [str(dataset.get("schema") or ""), str(dataset["name"])])),
+            "tableQuery": ".".join(
+                filter(None, [str(dataset.get("schema") or ""), str(dataset["name"])])
+            ),
             "fields": [
                 {"fieldName": str(item["name"]), "dataType": actual_columns[str(item["name"])]}
                 for item in payload.fields
             ],
             "identifiers": [
-                {"name": str(item.get("name") or item["field"]), "type": str(item.get("type") or "primary"),
-                 "bizName": str(item["field"]), "entityNames": item.get("synonyms") or [],
-                 "isCreateDimension": 1}
+                {
+                    "name": str(item.get("name") or item["field"]),
+                    "type": str(item.get("type") or "primary"),
+                    "bizName": str(item["field"]),
+                    "entityNames": item.get("synonyms") or [],
+                    "isCreateDimension": 1,
+                }
                 for item in identifiers
             ],
             "dimensions": [
-                {"name": str(item.get("name") or item["field"]), "bizName": str(item["field"]),
-                 "type": str(item.get("type") or "categorical"), "expr": str(item["field"]),
-                 "isCreateDimension": 1,
-                 **({"typeParams": {"isPrimary": "true", "timeGranularity": "day"}}
-                    if item.get("type") == "time" else {})}
+                {
+                    "name": str(item.get("name") or item["field"]),
+                    "bizName": str(item["field"]),
+                    "type": str(item.get("type") or "categorical"),
+                    "expr": str(item["field"]),
+                    "isCreateDimension": 1,
+                    **(
+                        {"typeParams": {"isPrimary": "true", "timeGranularity": "day"}}
+                        if item.get("type") == "time"
+                        else {}
+                    ),
+                }
                 for item in dimensions
             ],
             "measures": [
-                {"name": str(item.get("name") or item["field"]), "bizName": str(item["field"]),
-                 "expr": str(item["field"]), "agg": str(item.get("aggregation") or "SUM"),
-                 "isCreateMetric": 1}
+                {
+                    "name": str(item.get("name") or item["field"]),
+                    "bizName": str(item["field"]),
+                    "expr": str(item["field"]),
+                    "agg": str(item.get("aggregation") or "SUM"),
+                    "isCreateMetric": 1,
+                }
                 for item in measures
             ],
         }
         upstream_payload = {
-            "name": payload.name, "bizName": payload.biz_name,
-            "description": payload.description, "databaseId": payload.database_id,
-            "domainId": payload.domain_id, "isOpen": 1, "modelDetail": model_detail,
-            "viewers": [identity.username], "admins": [identity.username],
-            "viewOrgs": [], "adminOrgs": [],
+            "name": payload.name,
+            "bizName": payload.biz_name,
+            "description": payload.description,
+            "databaseId": payload.database_id,
+            "domainId": payload.domain_id,
+            "isOpen": 1,
+            "modelDetail": model_detail,
+            "viewers": [identity.username],
+            "admins": [identity.username],
+            "viewOrgs": [],
+            "adminOrgs": [],
         }
         try:
             await app.state.supersonic_client.publish_semantic_model(upstream_payload)
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 拒绝发布语义模型") from exc
         sessions.audit(
-            "semantic_draft_published", "success", actor_user_id=identity.subject,
+            "semantic_draft_published",
+            "success",
+            actor_user_id=identity.subject,
             source_ip=request.client.host if request.client else "",
             detail=f"dataset:{payload.dataset_id}:model:{payload.biz_name}",
         )
@@ -844,41 +936,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/v1/admin/semantic-models", status_code=status.HTTP_201_CREATED)
     async def create_semantic_model(
-        payload: SemanticModelCreatePayload, request: Request,
+        payload: SemanticModelCreatePayload,
+        request: Request,
         identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             model = sessions.create_semantic_model(
-                name=payload.name, subject_area=payload.subject_area,
-                description=payload.description, actor_user_id=identity.subject,
+                name=payload.name,
+                subject_area=payload.subject_area,
+                description=payload.description,
+                actor_user_id=identity.subject,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="语义模型已存在") from exc
-        sessions.audit("semantic_model_created", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=payload.name)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="语义模型已存在"
+            ) from exc
+        sessions.audit(
+            "semantic_model_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.name,
+        )
         return {"model": model}
 
     @app.put("/api/v1/admin/semantic-models/{model_name}")
     async def update_semantic_model(
-        model_name: str, payload: SemanticModelUpdatePayload, request: Request,
+        model_name: str,
+        payload: SemanticModelUpdatePayload,
+        request: Request,
         identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             model = sessions.update_semantic_model(
-                model_name, subject_area=payload.subject_area,
-                description=payload.description, status=payload.status,
+                model_name,
+                subject_area=payload.subject_area,
+                description=payload.description,
+                status=payload.status,
             )
         except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="语义模型不存在") from exc
-        sessions.audit("semantic_model_updated", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=model_name)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="语义模型不存在"
+            ) from exc
+        sessions.audit(
+            "semantic_model_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=model_name,
+        )
         return {"model": model}
 
     @app.delete("/api/v1/admin/semantic-models/{model_name}", status_code=204)
     async def delete_semantic_model(
-        model_name: str, request: Request, identity: SessionIdentity = semantic_session,
+        model_name: str,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
     ) -> Response:
         enforce_csrf(request, identity)
         try:
@@ -887,8 +1002,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="语义模型不存在") from exc
         except PermissionError as exc:
             raise HTTPException(status_code=409, detail="语义模型正被图表引用，不能删除") from exc
-        sessions.audit("semantic_model_deleted", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=model_name)
+        sessions.audit(
+            "semantic_model_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=model_name,
+        )
         return Response(status_code=204)
 
     async def probe_upstream(base_url: str) -> dict[str, str]:
@@ -917,7 +1037,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "dashboard:view" not in identity.permissions:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
         home_dashboard = sessions.get_home_superset_dashboard()
-        path = str(home_dashboard["url_path"] if home_dashboard else settings.superset_dashboard_path).strip()
+        path = str(
+            home_dashboard["url_path"] if home_dashboard else settings.superset_dashboard_path
+        ).strip()
         if (
             not path.startswith("/superset/dashboard/")
             or path.startswith("//")
@@ -1005,10 +1127,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 payload.database_name, connection_uri
             )
         except (SupersetApiError, ValueError) as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         sessions.audit(
-            "superset_database_tested", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=payload.database_name,
+            "superset_database_tested",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.database_name,
         )
         return {"message": "数据库连接测试成功"}
 
@@ -1025,10 +1152,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 payload.database_name, connection_uri, payload.expose_in_sqllab
             )
         except (SupersetApiError, ValueError) as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         sessions.audit(
-            "superset_database_created", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=payload.database_name,
+            "superset_database_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.database_name,
         )
         return {"database": database, "message": "数据库连接已保存到 Superset"}
 
@@ -1044,9 +1176,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 payload.database_id, payload.schema_name, payload.table_name
             )
         except SupersetApiError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         sessions.audit(
-            "superset_dataset_created", "success", actor_user_id=identity.subject,
+            "superset_dataset_created",
+            "success",
+            actor_user_id=identity.subject,
             source_ip=request.client.host if request.client else "",
             detail=f"{payload.database_id}:{payload.schema_name}:{payload.table_name}",
         )
@@ -1054,7 +1190,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/admin/superset/datasets/{dataset_id}")
     async def get_superset_dataset(
-        dataset_id: int, _: SessionIdentity = datasource_session,
+        dataset_id: int,
+        _: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         try:
             return {"dataset": await app.state.superset_client.get_dataset(dataset_id)}
@@ -1063,7 +1200,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/v1/admin/superset/datasets/{dataset_id}", status_code=204)
     async def delete_superset_dataset(
-        dataset_id: int, request: Request,
+        dataset_id: int,
+        request: Request,
         identity: SessionIdentity = datasource_session,
     ) -> Response:
         enforce_csrf(request, identity)
@@ -1072,14 +1210,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SupersetApiError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         sessions.audit(
-            "superset_dataset_deleted", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=str(dataset_id),
+            "superset_dataset_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=str(dataset_id),
         )
         return Response(status_code=204)
 
     @app.delete("/api/v1/admin/superset/databases/{database_id}", status_code=204)
     async def delete_superset_database(
-        database_id: int, request: Request,
+        database_id: int,
+        request: Request,
         identity: SessionIdentity = datasource_session,
     ) -> Response:
         enforce_csrf(request, identity)
@@ -1088,34 +1230,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SupersetApiError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         sessions.audit(
-            "superset_database_deleted", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=str(database_id),
+            "superset_database_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=str(database_id),
         )
         return Response(status_code=204)
 
     @app.put("/api/v1/admin/superset/databases/{database_id}")
     async def update_superset_database(
-        database_id: int, payload: SupersetDatabaseUpdatePayload, request: Request,
+        database_id: int,
+        payload: SupersetDatabaseUpdatePayload,
+        request: Request,
         identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             connection_uri = payload.resolved_uri(required=False)
             database = await app.state.superset_client.update_database(
-                database_id, payload.database_name, connection_uri,
+                database_id,
+                payload.database_name,
+                connection_uri,
                 payload.expose_in_sqllab,
             )
         except (SupersetApiError, ValueError) as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         sessions.audit(
-            "superset_database_updated", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=payload.database_name,
+            "superset_database_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.database_name,
         )
         return {"database": database, "message": "数据库连接已更新"}
 
     @app.put("/api/v1/admin/superset/datasets/{dataset_id}")
     async def update_superset_dataset(
-        dataset_id: int, payload: SupersetDatasetUpdatePayload, request: Request,
+        dataset_id: int,
+        payload: SupersetDatasetUpdatePayload,
+        request: Request,
         identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
@@ -1124,50 +1280,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 dataset_id, payload.description
             )
         except SupersetApiError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         sessions.audit(
-            "superset_dataset_updated", "success", actor_user_id=identity.subject,
-            source_ip=request.client.host if request.client else "", detail=str(dataset_id),
+            "superset_dataset_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=str(dataset_id),
         )
         return {"dataset": dataset, "message": "Dataset 说明已更新"}
 
     @app.post("/api/v1/admin/data-sources", status_code=status.HTTP_201_CREATED)
     async def create_data_source(
-        payload: DataSourceCreatePayload, request: Request,
+        payload: DataSourceCreatePayload,
+        request: Request,
         identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             source = sessions.create_data_source(
-                name=payload.name, source_type=payload.source_type,
-                description=payload.description, actor_user_id=identity.subject,
+                name=payload.name,
+                source_type=payload.source_type,
+                description=payload.description,
+                actor_user_id=identity.subject,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail="数据源已存在") from exc
-        sessions.audit("data_source_created", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=payload.name)
+        sessions.audit(
+            "data_source_created",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=payload.name,
+        )
         return {"source": source}
 
     @app.put("/api/v1/admin/data-sources/{source_name}")
     async def update_data_source(
-        source_name: str, payload: DataSourceUpdatePayload, request: Request,
+        source_name: str,
+        payload: DataSourceUpdatePayload,
+        request: Request,
         identity: SessionIdentity = datasource_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         try:
             source = sessions.update_data_source(
-                source_name, source_type=payload.source_type,
-                description=payload.description, status=payload.status,
+                source_name,
+                source_type=payload.source_type,
+                description=payload.description,
+                status=payload.status,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="数据源不存在") from exc
-        sessions.audit("data_source_updated", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=source_name)
+        sessions.audit(
+            "data_source_updated",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=source_name,
+        )
         return {"source": source}
 
     @app.delete("/api/v1/admin/data-sources/{source_name}", status_code=204)
     async def delete_data_source(
-        source_name: str, request: Request, identity: SessionIdentity = datasource_session,
+        source_name: str,
+        request: Request,
+        identity: SessionIdentity = datasource_session,
     ) -> Response:
         enforce_csrf(request, identity)
         try:
@@ -1176,8 +1356,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="数据源不存在") from exc
         except PermissionError as exc:
             raise HTTPException(status_code=409, detail="数据源正被图表引用，不能删除") from exc
-        sessions.audit("data_source_deleted", "success", actor_user_id=identity.subject,
-                       source_ip=request.client.host if request.client else "", detail=source_name)
+        sessions.audit(
+            "data_source_deleted",
+            "success",
+            actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=source_name,
+        )
         return Response(status_code=204)
 
     @app.post("/api/v1/admin/data-sources/{source_name}/test")
@@ -1235,7 +1420,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 actor_user_id=identity.subject,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="图表 ID 已存在") from exc
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="图表 ID 已存在"
+            ) from exc
         sessions.audit(
             "chart_created",
             "success",

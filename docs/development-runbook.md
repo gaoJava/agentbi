@@ -120,3 +120,19 @@ tenant-aware state for multi-replica deployment.
 
 These findings do not block the verified rule-based semantic query path, but should be tracked
 before the competition stability and security review.
+
+## Optional LLM semantic-draft enrichment
+
+The semantic draft workflow works without an LLM and labels that mode as metadata inference.
+To enable a real OpenAI-compatible provider, set these only in the AgentBI server process:
+
+```powershell
+$env:AGENTBI_LLM_BASE_URL = 'https://your-provider.example/v1'
+$env:AGENTBI_LLM_API_KEY = '<secret>'
+$env:AGENTBI_LLM_MODEL = '<model-name>'
+```
+
+AgentBI sends Dataset names and column metadata only. It never sends data rows, SQLAlchemy URIs,
+database credentials, user questions, or query results. Provider output is rejected if it references
+unknown fields, unsupported dimension types or unsupported aggregations. Failure safely falls back to
+metadata inference and is shown as such in the review dialog.
