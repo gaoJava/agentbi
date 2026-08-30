@@ -221,7 +221,9 @@ class SupersetChartAuthoringPayload(BaseModel):
     title: str = Field(min_length=2, max_length=250)
     dataset_id: int = Field(gt=0)
     dashboard_id: int = Field(gt=0)
-    visualization_type: Literal["table", "bar", "line", "pie", "big_number"] = "table"
+    visualization_type: Literal[
+        "table", "bar", "line", "area", "pie", "donut", "scatter", "funnel", "big_number"
+    ] = "table"
     dimension: str = Field(min_length=1, max_length=250)
     metric_column: str = Field(min_length=1, max_length=250)
     aggregation: Literal["SUM", "AVG", "COUNT", "MAX", "MIN"] = "SUM"

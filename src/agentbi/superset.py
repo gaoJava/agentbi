@@ -266,8 +266,10 @@ class SupersetClient:
             raise SupersetApiError("维度或指标字段不属于当前 Dataset")
         if time_column and (time_column not in columns or not columns[time_column]["is_time"]):
             raise SupersetApiError("时间字段无效或不是日期时间类型")
-        viz_type = {"line": "echarts_timeseries_line", "bar": "echarts_timeseries_bar",
-                    "pie": "pie", "big_number": "big_number_total"}.get(
+        viz_type = {"line": "echarts_timeseries_line", "area": "echarts_timeseries_line",
+                    "bar": "echarts_timeseries_bar", "pie": "pie", "donut": "pie",
+                    "scatter": "echarts_timeseries_scatter", "funnel": "funnel",
+                    "big_number": "big_number_total"}.get(
                         visualization_type, "table"
                     )
         metric = {
@@ -288,14 +290,18 @@ class SupersetClient:
             "row_limit": 10000,
             "adhoc_filters": [],
         }
-        if visualization_type in {"bar", "line"}:
+        if visualization_type in {"bar", "line", "area", "scatter"}:
             params["x_axis"] = time_column or dimension
             params["groupby"] = []
             if time_column:
                 params["time_grain_sqla"] = "P1D"
-        elif visualization_type == "pie":
+            if visualization_type == "area":
+                params["area"] = True
+        elif visualization_type in {"pie", "donut", "funnel"}:
             params["metric"] = metric
             params["groupby"] = [dimension]
+            if visualization_type == "donut":
+                params["donut"] = True
         elif visualization_type == "table":
             params["groupby"] = [dimension]
         query_context = self._build_query_context(
@@ -373,6 +379,10 @@ class SupersetClient:
             "status": "configuration_required",
             "columns": [], "rows": [],
         }
+        if form_data.get("viz_type") == "pie" and form_data.get("donut"):
+            payload["visualization_type"] = "donut"
+        elif form_data.get("viz_type") == "echarts_timeseries_line" and form_data.get("area"):
+            payload["visualization_type"] = "area"
         metrics = form_data.get("metrics") if isinstance(form_data.get("metrics"), list) else []
         metric = metrics[0] if metrics and isinstance(metrics[0], dict) else form_data.get("metric")
         metric = metric if isinstance(metric, dict) else {}
@@ -419,8 +429,10 @@ class SupersetClient:
             raise SupersetApiError("维度或指标字段不属于当前 Dataset")
         if time_column and (time_column not in columns or not columns[time_column]["is_time"]):
             raise SupersetApiError("时间字段无效或不是日期时间类型")
-        viz_type = {"line": "echarts_timeseries_line", "bar": "echarts_timeseries_bar",
-                    "pie": "pie", "big_number": "big_number_total"}.get(visualization_type, "table")
+        viz_type = {"line": "echarts_timeseries_line", "area": "echarts_timeseries_line",
+                    "bar": "echarts_timeseries_bar", "pie": "pie", "donut": "pie",
+                    "scatter": "echarts_timeseries_scatter", "funnel": "funnel",
+                    "big_number": "big_number_total"}.get(visualization_type, "table")
         metric = {"expressionType": "SIMPLE",
                   "column": {"column_name": metric_column, "type": columns[metric_column]["type"]},
                   "aggregate": aggregation, "sqlExpression": None,
@@ -428,12 +440,16 @@ class SupersetClient:
                   "optionName": f"metric_{aggregation.lower()}_{metric_column}"}
         params: dict[str, object] = {"viz_type": viz_type, "datasource": f"{dataset_id}__table",
                                      "metrics": [metric], "row_limit": 10000, "adhoc_filters": []}
-        if visualization_type in {"bar", "line"}:
+        if visualization_type in {"bar", "line", "area", "scatter"}:
             params.update({"x_axis": time_column or dimension, "groupby": []})
             if time_column:
                 params["time_grain_sqla"] = "P1D"
-        elif visualization_type == "pie":
+            if visualization_type == "area":
+                params["area"] = True
+        elif visualization_type in {"pie", "donut", "funnel"}:
             params.update({"metric": metric, "groupby": [dimension]})
+            if visualization_type == "donut":
+                params["donut"] = True
         elif visualization_type == "table":
             params["groupby"] = [dimension]
         query_context = self._build_query_context(dataset_id, viz_type, dimension, metric, time_column)

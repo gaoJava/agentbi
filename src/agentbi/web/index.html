@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260831.1">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260831.2">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -398,7 +398,7 @@
         <section class="authoring-section"><div class="authoring-section-title"><b>2</b><div><strong>推荐分析</strong><small>可一键套用，也可以在下方自由配置</small></div></div><div id="superset-chart-presets" class="chart-preset-grid"></div></section>
         <section class="authoring-section"><div class="authoring-section-title"><b>3</b><div><strong>配置图表口径</strong><small>维度决定“按什么看”，指标决定“看什么数”</small></div></div><div class="wizard-grid">
         <label class="wizard-full">图表名称<input id="superset-chart-title" required minlength="2" maxlength="250"></label>
-        <label>图表类型<select id="superset-chart-type"><option value="table">表格</option><option value="bar">柱状图</option><option value="line">折线图</option><option value="pie">饼图</option><option value="big_number">指标卡</option></select></label>
+        <label>图表类型<select id="superset-chart-type"><option value="table">表格</option><option value="bar">柱状图</option><option value="line">折线图</option><option value="area">面积图</option><option value="pie">饼图</option><option value="donut">环图</option><option value="scatter">散点图</option><option value="funnel">漏斗图</option><option value="big_number">指标卡</option></select></label>
         <label>维度字段<small>用于分组或横轴</small><select id="superset-chart-dimension" required></select></label>
         <label>指标字段<small>用于计算业务指标</small><select id="superset-chart-metric-column" required></select></label>
         <label>聚合方式<select id="superset-chart-aggregation"><option value="SUM">求和 SUM</option><option value="AVG">平均 AVG</option><option value="COUNT">计数 COUNT</option><option value="MAX">最大 MAX</option><option value="MIN">最小 MIN</option></select></label>
@@ -416,6 +416,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260831.1" defer></script>
+  <script src="/app/assets/app.js?v=20260831.2" defer></script>
 </body>
 </html>

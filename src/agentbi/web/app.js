@@ -118,10 +118,20 @@ function resolveNativeChartAdapter(visualizationType) {
   const type = String(visualizationType || '').toLowerCase();
   if (type.includes('big_number')) return 'big_number';
   if (type.includes('pie') || type.includes('donut')) return 'pie';
+  if (type.includes('area')) return 'area';
+  if (type.includes('scatter')) return 'scatter';
+  if (type.includes('funnel')) return 'funnel';
   if (type.includes('line')) return 'line';
   if (type.includes('bar')) return 'bar';
   if (type.includes('table')) return 'table';
   return 'unsupported';
+}
+
+function nativeChartIcon(visualizationType) {
+  return {
+    big_number: '◉', pie: '◔', area: '⌁', scatter: '∷', funnel: '▽',
+    line: '⌁', bar: '▥', table: '▦', unsupported: '?',
+  }[resolveNativeChartAdapter(visualizationType)];
 }
 
 function renderNativeChartVisual(chart) {
@@ -135,7 +145,8 @@ function renderNativeChartVisual(chart) {
   if (!rows.length || !columns.length) {
     visual.classList.add('native-chart-warning'); visual.innerHTML = '<strong>查询成功，暂无数据</strong><p>请检查筛选范围或数据源内容。</p>'; return visual;
   }
-  const numeric = columns.find(column => rows.some(row => typeof row[column] === 'number'));
+  const numericColumns = columns.filter(column => rows.some(row => typeof row[column] === 'number'));
+  const numeric = numericColumns.at(-1);
   const dimension = columns.find(column => column !== numeric) || columns[0];
   const adapter = resolveNativeChartAdapter(chart.visualization_type);
   if (adapter === 'big_number' && numeric) {
@@ -175,7 +186,7 @@ function renderNativeChartVisual(chart) {
     });
     visual.append(chart, legend); return visual;
   }
-  if (adapter === 'line' && numeric) {
+  if ((adapter === 'line' || adapter === 'area') && numeric) {
     const data = rows.slice(0, 16).map(row => ({
       label: formatNativeValue(row[dimension]), value: Number(row[numeric]) || 0,
     }));
@@ -186,7 +197,8 @@ function renderNativeChartVisual(chart) {
     const y = value => top + (max - value) / range * plotHeight;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', `${chart.title}折线图`); visual.classList.add('native-line');
+    svg.setAttribute('aria-label', `${chart.title}${adapter === 'area' ? '面积图' : '折线图'}`); visual.classList.add('native-line');
+    if (adapter === 'area') visual.classList.add('native-area');
     for (let index = 0; index <= 4; index += 1) {
       const gridY = top + index / 4 * plotHeight; const value = max - index / 4 * range;
       const grid = document.createElementNS(svg.namespaceURI, 'line'); grid.setAttribute('x1', left); grid.setAttribute('x2', width - right); grid.setAttribute('y1', gridY); grid.setAttribute('y2', gridY); grid.setAttribute('class', 'native-line-grid');
@@ -204,6 +216,40 @@ function renderNativeChartVisual(chart) {
       }
     });
     visual.append(svg); return visual;
+  }
+  if (adapter === 'scatter' && numeric) {
+    const data = rows.slice(0, 40).map((row, index) => ({
+      label: formatNativeValue(row[dimension]),
+      x: numericColumns.length > 1 ? Number(row[numericColumns[0]]) || 0 : index + 1,
+      y: Number(row[numeric]) || 0,
+    }));
+    const xValues = data.map(item => item.x); const yValues = data.map(item => item.y);
+    const xMin = Math.min(...xValues); const xRange = Math.max(...xValues) - xMin || 1;
+    const yMin = Math.min(...yValues); const yRange = Math.max(...yValues) - yMin || 1;
+    const width = 640; const height = 260; const left = 52; const right = 20; const top = 18; const bottom = 35;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${chart.title}散点图`);
+    visual.classList.add('native-scatter');
+    for (let index = 0; index <= 4; index += 1) {
+      const gridY = top + index / 4 * (height - top - bottom); const grid = document.createElementNS(svg.namespaceURI, 'line');
+      grid.setAttribute('x1', left); grid.setAttribute('x2', width - right); grid.setAttribute('y1', gridY); grid.setAttribute('y2', gridY); grid.setAttribute('class', 'native-line-grid'); svg.append(grid);
+    }
+    data.forEach(item => {
+      const point = document.createElementNS(svg.namespaceURI, 'circle');
+      point.setAttribute('cx', left + (item.x - xMin) / xRange * (width - left - right));
+      point.setAttribute('cy', top + (1 - (item.y - yMin) / yRange) * (height - top - bottom));
+      point.setAttribute('r', 6); point.setAttribute('class', 'native-scatter-point');
+      const tooltip = document.createElementNS(svg.namespaceURI, 'title'); tooltip.textContent = `${item.label}：${formatNativeValue(item.y)}`; point.append(tooltip); svg.append(point);
+    });
+    visual.append(svg); return visual;
+  }
+  if (adapter === 'funnel' && numeric) {
+    const data = rows.map(row => ({label: formatNativeValue(row[dimension]), value: Math.max(0, Number(row[numeric]) || 0)})).filter(item => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+    const max = Math.max(...data.map(item => item.value), 1); visual.classList.add('native-funnel');
+    data.forEach((item, index) => {
+      const row = document.createElement('div'); const bar = document.createElement('i'); const label = document.createElement('span'); const value = document.createElement('strong');
+      bar.style.width = `${Math.max(18, item.value / max * 100)}%`; bar.style.setProperty('--funnel-index', index); label.textContent = item.label; value.textContent = formatNativeValue(item.value);
+      row.append(bar, label, value); visual.append(row);
+    }); return visual;
   }
   if (adapter === 'bar' && numeric) {
     visual.classList.add('native-bars'); const data = rows.slice(0, 12); const max = Math.max(...data.map(row => Number(row[numeric]) || 0), 1);
@@ -885,7 +931,7 @@ async function openDashboardChartManager(dashboard) {
     }
     body.replaceChildren(...charts.map(chart => {
       const card = document.createElement('article');
-      const icon = document.createElement('span'); icon.className = 'dashboard-chart-icon'; icon.textContent = chart.visualization_type?.includes('bar') ? '▥' : chart.visualization_type?.includes('line') ? '⌁' : chart.visualization_type === 'pie' ? '◔' : '▦';
+      const icon = document.createElement('span'); icon.className = 'dashboard-chart-icon'; icon.textContent = nativeChartIcon(chart.visualization_type);
       const info = document.createElement('div'); const title = document.createElement('strong'); title.textContent = chart.title;
       const meta = document.createElement('div'); meta.className = 'dashboard-chart-meta';
       const id = document.createElement('small'); id.textContent = `Chart ${chart.superset_id}`;
@@ -1007,10 +1053,12 @@ function closeSupersetChartEditor() {
 function updateSupersetChartPreview() {
   const value = id => document.querySelector(id)?.value || '—';
   const text = id => document.querySelector(id)?.selectedOptions?.[0]?.textContent || '—';
-  const typeLabels = {table: '表格', bar: '柱状图', line: '折线图', pie: '饼图', big_number: '指标卡'};
+  const typeLabels = {table: '表格', bar: '柱状图', line: '折线图', area: '面积图', pie: '饼图', donut: '环图', scatter: '散点图', funnel: '漏斗图', big_number: '指标卡'};
   const rawTitle = document.querySelector('#superset-chart-title')?.value.trim();
   document.querySelector('#superset-chart-preview-title').textContent =
     rawTitle || '尚未填写图表名称';
+  document.querySelector('#superset-chart-editor .preview-chart-icon').textContent =
+    nativeChartIcon(value('#superset-chart-type'));
   const rows = [
     ['图表类型', typeLabels[value('#superset-chart-type')] || '—'],
     ['分析维度', text('#superset-chart-dimension')],
@@ -1115,8 +1163,10 @@ async function openSupersetChartEditor(dataset, dashboard, chart) {
     await loadSupersetChartFields();
     if (chart) {
       const type = String(chart.visualization_type || 'table');
-      const chartType = type.includes('bar') ? 'bar' : type.includes('line') ? 'line'
-        : type.includes('big_number') ? 'big_number' : type === 'pie' ? 'pie' : 'table';
+      const chartType = type.includes('bar') ? 'bar' : type.includes('area') ? 'area'
+        : type.includes('line') ? 'line' : type.includes('scatter') ? 'scatter'
+          : type.includes('funnel') ? 'funnel' : type.includes('big_number') ? 'big_number'
+            : type === 'donut' ? 'donut' : type === 'pie' ? 'pie' : 'table';
       document.querySelector('#superset-chart-editor-title').textContent = `修改图表 · ${chart.title}`;
       document.querySelector('#superset-chart-title').value = chart.title;
       document.querySelector('#superset-chart-type').value = chartType;
