@@ -723,7 +723,9 @@ function renderSupersetDashboardAssets() {
         supersetWorkspace = undefined;
         window.AgentBI.supersetWorkspace.clear();
         await loadSupersetDashboardAssets();
-        showManagementFeedback(`${dashboard.title} 已设为经营总览`);
+        switchView('dashboard');
+        await loadSupersetWorkspace({ force: true });
+        showManagementFeedback(`${dashboard.title} 已设为经营总览，分析工作台已更新`);
       } catch (error) { showManagementFeedback(error.message, true); }
     });
     home.disabled = dashboard.is_home || !dashboard.published || !dashboard.available;
@@ -1477,6 +1479,9 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
   event.preventDefault();
   const errorBox = document.querySelector('#superset-chart-editor-error'); errorBox.hidden = true;
   try {
+    const targetDashboardId = Number(document.querySelector('#superset-chart-dashboard').value);
+    const targetDashboard = loadedSupersetDashboards.find(
+      dashboard => dashboard.superset_id === targetDashboardId);
     const body = await request('/api/v1/admin/superset/charts', {
       method: 'POST', headers: {
         'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token,
@@ -1484,7 +1489,7 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
       body: JSON.stringify({
         title: document.querySelector('#superset-chart-title').value.trim(),
         dataset_id: Number(document.querySelector('#superset-chart-dataset').value),
-        dashboard_id: Number(document.querySelector('#superset-chart-dashboard').value),
+        dashboard_id: targetDashboardId,
         visualization_type: document.querySelector('#superset-chart-type').value,
         dimension: document.querySelector('#superset-chart-dimension').value,
         metric_column: document.querySelector('#superset-chart-metric-column').value,
@@ -1494,7 +1499,14 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
     });
     closeSupersetChartEditor();
     await refreshSupersetDashboardsAfterWrite(
-      `${body.chart.title} 已创建，指标与维度配置已保存到 Superset`);
+      `${body.chart.title} 已创建并加入 ${targetDashboard?.title || '目标仪表盘'}`);
+    if (targetDashboard?.is_home) {
+      switchView('dashboard');
+      await loadSupersetWorkspace({ force: true });
+      showManagementFeedback(`${body.chart.title} 已显示在经营总览底部`);
+    } else {
+      openSupersetPath(body.chart.dashboard_path || `/superset/dashboard/${targetDashboardId}/`);
+    }
   } catch (error) {
     errorBox.textContent = error.message; errorBox.hidden = false;
   }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -305,10 +306,71 @@ class SupersetClient:
         if response.status_code >= 400:
             raise SupersetApiError("图表创建失败，请检查 Dataset、仪表盘和操作权限")
         chart_id = int(response.json().get("id"))
+        await self._append_chart_to_dashboard_layout(
+            dashboard_id=dashboard_id,
+            chart_id=chart_id,
+            title=title.strip(),
+        )
         return {"superset_id": chart_id, "title": title.strip(), "dashboard_id": dashboard_id,
+                "dashboard_path": f"/superset/dashboard/{dashboard_id}/",
                 "explore_path": f"/explore/?slice_id={chart_id}",
                 "configuration": {"dimension": dimension, "metric_column": metric_column,
                                   "aggregation": aggregation, "time_column": time_column}}
+
+    async def _append_chart_to_dashboard_layout(
+        self, dashboard_id: int, chart_id: int, title: str
+    ) -> None:
+        """Place a newly created chart on the dashboard instead of leaving it orphaned."""
+
+        dashboard_response = await self._authorized_request(
+            "GET", f"/api/v1/dashboard/{dashboard_id}"
+        )
+        if dashboard_response.status_code >= 400:
+            raise SupersetApiError("图表已创建，但读取目标仪表盘布局失败")
+        dashboard = dashboard_response.json().get("result") or {}
+        try:
+            position = json.loads(dashboard.get("position_json") or "{}")
+        except (TypeError, ValueError) as exc:
+            raise SupersetApiError("目标仪表盘布局格式无效") from exc
+        if not isinstance(position, dict):
+            raise SupersetApiError("目标仪表盘布局格式无效")
+        position.setdefault("DASHBOARD_VERSION_KEY", "v2")
+        position.setdefault(
+            "ROOT_ID", {"children": ["GRID_ID"], "id": "ROOT_ID", "type": "ROOT"}
+        )
+        position.setdefault(
+            "GRID_ID",
+            {"children": [], "id": "GRID_ID", "parents": ["ROOT_ID"], "type": "GRID"},
+        )
+        root_children = position["ROOT_ID"].setdefault("children", [])
+        if "GRID_ID" not in root_children:
+            root_children.append("GRID_ID")
+        grid_children = position["GRID_ID"].setdefault("children", [])
+        suffix = secrets.token_hex(4).upper()
+        row_id = f"ROW-N-{suffix}"
+        chart_node_id = f"CHART-{suffix}"
+        grid_children.append(row_id)
+        position[row_id] = {
+            "children": [chart_node_id],
+            "id": row_id,
+            "meta": {"0": "ROOT_ID", "background": "BACKGROUND_TRANSPARENT"},
+            "parents": ["ROOT_ID", "GRID_ID"],
+            "type": "ROW",
+        }
+        position[chart_node_id] = {
+            "children": [],
+            "id": chart_node_id,
+            "meta": {"chartId": chart_id, "height": 50, "sliceName": title, "width": 12},
+            "parents": ["ROOT_ID", "GRID_ID", row_id],
+            "type": "CHART",
+        }
+        update_response = await self._authorized_request(
+            "PUT",
+            f"/api/v1/dashboard/{dashboard_id}",
+            json={"position_json": json.dumps(position, ensure_ascii=False)},
+        )
+        if update_response.status_code >= 400:
+            raise SupersetApiError("图表已创建，但写入目标仪表盘布局失败")
 
     async def update_dataset(self, dataset_id: int, description: str) -> dict[str, object]:
         response = await self._authorized_request(
