@@ -98,6 +98,13 @@ function attributeWithin(element: Element, names: string[]): string | undefined 
 function chartIdWithin(element: Element): string | undefined {
   const attributeId = attributeWithin(element, ['data-chart-id', 'data-test-chart-id']);
   if (attributeId) return attributeId;
+  // Superset 6.x exposes the slice id on ChartHolder as
+  // `dashboard-chart-id-<id>` rather than a data attribute. Browse mode may
+  // also omit the Explore link, so this class is the most reliable source.
+  const classId = Array.from(element.classList)
+    .map(className => className.match(/^dashboard-chart-id-(\d+)$/)?.[1])
+    .find(Boolean);
+  if (classId) return positiveInteger(classId)?.toString();
   const href = element.querySelector<HTMLAnchorElement>('a[href*="slice_id="]')?.href;
   if (!href) return undefined;
   try {
