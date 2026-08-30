@@ -7,9 +7,20 @@ var AgentBI;
             ? null
             : await response.json().catch(() => null);
         if (!response.ok) {
-            const detail = typeof body === 'object' && body !== null && 'detail' in body
-                ? String(body.detail || '')
-                : '';
+            const rawDetail = typeof body === 'object' && body !== null && 'detail' in body
+                ? body.detail
+                : undefined;
+            const detail = typeof rawDetail === 'string'
+                ? rawDetail
+                : Array.isArray(rawDetail)
+                    ? rawDetail.map(item => {
+                        if (typeof item !== 'object' || item === null)
+                            return String(item);
+                        const issue = item;
+                        const field = Array.isArray(issue.loc) ? issue.loc.slice(1).join('.') : '';
+                        return `${field ? `${field}：` : ''}${String(issue.msg || '请求参数无效')}`;
+                    }).join('；')
+                    : '';
             throw new Error(detail || '请求失败，请稍后重试');
         }
         return body;

@@ -110,7 +110,7 @@ namespace AgentBI {
     readonly charts: Readonly<Record<string, DrillConfiguration>>;
   }
 
-  export interface ApiErrorBody { detail?: string }
+  export interface ApiErrorBody { detail?: unknown }
 
   interface SessionEnvelope { user: unknown }
   interface WorkspaceEnvelope { workspace: unknown }
@@ -121,9 +121,19 @@ namespace AgentBI {
       ? null
       : await response.json().catch((): null => null);
     if (!response.ok) {
-      const detail = typeof body === 'object' && body !== null && 'detail' in body
-        ? String((body as ApiErrorBody).detail || '')
-        : '';
+      const rawDetail = typeof body === 'object' && body !== null && 'detail' in body
+        ? (body as ApiErrorBody).detail
+        : undefined;
+      const detail = typeof rawDetail === 'string'
+        ? rawDetail
+        : Array.isArray(rawDetail)
+          ? rawDetail.map(item => {
+              if (typeof item !== 'object' || item === null) return String(item);
+              const issue = item as {loc?: unknown[]; msg?: unknown};
+              const field = Array.isArray(issue.loc) ? issue.loc.slice(1).join('.') : '';
+              return `${field ? `${field}：` : ''}${String(issue.msg || '请求参数无效')}`;
+            }).join('；')
+          : '';
       throw new Error(detail || '请求失败，请稍后重试');
     }
     return body as T;

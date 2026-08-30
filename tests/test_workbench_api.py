@@ -37,8 +37,8 @@ def test_product_shell_and_user_session_flow() -> None:
     with TestClient(create_app(settings())) as client:
         shell = client.get("/app")
         assert shell.status_code == 200
-        assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260830.16" in shell.text
+        assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
+        assert "app.js?v=20260830.17" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200

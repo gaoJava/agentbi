@@ -778,7 +778,9 @@ async function refreshSupersetDashboardsAfterWrite(message) {
 async function updateSupersetDashboardState(dashboard, published) {
   try {
     await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}`, {
-      method: 'PUT', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+      method: 'PUT', headers: {
+        'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token,
+      },
       body: JSON.stringify({title: dashboard.title, published}),
     });
     await refreshSupersetDashboardsAfterWrite(`${dashboard.title} 已${published ? '发布' : '下线'}`);
@@ -1337,7 +1339,9 @@ document.querySelector('#superset-dashboard-editor-form').addEventListener('subm
       endpoint += `/${editingSupersetDashboard.superset_id}/copy`;
       payload = {title, duplicate_charts: document.querySelector('#superset-dashboard-copy-charts').checked};
     }
-    await request(endpoint, {method, headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+    await request(endpoint, {method, headers: {
+      'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token,
+    },
       body: JSON.stringify(payload)});
     closeSupersetDashboardEditor();
     await refreshSupersetDashboardsAfterWrite(`${title} 已保存到 Superset`);
@@ -1353,7 +1357,9 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
   const supersetBase = supersetWorkspace?.view_url || supersetWorkspace?.edit_url;
   try {
     const body = await request('/api/v1/admin/superset/charts', {
-      method: 'POST', headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+      method: 'POST', headers: {
+        'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token,
+      },
       body: JSON.stringify({
         title: document.querySelector('#superset-chart-title').value.trim(),
         dataset_id: Number(document.querySelector('#superset-chart-dataset').value),
