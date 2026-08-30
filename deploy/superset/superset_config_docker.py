@@ -41,5 +41,19 @@ LANGUAGES = {
     "en": {"flag": "us", "name": "English"},
 }
 
+
+def set_agentbi_locale() -> None:
+    """Persist the locale selected by AgentBI links in the Superset session."""
+    from flask import request, session
+
+    if request.args.get("lang") == "zh":
+        session["locale"] = "zh"
+
+
+def FLASK_APP_MUTATOR(app):
+    """Allow AgentBI to request the configured Simplified Chinese UI."""
+    app.before_request(set_agentbi_locale)
+    return app
+
 # Mounted read-only by compose.agentbi.yml. Superset loads only the built dist tree.
 LOCAL_EXTENSIONS = ["/app/extensions/agentbi-insight-pilot"]

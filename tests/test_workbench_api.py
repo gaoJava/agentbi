@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260830.17" in shell.text
+        assert "app.js?v=20260830.18" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -196,25 +196,27 @@ def test_user_reads_sanitized_live_supersonic_models() -> None:
 
 def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
     class FakeSupersetClient:
+        dashboards = [
+            {
+                "superset_id": 5,
+                "title": "Sales Dashboard",
+                "slug": None,
+                "url_path": "/superset/dashboard/5/",
+                "chart_count": 10,
+                "published": True,
+            },
+            {
+                "superset_id": 7,
+                "title": "Executive Dashboard",
+                "slug": "executive",
+                "url_path": "/superset/dashboard/7/",
+                "chart_count": 4,
+                "published": True,
+            },
+        ]
+
         async def list_dashboards(self) -> list[dict[str, object]]:
-            return [
-                {
-                    "superset_id": 5,
-                    "title": "Sales Dashboard",
-                    "slug": None,
-                    "url_path": "/superset/dashboard/5/",
-                    "chart_count": 10,
-                    "published": True,
-                },
-                {
-                    "superset_id": 7,
-                    "title": "Executive Dashboard",
-                    "slug": "executive",
-                    "url_path": "/superset/dashboard/7/",
-                    "chart_count": 4,
-                    "published": True,
-                },
-            ]
+            return self.dashboards
 
     app = create_app(settings())
     app.state.superset_client = FakeSupersetClient()
@@ -234,6 +236,11 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
         selected = client.post("/api/v1/admin/superset/dashboards/7/home", headers=headers)
         assert selected.status_code == 200
         assert selected.json()["dashboard"]["is_home"] is True
+
+        app.state.superset_client.dashboards = [app.state.superset_client.dashboards[1]]
+        resynced = client.post("/api/v1/admin/superset/dashboards/sync", headers=headers)
+        assert resynced.status_code == 200
+        assert [item["superset_id"] for item in resynced.json()["dashboards"]] == [7]
 
 
 def test_admin_manages_real_superset_dashboards_and_charts() -> None:

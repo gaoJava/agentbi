@@ -235,6 +235,13 @@
       <footer><button id="cancel-delete-chart" type="button">取消</button><button id="confirm-delete-chart" class="danger-button" type="button">确认删除</button></footer>
     </section>
   </div>
+  <div id="delete-superset-dashboard-confirm" class="modal-backdrop" hidden>
+    <section class="delete-confirm" role="dialog" aria-modal="true" aria-labelledby="delete-superset-dashboard-title">
+      <header><div><span>Superset 不可恢复操作</span><h2 id="delete-superset-dashboard-title">确认删除仪表盘</h2></div><button id="close-delete-superset-dashboard" type="button" aria-label="关闭">×</button></header>
+      <div><p>将从 Superset 永久删除仪表盘：</p><strong id="delete-superset-dashboard-name"></strong><small>删除前请确认该仪表盘不再被经营总览或其他业务入口使用。</small><div id="delete-superset-dashboard-error" class="form-error" hidden></div></div>
+      <footer><button id="cancel-delete-superset-dashboard" type="button">取消</button><button id="confirm-delete-superset-dashboard" class="danger-button" type="button">确认永久删除</button></footer>
+    </section>
+  </div>
   <div id="user-editor" class="modal-backdrop" hidden>
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="user-editor-title">
       <header><div><span>服务端 RBAC 配置</span><h2 id="user-editor-title">编辑用户权限</h2></div><button id="close-user-editor" type="button" aria-label="关闭">×</button></header>
@@ -396,6 +403,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260830.17" defer></script>
+  <script src="/app/assets/app.js?v=20260830.18" defer></script>
 </body>
 </html>

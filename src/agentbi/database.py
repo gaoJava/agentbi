@@ -1136,7 +1136,9 @@ class IdentityRepository:
     def _dashboard_assets(db: Session) -> list[SupersetDashboardAsset]:
         return list(
             db.scalars(
-                select(SupersetDashboardAsset).order_by(
+                select(SupersetDashboardAsset)
+                .where(SupersetDashboardAsset.available.is_(True))
+                .order_by(
                     SupersetDashboardAsset.is_home.desc(), SupersetDashboardAsset.title
                 )
             ).all()

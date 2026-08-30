@@ -27,6 +27,7 @@ let editingSupersetDatabaseId;
 let editingSupersetDataset;
 let editingSupersetDashboard;
 let supersetDashboardEditorMode = 'create';
+let pendingSupersetDashboardDelete;
 let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
@@ -737,6 +738,7 @@ function openSupersetPath(path) {
     return;
   }
   const target = new URL(path, base);
+  target.searchParams.set('lang', 'zh');
   if (target.origin !== new URL(base).origin) {
     showManagementFeedback('Superset 地址校验失败', true);
     return;
@@ -787,14 +789,34 @@ async function updateSupersetDashboardState(dashboard, published) {
   } catch (error) { showManagementFeedback(error.message, true); }
 }
 
-async function deleteSupersetDashboard(dashboard) {
-  if (!window.confirm(`确认永久删除 Superset 仪表盘“${dashboard.title}”吗？`)) return;
+function deleteSupersetDashboard(dashboard) {
+  pendingSupersetDashboardDelete = dashboard;
+  document.querySelector('#delete-superset-dashboard-name').textContent = dashboard.title;
+  document.querySelector('#delete-superset-dashboard-error').hidden = true;
+  document.querySelector('#delete-superset-dashboard-confirm').hidden = false;
+}
+
+function closeSupersetDashboardDeleteConfirmation() {
+  document.querySelector('#delete-superset-dashboard-confirm').hidden = true;
+  document.querySelector('#delete-superset-dashboard-error').hidden = true;
+  pendingSupersetDashboardDelete = undefined;
+}
+
+async function confirmSupersetDashboardDelete() {
+  const dashboard = pendingSupersetDashboardDelete;
+  if (!dashboard) return;
+  const button = document.querySelector('#confirm-delete-superset-dashboard');
+  const errorBox = document.querySelector('#delete-superset-dashboard-error');
+  button.disabled = true; errorBox.hidden = true;
   try {
     await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}`, {
       method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
     });
+    closeSupersetDashboardDeleteConfirmation();
     await refreshSupersetDashboardsAfterWrite(`${dashboard.title} 已删除`);
-  } catch (error) { showManagementFeedback(error.message, true); }
+  } catch (error) {
+    errorBox.textContent = error.message; errorBox.hidden = false;
+  } finally { button.disabled = false; }
 }
 
 function closeSupersetChartEditor() {
@@ -1324,6 +1346,12 @@ document.querySelector('#create-superset-chart').addEventListener('click', () =>
 
 document.querySelector('#close-superset-dashboard-editor').addEventListener('click', closeSupersetDashboardEditor);
 document.querySelector('#cancel-superset-dashboard-editor').addEventListener('click', closeSupersetDashboardEditor);
+document.querySelector('#close-delete-superset-dashboard').addEventListener('click', closeSupersetDashboardDeleteConfirmation);
+document.querySelector('#cancel-delete-superset-dashboard').addEventListener('click', closeSupersetDashboardDeleteConfirmation);
+document.querySelector('#delete-superset-dashboard-confirm').addEventListener('click', event => {
+  if (event.target.id === 'delete-superset-dashboard-confirm') closeSupersetDashboardDeleteConfirmation();
+});
+document.querySelector('#confirm-delete-superset-dashboard').addEventListener('click', confirmSupersetDashboardDelete);
 document.querySelector('#superset-dashboard-editor-form').addEventListener('submit', async event => {
   event.preventDefault();
   const errorBox = document.querySelector('#superset-dashboard-editor-error'); errorBox.hidden = true;
@@ -1369,7 +1397,11 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
     });
     closeSupersetChartEditor();
     await refreshSupersetDashboardsAfterWrite(`${body.chart.title} 已创建，请继续配置指标与维度`);
-    if (preview && supersetBase) preview.location.href = new URL(body.chart.explore_path, supersetBase).href;
+    if (preview && supersetBase) {
+      const target = new URL(body.chart.explore_path, supersetBase);
+      target.searchParams.set('lang', 'zh');
+      preview.location.href = target.href;
+    }
     else preview?.close();
   } catch (error) {
     preview?.close(); errorBox.textContent = error.message; errorBox.hidden = false;
