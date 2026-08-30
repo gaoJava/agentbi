@@ -23,7 +23,13 @@ AGENTBI_ORCHESTRATOR_URL=http://127.0.0.1:8090
 AGENTBI_API_KEY=<same 32+ character value used by the orchestrator>
 ```
 
-Build and packaging should use the `superset-extensions` CLI shipped with the inspected
-Superset source version. External extensions execute in the Superset process without sandboxing,
-so the package must be reviewed and pinned before deployment.
+Build the frontend and the complete local-extension package together from the repository root:
 
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-superset-extension.ps1
+```
+
+The script updates both `frontend/dist` and the root `dist/manifest.json` consumed by
+`LOCAL_EXTENSIONS`. Building only the webpack frontend leaves Superset on a stale remote entry.
+External extensions execute in the Superset process without sandboxing, so the package must be
+reviewed and pinned before deployment.

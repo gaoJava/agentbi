@@ -162,6 +162,8 @@ $env:DOCKER_HOST = 'npipe:////./pipe/dockerDesktopLinuxEngine'
 $env:AGENTBI_PROJECT_ROOT = $projectRoot.Replace('\', '/')
 $env:SUPERSET_PORT = '127.0.0.1:8088'
 $env:CYPRESS_PORT = '127.0.0.1:8081'
+& (Join-Path $PSScriptRoot 'build-superset-extension.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'AgentBI Superset extension packaging failed.' }
 $composeOverride = Join-Path $projectRoot 'deploy\superset\compose.agentbi.yml'
 $composeBase = Join-Path $SupersetRoot 'docker-compose.yml'
 # Start only the services used by the local competition demo. Once initialization
