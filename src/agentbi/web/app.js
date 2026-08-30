@@ -114,6 +114,16 @@ function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id)
   setAgentPanelExpanded(true);
 }
 
+function resolveNativeChartAdapter(visualizationType) {
+  const type = String(visualizationType || '').toLowerCase();
+  if (type.includes('big_number')) return 'big_number';
+  if (type.includes('pie') || type.includes('donut')) return 'pie';
+  if (type.includes('line')) return 'line';
+  if (type.includes('bar')) return 'bar';
+  if (type.includes('table')) return 'table';
+  return 'unsupported';
+}
+
 function renderNativeChartVisual(chart) {
   const visual = document.createElement('div'); visual.className = 'native-chart-visual';
   if (chart.status !== 'ready') {
@@ -126,12 +136,13 @@ function renderNativeChartVisual(chart) {
     visual.classList.add('native-chart-warning'); visual.innerHTML = '<strong>查询成功，暂无数据</strong><p>请检查筛选范围或数据源内容。</p>'; return visual;
   }
   const numeric = columns.find(column => rows.some(row => typeof row[column] === 'number'));
-  const dimension = columns.find(column => column !== numeric) || columns[0]; const type = chart.visualization_type || '';
-  if (type.includes('big_number') && numeric) {
+  const dimension = columns.find(column => column !== numeric) || columns[0];
+  const adapter = resolveNativeChartAdapter(chart.visualization_type);
+  if (adapter === 'big_number' && numeric) {
     visual.classList.add('native-big-number'); const strong = document.createElement('strong'); strong.textContent = formatNativeValue(rows[0][numeric]);
     const small = document.createElement('small'); small.textContent = numeric; visual.append(strong, small); return visual;
   }
-  if (type === 'pie' && numeric) {
+  if (adapter === 'pie' && numeric) {
     const palette = ['#3478f6', '#20b5b9', '#7555e8', '#f5ad32', '#ef6c72', '#5f91ee', '#40bf83', '#9a67dc'];
     const data = rows
       .map(row => ({label: formatNativeValue(row[dimension]), value: Math.max(0, Number(row[numeric]) || 0)}))
@@ -164,12 +175,48 @@ function renderNativeChartVisual(chart) {
     });
     visual.append(chart, legend); return visual;
   }
-  if ((type.includes('bar') || type.includes('line')) && numeric) {
+  if (adapter === 'line' && numeric) {
+    const data = rows.slice(0, 16).map(row => ({
+      label: formatNativeValue(row[dimension]), value: Number(row[numeric]) || 0,
+    }));
+    const values = data.map(item => item.value); const min = Math.min(...values, 0); const max = Math.max(...values, 0);
+    const range = max - min || 1; const width = 640; const height = 260; const left = 58; const right = 20; const top = 20; const bottom = 42;
+    const plotWidth = width - left - right; const plotHeight = height - top - bottom;
+    const x = index => left + (data.length === 1 ? plotWidth / 2 : index / (data.length - 1) * plotWidth);
+    const y = value => top + (max - value) / range * plotHeight;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', `${chart.title}折线图`); visual.classList.add('native-line');
+    for (let index = 0; index <= 4; index += 1) {
+      const gridY = top + index / 4 * plotHeight; const value = max - index / 4 * range;
+      const grid = document.createElementNS(svg.namespaceURI, 'line'); grid.setAttribute('x1', left); grid.setAttribute('x2', width - right); grid.setAttribute('y1', gridY); grid.setAttribute('y2', gridY); grid.setAttribute('class', 'native-line-grid');
+      const label = document.createElementNS(svg.namespaceURI, 'text'); label.setAttribute('x', left - 10); label.setAttribute('y', gridY + 4); label.setAttribute('class', 'native-line-y-label'); label.textContent = formatNativeValue(value);
+      svg.append(grid, label);
+    }
+    const area = document.createElementNS(svg.namespaceURI, 'polygon');
+    area.setAttribute('points', `${left},${top + plotHeight} ${data.map((item, index) => `${x(index)},${y(item.value)}`).join(' ')} ${width - right},${top + plotHeight}`); area.setAttribute('class', 'native-line-area'); svg.append(area);
+    const line = document.createElementNS(svg.namespaceURI, 'polyline'); line.setAttribute('points', data.map((item, index) => `${x(index)},${y(item.value)}`).join(' ')); line.setAttribute('class', 'native-line-path'); svg.append(line);
+    data.forEach((item, index) => {
+      const point = document.createElementNS(svg.namespaceURI, 'circle'); point.setAttribute('cx', x(index)); point.setAttribute('cy', y(item.value)); point.setAttribute('r', 4); point.setAttribute('class', 'native-line-point');
+      const tooltip = document.createElementNS(svg.namespaceURI, 'title'); tooltip.textContent = `${item.label}：${formatNativeValue(item.value)}`; point.append(tooltip); svg.append(point);
+      if (index === 0 || index === data.length - 1 || index % Math.max(1, Math.ceil(data.length / 6)) === 0) {
+        const label = document.createElementNS(svg.namespaceURI, 'text'); label.setAttribute('x', x(index)); label.setAttribute('y', height - 15); label.setAttribute('class', 'native-line-x-label'); label.textContent = item.label; svg.append(label);
+      }
+    });
+    visual.append(svg); return visual;
+  }
+  if (adapter === 'bar' && numeric) {
     visual.classList.add('native-bars'); const data = rows.slice(0, 12); const max = Math.max(...data.map(row => Number(row[numeric]) || 0), 1);
     data.forEach(row => { const item = document.createElement('div'); const label = document.createElement('span'); label.textContent = formatNativeValue(row[dimension]);
       const track = document.createElement('i'); const fill = document.createElement('b'); fill.style.width = `${Math.max(2, (Number(row[numeric]) || 0) / max * 100)}%`;
       const amount = document.createElement('em'); amount.textContent = formatNativeValue(row[numeric]); track.append(fill); item.append(label, track, amount); visual.append(item); });
     return visual;
+  }
+  if (adapter === 'unsupported') {
+    visual.classList.add('native-chart-warning');
+    const title = document.createElement('strong'); title.textContent = '该图表类型尚未适配';
+    const message = document.createElement('p'); message.textContent = `Superset 类型：${chart.visualization_type || '未知'}。数据已连接，但 AgentBI 暂不使用错误图形替代。`;
+    visual.append(title, message); return visual;
   }
   visual.classList.add('native-table-wrap'); const table = document.createElement('table'); const head = document.createElement('thead'); const headRow = document.createElement('tr');
   columns.slice(0, 8).forEach(column => { const th = document.createElement('th'); th.textContent = column; headRow.append(th); }); head.append(headRow); const body = document.createElement('tbody');
