@@ -97,7 +97,7 @@
         <header><div><span class="registry-status ready">● 已连接 Superset</span><strong>分析画布</strong><small id="superset-mode-label">浏览模式</small></div></header>
         <div id="superset-loading" class="superset-state"><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>正在检查上游服务和仪表盘配置。</p></div>
         <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">真实分析服务当前不可用，不展示模拟业务数据。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button" hidden>本地画布已停用</button></div></div>
-        <iframe id="superset-frame" title="Superset 分析画布" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" referrerpolicy="same-origin" hidden></iframe>
+        <iframe id="superset-frame" title="Superset 分析画布" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts" referrerpolicy="origin" hidden></iframe>
       </section>
 
       <section id="permission-card" class="permission-card dashboard-section">

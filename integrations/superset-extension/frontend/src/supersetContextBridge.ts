@@ -9,8 +9,6 @@ import {
 const DASHBOARD_PATH = /\/superset\/dashboard\/([^/?#]+)/;
 const DEFAULT_TIME_RANGE = '最近7天';
 const DEFAULT_SEMANTIC_MODEL_ID = 1;
-const ANALYZE_BUTTON_CLASS = 'agentbi-chart-analyze';
-const ANALYZE_STYLE_ID = 'agentbi-chart-analyze-style';
 const ANALYZE_MENU_CLASS = 'agentbi-chart-analyze-menu-item';
 
 interface ContextSettings {
@@ -119,7 +117,7 @@ function chartIdWithin(element: Element): string | undefined {
 
 function chartTitle(element: Element, chartId: string): string {
   const title = element.querySelector<HTMLElement>(
-    '[data-test="chart-title"],.chart-header .header-title,.slice-header',
+    '[data-test="chart-title"],.chart-header .header-title,.slice-header,a[href*="slice_id="]',
   )?.innerText.trim();
   return (title || `图表 ${chartId}`).slice(0, 200);
 }
@@ -203,38 +201,6 @@ export function installSupersetContextBridge(): () => void {
       },
     }, targetOrigin);
   };
-  const installAnalyzeButton = (container: HTMLElement) => {
-    if (container.querySelector(`:scope > .${ANALYZE_BUTTON_CLASS}`)) return;
-    const hoveredChartId = chartIdWithin(container);
-    if (!hoveredChartId) return;
-    const analyzeButton = document.createElement('button');
-    analyzeButton.type = 'button';
-    analyzeButton.className = ANALYZE_BUTTON_CLASS;
-    analyzeButton.textContent = '✦ AI 分析此图';
-    analyzeButton.setAttribute('aria-label', `使用 AI 分析${chartTitle(container, hoveredChartId)}`);
-    Object.assign(analyzeButton.style, {
-      position: 'absolute', top: '10px', right: '42px', zIndex: '100', border: '1px solid #9cc0ff',
-      borderRadius: '16px', padding: '6px 11px', color: '#155eef', background: '#ffffffee',
-      boxShadow: '0 4px 14px rgba(21,94,239,.18)', cursor: 'pointer', fontWeight: '700',
-      opacity: '0', pointerEvents: 'none', transition: 'opacity 120ms ease',
-    });
-    if (window.getComputedStyle(container).position === 'static') container.style.position = 'relative';
-    analyzeButton.addEventListener('click', buttonEvent => {
-      buttonEvent.preventDefault();
-      buttonEvent.stopPropagation();
-      selectChart(container, hoveredChartId);
-    });
-    container.appendChild(analyzeButton);
-  };
-  const scanChartContainers = () => {
-    document.querySelectorAll<HTMLElement>(
-      '[data-chart-id],[data-test-chart-id],[data-test="dashboard-component-chart-holder"],.dashboard-component-chart-holder',
-    ).forEach(installAnalyzeButton);
-  };
-  const onChartHover = (event: MouseEvent) => {
-    const container = chartContainer(event.target);
-    if (container) installAnalyzeButton(container);
-  };
   const installAnalyzeMenuItem = (container: HTMLElement, selectedChartId: string) => {
     const menu = document.getElementById(`slice_${selectedChartId}-menu`);
     if (!menu || menu.querySelector(`.${ANALYZE_MENU_CLASS}`)) return;
@@ -271,43 +237,21 @@ export function installSupersetContextBridge(): () => void {
 
   document.addEventListener('click', onClick, true);
   document.addEventListener('click', onMenuTrigger, true);
-  document.addEventListener('mouseover', onChartHover, true);
-  if (!document.getElementById(ANALYZE_STYLE_ID)) {
-    const style = document.createElement('style');
-    style.id = ANALYZE_STYLE_ID;
-    style.textContent = `
-      [data-test="dashboard-component-chart-holder"]:hover > .${ANALYZE_BUTTON_CLASS},
-      .dashboard-component-chart-holder:hover > .${ANALYZE_BUTTON_CLASS},
-      [data-chart-id]:hover > .${ANALYZE_BUTTON_CLASS},
-      [data-test-chart-id]:hover > .${ANALYZE_BUTTON_CLASS} {
-        opacity: 1 !important;
-        pointer-events: auto !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
   window.addEventListener('popstate', onPopState);
   window.addEventListener(CONTEXT_REQUEST_EVENT, onContextRequest);
   window.addEventListener(CONTEXT_SETTINGS_EVENT, onSettings);
   const interval = window.setInterval(publish, 1000);
-  const chartScanInterval = window.setInterval(scanChartContainers, 750);
   window.setTimeout(publish, 0);
   window.setTimeout(publish, 750);
-  window.setTimeout(scanChartContainers, 0);
-  window.setTimeout(scanChartContainers, 750);
 
   return () => {
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('click', onMenuTrigger, true);
-    document.removeEventListener('mouseover', onChartHover, true);
-    document.querySelectorAll(`.${ANALYZE_BUTTON_CLASS}`).forEach(button => button.remove());
     document.querySelectorAll(`.${ANALYZE_MENU_CLASS}`).forEach(item => item.remove());
-    document.getElementById(ANALYZE_STYLE_ID)?.remove();
     window.removeEventListener('popstate', onPopState);
     window.removeEventListener(CONTEXT_REQUEST_EVENT, onContextRequest);
     window.removeEventListener(CONTEXT_SETTINGS_EVENT, onSettings);
     window.clearInterval(interval);
-    window.clearInterval(chartScanInterval);
   };
 }
 
