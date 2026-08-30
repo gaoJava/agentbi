@@ -1626,17 +1626,14 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
     closeSupersetChartEditor();
     await refreshSupersetDashboardsAfterWrite(
       `${body.chart.title} 已${editing ? '更新' : '创建并加入'} ${targetDashboard?.title || '目标仪表盘'}`);
-    if (editing) {
-      await openDashboardChartManager(editing.dashboard);
-      return;
-    }
-    if (targetDashboard?.is_home) {
-      switchView('dashboard');
-      await loadSupersetWorkspace({ force: true });
-      showManagementFeedback(`${body.chart.title} 已显示在经营总览底部`);
-    } else {
-      openSupersetPath(body.chart.dashboard_path || `/superset/dashboard/${targetDashboardId}/`);
-    }
+    const refreshedDashboard = loadedSupersetDashboards.find(
+      dashboard => dashboard.superset_id === targetDashboardId)
+      || editing?.dashboard
+      || targetDashboard;
+    switchView('chart-management');
+    if (refreshedDashboard) await openDashboardChartManager(refreshedDashboard);
+    showManagementFeedback(
+      `${body.chart.title} 已${editing ? '更新' : '加入'} ${refreshedDashboard?.title || '目标仪表盘'}，图表列表已刷新`);
   } catch (error) {
     errorBox.textContent = error.message; errorBox.hidden = false;
   }
