@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260830.22" in shell.text
+        assert "app.js?v=20260830.23" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -218,6 +218,16 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
         async def list_dashboards(self) -> list[dict[str, object]]:
             return self.dashboards
 
+        async def get_native_dashboard(self, dashboard_id: int) -> dict[str, object]:
+            assert dashboard_id == 7
+            return {
+                "superset_id": 7, "title": "Executive Dashboard",
+                "charts": [{"superset_id": 44, "title": "销售趋势", "status": "ready",
+                            "visualization_type": "echarts_timeseries_bar",
+                            "columns": ["region", "SUM(revenue)"],
+                            "rows": [{"region": "华东", "SUM(revenue)": 100}] }],
+            }
+
     app = create_app(settings())
     app.state.superset_client = FakeSupersetClient()
     with TestClient(app) as client:
@@ -236,6 +246,10 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
         selected = client.post("/api/v1/admin/superset/dashboards/7/home", headers=headers)
         assert selected.status_code == 200
         assert selected.json()["dashboard"]["is_home"] is True
+
+        native = client.get("/api/v1/superset/workspace/native")
+        assert native.status_code == 200
+        assert native.json()["dashboard"]["charts"][0]["rows"][0]["SUM(revenue)"] == 100
 
         app.state.superset_client.dashboards = [app.state.superset_client.dashboards[1]]
         resynced = client.post("/api/v1/admin/superset/dashboards/sync", headers=headers)

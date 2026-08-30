@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import asyncio
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -297,11 +298,15 @@ class SupersetClient:
             params["groupby"] = [dimension]
         elif visualization_type == "table":
             params["groupby"] = [dimension]
+        query_context = self._build_query_context(
+            dataset_id, viz_type, dimension, metric, time_column
+        )
         response = await self._authorized_request(
             "POST", "/api/v1/chart/",
             json={"slice_name": title.strip(), "viz_type": viz_type,
                   "datasource_id": dataset_id, "datasource_type": "table",
-                  "dashboards": [dashboard_id], "params": json.dumps(params)},
+                  "dashboards": [dashboard_id], "params": json.dumps(params),
+                  "query_context": json.dumps(query_context)},
         )
         if response.status_code >= 400:
             raise SupersetApiError("图表创建失败，请检查 Dataset、仪表盘和操作权限")
@@ -316,6 +321,75 @@ class SupersetClient:
                 "explore_path": f"/explore/?slice_id={chart_id}",
                 "configuration": {"dimension": dimension, "metric_column": metric_column,
                                   "aggregation": aggregation, "time_column": time_column}}
+
+    @staticmethod
+    def _build_query_context(
+        dataset_id: int, viz_type: str, dimension: str,
+        metric: dict[str, object], time_column: str | None,
+    ) -> dict[str, object]:
+        columns = [time_column or dimension]
+        return {
+            "datasource": {"id": dataset_id, "type": "table"},
+            "force": False,
+            "queries": [{
+                "time_range": "No filter", "granularity": time_column,
+                "filters": [], "extras": {"having": "", "where": ""},
+                "applied_time_extras": {}, "columns": columns, "metrics": [metric],
+                "orderby": [[metric, False]], "annotation_layers": [],
+                "row_limit": 1000, "series_limit": 0, "order_desc": True,
+                "url_params": {}, "custom_params": {}, "custom_form_data": {},
+            }],
+            "form_data": {"viz_type": viz_type, "datasource": f"{dataset_id}__table"},
+            "result_format": "json", "result_type": "full",
+        }
+
+    async def get_native_dashboard(self, dashboard_id: int) -> dict[str, object]:
+        """Return bounded chart metadata and data for AgentBI's own renderer."""
+
+        dashboard_response, charts_response = await asyncio.gather(
+            self._authorized_request("GET", f"/api/v1/dashboard/{dashboard_id}"),
+            self._authorized_request("GET", f"/api/v1/dashboard/{dashboard_id}/charts"),
+        )
+        if dashboard_response.status_code >= 400 or charts_response.status_code >= 400:
+            raise SupersetApiError("经营总览读取失败或当前账号无权访问")
+        dashboard = dashboard_response.json().get("result") or {}
+        raw_charts = (charts_response.json().get("result") or [])[:50]
+        chart_results = await asyncio.gather(
+            *(self._native_chart_payload(chart) for chart in raw_charts)
+        )
+        return {
+            "superset_id": dashboard_id,
+            "title": str(dashboard.get("dashboard_title") or f"Dashboard {dashboard_id}"),
+            "charts": list(chart_results),
+        }
+
+    async def _native_chart_payload(self, chart: dict[str, object]) -> dict[str, object]:
+        chart_id = int(chart.get("id") or 0)
+        form_data = chart.get("form_data") if isinstance(chart.get("form_data"), dict) else {}
+        payload: dict[str, object] = {
+            "superset_id": chart_id,
+            "title": str(chart.get("slice_name") or f"图表 {chart_id}"),
+            "visualization_type": str(form_data.get("viz_type") or "table"),
+            "status": "configuration_required",
+            "columns": [], "rows": [],
+        }
+        if not chart_id:
+            return payload
+        response = await self._authorized_request(
+            "GET", f"/api/v1/chart/{chart_id}/data/?format=json&type=full"
+        )
+        if response.status_code >= 400:
+            return payload
+        result = (response.json().get("result") or [{}])[0]
+        if not isinstance(result, dict) or result.get("status") not in {None, "success"}:
+            return payload
+        columns = [str(item)[:250] for item in (result.get("colnames") or [])[:50]]
+        rows = []
+        for raw in (result.get("data") or [])[:200]:
+            if isinstance(raw, dict):
+                rows.append({column: raw.get(column) for column in columns})
+        payload.update({"status": "ready", "columns": columns, "rows": rows})
+        return payload
 
     async def _append_chart_to_dashboard_layout(
         self, dashboard_id: int, chart_id: int, title: str

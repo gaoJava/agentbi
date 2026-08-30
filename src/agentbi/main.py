@@ -1403,6 +1403,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         }
 
+    @app.get("/api/v1/superset/workspace/native")
+    async def native_superset_workspace(
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "dashboard:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        home_dashboard = sessions.get_home_superset_dashboard()
+        if home_dashboard is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="尚未设置经营总览")
+        try:
+            dashboard = await app.state.superset_client.get_native_dashboard(
+                int(home_dashboard["superset_id"])
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return {"dashboard": dashboard}
+
     @app.post("/api/v1/admin/semantic-models/{model_name}/sync")
     async def sync_semantic_model(
         model_name: str,

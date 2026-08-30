@@ -92,9 +92,64 @@ function renderDashboardCanvasMode() {
 function showSupersetUnavailable(message) {
   document.querySelector('#superset-loading').hidden = true;
   document.querySelector('#superset-frame').hidden = true;
+  document.querySelector('#native-dashboard-grid').hidden = true;
   document.querySelector('#superset-unavailable-message').textContent = message;
   document.querySelector('#superset-unavailable').hidden = false;
   document.querySelector('#edit-dashboard').disabled = true;
+}
+
+function formatNativeValue(value) {
+  if (typeof value === 'number') return new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 2}).format(value);
+  return value === null || value === undefined ? '—' : String(value);
+}
+
+function selectNativeChart(chart) {
+  selectedSupersetContext = {dashboard_id: String(supersetWorkspace?.dashboard_id || ''), chart_id: String(chart.superset_id)};
+  const chip = document.querySelector('#agent-chart-context');
+  chip.textContent = `${chart.title} · Chart ${chart.superset_id}`; chip.hidden = false;
+  document.querySelector('#agent-context-description').textContent = '已固定当前 AgentBI 图表；问答将携带真实仪表盘与 Chart ID';
+  document.querySelector('#agent-question').placeholder = `针对“${chart.title}”提问…`;
+  setAgentPanelExpanded(true);
+}
+
+function renderNativeChartVisual(chart) {
+  const visual = document.createElement('div'); visual.className = 'native-chart-visual';
+  if (chart.status !== 'ready') {
+    visual.classList.add('native-chart-warning');
+    visual.innerHTML = '<strong>需要重新配置</strong><p>该图表缺少标准查询上下文。请在 AgentBI 中重新创建后查看真实结果。</p>';
+    return visual;
+  }
+  const rows = Array.isArray(chart.rows) ? chart.rows : []; const columns = Array.isArray(chart.columns) ? chart.columns : [];
+  if (!rows.length || !columns.length) {
+    visual.classList.add('native-chart-warning'); visual.innerHTML = '<strong>查询成功，暂无数据</strong><p>请检查筛选范围或数据源内容。</p>'; return visual;
+  }
+  const numeric = columns.find(column => rows.some(row => typeof row[column] === 'number'));
+  const dimension = columns.find(column => column !== numeric) || columns[0]; const type = chart.visualization_type || '';
+  if (type.includes('big_number') && numeric) {
+    visual.classList.add('native-big-number'); const strong = document.createElement('strong'); strong.textContent = formatNativeValue(rows[0][numeric]);
+    const small = document.createElement('small'); small.textContent = numeric; visual.append(strong, small); return visual;
+  }
+  if ((type.includes('bar') || type.includes('line') || type === 'pie') && numeric) {
+    visual.classList.add('native-bars'); const data = rows.slice(0, 12); const max = Math.max(...data.map(row => Number(row[numeric]) || 0), 1);
+    data.forEach(row => { const item = document.createElement('div'); const label = document.createElement('span'); label.textContent = formatNativeValue(row[dimension]);
+      const track = document.createElement('i'); const fill = document.createElement('b'); fill.style.width = `${Math.max(2, (Number(row[numeric]) || 0) / max * 100)}%`;
+      const amount = document.createElement('em'); amount.textContent = formatNativeValue(row[numeric]); track.append(fill); item.append(label, track, amount); visual.append(item); });
+    return visual;
+  }
+  visual.classList.add('native-table-wrap'); const table = document.createElement('table'); const head = document.createElement('thead'); const headRow = document.createElement('tr');
+  columns.slice(0, 8).forEach(column => { const th = document.createElement('th'); th.textContent = column; headRow.append(th); }); head.append(headRow); const body = document.createElement('tbody');
+  rows.slice(0, 20).forEach(row => { const tr = document.createElement('tr'); columns.slice(0, 8).forEach(column => { const td = document.createElement('td'); td.textContent = formatNativeValue(row[column]); tr.append(td); }); body.append(tr); });
+  table.append(head, body); visual.append(table); return visual;
+}
+
+function renderNativeDashboard(dashboard) {
+  const grid = document.querySelector('#native-dashboard-grid'); document.querySelector('#dashboard-title').textContent = dashboard.title || '经营总览';
+  const charts = Array.isArray(dashboard.charts) ? dashboard.charts : [];
+  if (!charts.length) grid.innerHTML = '<div class="native-dashboard-empty"><strong>当前仪表盘还没有图表</strong><p>请通过“仪表盘管理 → 添加图表”创建真实分析图表。</p></div>';
+  else grid.replaceChildren(...charts.map(chart => { const card = document.createElement('article'); card.className = 'native-chart-card'; const header = document.createElement('header');
+    const title = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = chart.title; const small = document.createElement('small'); small.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询' : '待配置'}`; title.append(strong, small);
+    const ai = document.createElement('button'); ai.type = 'button'; ai.textContent = '✦ AI 分析'; ai.addEventListener('click', () => selectNativeChart(chart)); header.append(title, ai); card.append(header, renderNativeChartVisual(chart)); return card; }));
+  grid.hidden = false;
 }
 
 function setSupersetFrameMode(mode) {
@@ -129,10 +184,6 @@ async function loadSupersetWorkspace({ force = false } = {}) {
   document.querySelector('#edit-dashboard').disabled = true;
   document.querySelector('#superset-unavailable').hidden = true;
   document.querySelector('#superset-loading').hidden = false;
-  if (supersetWorkspace?.available && !force) {
-    setSupersetFrameMode(supersetFrameMode);
-    return;
-  }
   try {
     supersetWorkspace = await window.AgentBI.supersetWorkspace.load(force);
     if (!supersetWorkspace.available) {
@@ -140,7 +191,10 @@ async function loadSupersetWorkspace({ force = false } = {}) {
       return;
     }
     document.querySelector('#edit-dashboard').disabled = !supersetWorkspace.can_edit;
-    setSupersetFrameMode(supersetFrameMode === 'edit' && supersetWorkspace.can_edit ? 'edit' : 'view');
+    const native = await request('/api/v1/superset/workspace/native');
+    document.querySelector('#superset-loading').hidden = true; document.querySelector('#superset-unavailable').hidden = true;
+    document.querySelector('#superset-frame').hidden = true; document.querySelector('#superset-mode-label').textContent = '原生模式 · 真实查询';
+    renderNativeDashboard(native.dashboard); document.querySelector('#agent-dashboard-name').textContent = native.dashboard.title || '经营总览';
   } catch (error) {
     showSupersetUnavailable(error.message);
   }
@@ -1424,7 +1478,7 @@ document.querySelector('#refresh-dashboard').addEventListener('click', async () 
 });
 document.querySelector('#edit-dashboard').addEventListener('click', () => {
   if (dashboardCanvasMode === 'superset') {
-    setSupersetFrameMode(supersetFrameMode === 'edit' ? 'view' : 'edit');
+    switchView('chart-management');
     return;
   }
   switchView('chart-management');
