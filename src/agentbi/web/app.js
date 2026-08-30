@@ -805,9 +805,12 @@ async function openDashboardChartManager(dashboard) {
     }
     body.replaceChildren(...charts.map(chart => {
       const card = document.createElement('article');
+      const icon = document.createElement('span'); icon.className = 'dashboard-chart-icon'; icon.textContent = chart.visualization_type?.includes('bar') ? '▥' : chart.visualization_type?.includes('line') ? '⌁' : chart.visualization_type === 'pie' ? '◔' : '▦';
       const info = document.createElement('div'); const title = document.createElement('strong'); title.textContent = chart.title;
-      const meta = document.createElement('small'); meta.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询可用' : '需要重新配置'}`;
-      info.append(title, meta); const actions = document.createElement('div');
+      const meta = document.createElement('div'); meta.className = 'dashboard-chart-meta';
+      const id = document.createElement('small'); id.textContent = `Chart ${chart.superset_id}`;
+      const status = document.createElement('span'); status.className = chart.status === 'ready' ? 'chart-state-ready' : 'chart-state-warning'; status.textContent = chart.status === 'ready' ? '● 真实查询可用' : '● 需要重新配置';
+      meta.append(id, status); info.append(title, meta); const actions = document.createElement('div'); actions.className = 'dashboard-chart-actions';
       const edit = actionButton('修改图表', '', () => openSupersetChartEditor(undefined, dashboard, chart));
       const remove = actionButton('删除图表', 'danger-action', async () => {
         if (!window.confirm(`确认永久删除图表“${chart.title}”吗？\n该操作会同步删除数据引擎中的图表资产。`)) return;
@@ -820,7 +823,7 @@ async function openDashboardChartManager(dashboard) {
           await openDashboardChartManager(dashboard);
         } catch (error) { showManagementFeedback(error.message, true); remove.disabled = false; }
       });
-      actions.append(edit, remove); card.append(info, actions); return card;
+      actions.append(edit, remove); card.append(icon, info, actions); return card;
     }));
   } catch (error) {
     body.innerHTML = ''; const message = document.createElement('div'); message.className = 'dashboard-chart-loading'; message.textContent = error.message; body.append(message);
