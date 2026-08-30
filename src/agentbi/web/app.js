@@ -28,6 +28,7 @@ let editingSupersetDataset;
 let editingSupersetDashboard;
 let supersetDashboardEditorMode = 'create';
 let pendingSupersetDashboardDelete;
+let managingSupersetDashboard;
 let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
@@ -103,8 +104,8 @@ function formatNativeValue(value) {
   return value === null || value === undefined ? '—' : String(value);
 }
 
-function selectNativeChart(chart) {
-  selectedSupersetContext = {dashboard_id: String(supersetWorkspace?.dashboard_id || ''), chart_id: String(chart.superset_id)};
+function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id) {
+  selectedSupersetContext = {dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id)};
   const chip = document.querySelector('#agent-chart-context');
   chip.textContent = `${chart.title} · Chart ${chart.superset_id}`; chip.hidden = false;
   document.querySelector('#agent-context-description').textContent = '已固定当前 AgentBI 图表；问答将携带真实仪表盘与 Chart ID';
@@ -762,7 +763,7 @@ function renderSupersetDashboardAssets() {
       dashboard.is_home ? '✓ 当前总览' : '—'];
     values.forEach(value => { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell); });
     const action = document.createElement('td'); action.className = 'registry-actions';
-    action.append(actionButton('打开', '', () => openSupersetPath(`/superset/dashboard/${dashboard.superset_id}/`)));
+    action.append(actionButton('管理图表', '', () => openDashboardChartManager(dashboard)));
     action.append(actionButton('修改', '', () => openSupersetDashboardEditor('edit', dashboard)));
     action.append(actionButton('添加图表', '', () => openSupersetChartEditor(undefined, dashboard)));
     action.append(actionButton(dashboard.published ? '下线' : '发布', 'warning-action', () =>
@@ -785,6 +786,44 @@ function renderSupersetDashboardAssets() {
     home.disabled = dashboard.is_home || !dashboard.published || !dashboard.available;
     action.append(home); row.append(action); return row;
   }));
+}
+
+async function openDashboardChartManager(dashboard) {
+  managingSupersetDashboard = dashboard;
+  const section = document.querySelector('#dashboard-chart-manager');
+  const body = document.querySelector('#dashboard-chart-manager-body');
+  document.querySelector('#dashboard-chart-manager-title').textContent = `${dashboard.title} · 图表管理`;
+  body.innerHTML = '<div class="dashboard-chart-loading">正在读取真实图表资产…</div>';
+  section.hidden = false; section.scrollIntoView({behavior: 'smooth', block: 'start'});
+  try {
+    const response = await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}/native`);
+    const charts = response.dashboard?.charts || [];
+    if (!charts.length) {
+      body.innerHTML = '<div class="dashboard-chart-loading">当前仪表盘还没有图表，可点击上方“添加图表”。</div>';
+      return;
+    }
+    body.replaceChildren(...charts.map(chart => {
+      const card = document.createElement('article');
+      const info = document.createElement('div'); const title = document.createElement('strong'); title.textContent = chart.title;
+      const meta = document.createElement('small'); meta.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询可用' : '需要重新配置'}`;
+      info.append(title, meta); const actions = document.createElement('div');
+      const ai = actionButton('AI 分析', '', () => { switchView('dashboard'); selectNativeChart(chart, dashboard.superset_id); });
+      const remove = actionButton('删除图表', 'danger-action', async () => {
+        if (!window.confirm(`确认永久删除图表“${chart.title}”吗？\n该操作会同步删除数据引擎中的图表资产。`)) return;
+        remove.disabled = true;
+        try {
+          await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}/charts/${chart.superset_id}`, {
+            method: 'DELETE', headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+          });
+          await refreshSupersetDashboardsAfterWrite(`${chart.title} 已从 ${dashboard.title} 删除`);
+          await openDashboardChartManager(dashboard);
+        } catch (error) { showManagementFeedback(error.message, true); remove.disabled = false; }
+      });
+      actions.append(ai, remove); card.append(info, actions); return card;
+    }));
+  } catch (error) {
+    body.innerHTML = ''; const message = document.createElement('div'); message.className = 'dashboard-chart-loading'; message.textContent = error.message; body.append(message);
+  }
 }
 
 function openSupersetPath(path) {
@@ -1487,6 +1526,10 @@ document.querySelector('#create-superset-dashboard').addEventListener('click', (
   openSupersetDashboardEditor('create'));
 document.querySelector('#create-superset-chart').addEventListener('click', () =>
   openSupersetChartEditor());
+document.querySelector('#close-dashboard-chart-manager').addEventListener('click', () => {
+  managingSupersetDashboard = undefined;
+  document.querySelector('#dashboard-chart-manager').hidden = true;
+});
 
 document.querySelector('#close-superset-dashboard-editor').addEventListener('click', closeSupersetDashboardEditor);
 document.querySelector('#cancel-superset-dashboard-editor').addEventListener('click', closeSupersetDashboardEditor);

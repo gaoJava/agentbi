@@ -1420,6 +1420,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         return {"dashboard": dashboard}
 
+    @app.get("/api/v1/admin/superset/dashboards/{superset_id}/native")
+    async def admin_native_superset_dashboard(
+        superset_id: int,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        try:
+            dashboard = await app.state.superset_client.get_native_dashboard(superset_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return {"dashboard": dashboard}
+
+    @app.delete("/api/v1/admin/superset/dashboards/{dashboard_id}/charts/{chart_id}", status_code=204)
+    async def delete_superset_chart_asset(
+        dashboard_id: int, chart_id: int, request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            await app.state.superset_client.delete_chart(chart_id, dashboard_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_chart_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "",
+                       detail=f"dashboard={dashboard_id},chart={chart_id}")
+        return Response(status_code=204)
+
     @app.post("/api/v1/admin/semantic-models/{model_name}/sync")
     async def sync_semantic_model(
         model_name: str,

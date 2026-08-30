@@ -391,6 +391,48 @@ class SupersetClient:
         payload.update({"status": "ready", "columns": columns, "rows": rows})
         return payload
 
+    async def delete_chart(self, chart_id: int, dashboard_id: int) -> None:
+        charts_response = await self._authorized_request(
+            "GET", f"/api/v1/dashboard/{dashboard_id}/charts"
+        )
+        if charts_response.status_code >= 400:
+            raise SupersetApiError("无法验证图表与仪表盘的归属关系")
+        dashboard_chart_ids = {
+            int(item.get("id")) for item in (charts_response.json().get("result") or [])
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        if chart_id not in dashboard_chart_ids:
+            raise SupersetApiError("图表不属于当前仪表盘，已拒绝删除")
+        response = await self._authorized_request("DELETE", f"/api/v1/chart/{chart_id}")
+        if response.status_code >= 400:
+            raise SupersetApiError("图表删除失败或当前账号无权操作")
+        dashboard_response = await self._authorized_request("GET", f"/api/v1/dashboard/{dashboard_id}")
+        if dashboard_response.status_code >= 400:
+            return
+        try:
+            position = json.loads((dashboard_response.json().get("result") or {}).get("position_json") or "{}")
+        except (TypeError, ValueError):
+            return
+        if not isinstance(position, dict):
+            return
+        chart_nodes = {key for key, node in position.items() if isinstance(node, dict)
+                       and node.get("type") == "CHART"
+                       and (node.get("meta") or {}).get("chartId") == chart_id}
+        empty_rows: set[str] = set()
+        for node in position.values():
+            if not isinstance(node, dict) or not isinstance(node.get("children"), list):
+                continue
+            node["children"] = [item for item in node["children"] if item not in chart_nodes]
+            if node.get("type") == "ROW" and not node["children"]:
+                empty_rows.add(str(node.get("id")))
+        for node in position.values():
+            if isinstance(node, dict) and isinstance(node.get("children"), list):
+                node["children"] = [item for item in node["children"] if item not in empty_rows]
+        for key in chart_nodes | empty_rows:
+            position.pop(key, None)
+        await self._authorized_request("PUT", f"/api/v1/dashboard/{dashboard_id}",
+                                       json={"position_json": json.dumps(position, ensure_ascii=False)})
+
     async def _append_chart_to_dashboard_layout(
         self, dashboard_id: int, chart_id: int, title: str
     ) -> None:
