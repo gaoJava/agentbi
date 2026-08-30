@@ -824,6 +824,64 @@ function closeSupersetChartEditor() {
   document.querySelector('#superset-chart-editor-error').hidden = true;
 }
 
+function updateSupersetChartPreview() {
+  const value = id => document.querySelector(id)?.value || '—';
+  const text = id => document.querySelector(id)?.selectedOptions?.[0]?.textContent || '—';
+  const typeLabels = {table: '表格', bar: '柱状图', line: '折线图', pie: '饼图', big_number: '指标卡'};
+  const rawTitle = document.querySelector('#superset-chart-title')?.value.trim();
+  document.querySelector('#superset-chart-preview-title').textContent =
+    rawTitle || '尚未填写图表名称';
+  const rows = [
+    ['图表类型', typeLabels[value('#superset-chart-type')] || '—'],
+    ['分析维度', text('#superset-chart-dimension')],
+    ['业务指标', `${value('#superset-chart-aggregation')}(${value('#superset-chart-metric-column')})`],
+    ['时间字段', text('#superset-chart-time-column')],
+    ['目标仪表盘', text('#superset-chart-dashboard')],
+  ];
+  document.querySelector('#superset-chart-config-summary').replaceChildren(...rows.map(([label, content]) => {
+    const row = document.createElement('div');
+    const term = document.createElement('dt'); term.textContent = label;
+    const detail = document.createElement('dd'); detail.textContent = content;
+    row.append(term, detail); return row;
+  }));
+}
+
+function renderSupersetChartPresets(dataset, columns) {
+  const names = new Set(columns.map(column => column.name));
+  const firstDimension = columns.find(column =>
+    /string|text|char|object/i.test(column.type))?.name || columns[0]?.name;
+  const firstMetric = columns.find(column =>
+    /int|numeric|decimal|float|double|real|number/i.test(column.type))?.name || columns[0]?.name;
+  const presets = dataset.name === 'video_game_sales' &&
+    ['genre', 'platform', 'publisher', 'global_sales'].every(name => names.has(name))
+    ? [
+        {title: '游戏类型销量', note: '按类型汇总全球销量', type: 'bar', dimension: 'genre', metric: 'global_sales', aggregation: 'SUM'},
+        {title: '平台销量对比', note: '比较不同游戏平台表现', type: 'bar', dimension: 'platform', metric: 'global_sales', aggregation: 'SUM'},
+        {title: '发行商销售排名', note: '查看发行商销量明细', type: 'table', dimension: 'publisher', metric: 'global_sales', aggregation: 'SUM'},
+        {title: '游戏类型占比', note: '查看各类型销量结构', type: 'pie', dimension: 'genre', metric: 'global_sales', aggregation: 'SUM'},
+      ]
+    : [
+        {title: '分类指标对比', note: '按维度汇总核心指标', type: 'bar', dimension: firstDimension, metric: firstMetric, aggregation: 'SUM'},
+        {title: '分类指标明细', note: '以表格查看汇总结果', type: 'table', dimension: firstDimension, metric: firstMetric, aggregation: 'SUM'},
+      ];
+  const container = document.querySelector('#superset-chart-presets');
+  container.replaceChildren(...presets.map(preset => {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'chart-preset';
+    const title = document.createElement('strong'); title.textContent = preset.title;
+    const note = document.createElement('small'); note.textContent = preset.note;
+    button.append(title, note); button.addEventListener('click', () => {
+      document.querySelector('#superset-chart-title').value = preset.title;
+      document.querySelector('#superset-chart-type').value = preset.type;
+      document.querySelector('#superset-chart-dimension').value = preset.dimension;
+      document.querySelector('#superset-chart-metric-column').value = preset.metric;
+      document.querySelector('#superset-chart-aggregation').value = preset.aggregation;
+      document.querySelector('#superset-chart-time-column').value = '';
+      updateSupersetChartPreview();
+    }); return button;
+  }));
+  container.firstElementChild?.click();
+}
+
 async function loadSupersetChartFields() {
   const datasetId = Number(document.querySelector('#superset-chart-dataset').value);
   const dimensionSelect = document.querySelector('#superset-chart-dimension');
@@ -832,6 +890,7 @@ async function loadSupersetChartFields() {
   dimensionSelect.disabled = true; metricSelect.disabled = true; timeSelect.disabled = true;
   try {
     const body = await request(`/api/v1/admin/superset/datasets/${datasetId}`);
+    const dataset = body.dataset || {};
     const columns = body.dataset?.columns || [];
     if (!columns.length) throw new Error('当前 Dataset 没有可配置字段');
     fillSelect(dimensionSelect, columns.map(column => ({...column, id: column.name})),
@@ -843,6 +902,10 @@ async function loadSupersetChartFields() {
     const timeColumns = columns.filter(column => column.is_time);
     timeSelect.replaceChildren(new Option('不使用时间字段', ''),
       ...timeColumns.map(column => new Option(`${column.name} · ${column.type}`, column.name)));
+    document.querySelector('#superset-chart-dataset-summary').textContent =
+      `${dataset.name || 'Dataset'} · ${columns.length} 个字段 · ${numeric.length} 个数值字段 · ${timeColumns.length} 个时间字段`;
+    renderSupersetChartPresets(dataset, columns);
+    updateSupersetChartPreview();
   } finally {
     dimensionSelect.disabled = false; metricSelect.disabled = false; timeSelect.disabled = false;
   }
@@ -1408,6 +1471,8 @@ document.querySelector('#superset-chart-dataset').addEventListener('change', asy
   try { await loadSupersetChartFields(); }
   catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
 });
+document.querySelector('#superset-chart-editor-form').addEventListener('input', updateSupersetChartPreview);
+document.querySelector('#superset-chart-editor-form').addEventListener('change', updateSupersetChartPreview);
 document.querySelector('#superset-chart-editor-form').addEventListener('submit', async event => {
   event.preventDefault();
   const errorBox = document.querySelector('#superset-chart-editor-error'); errorBox.hidden = true;

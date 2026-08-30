@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260830.6">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260830.7">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -383,18 +383,22 @@
     </section>
   </div>
   <div id="superset-chart-editor" class="modal-backdrop" hidden>
-    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="superset-chart-editor-title">
-      <header><div><span>真实 Dataset → Superset Chart</span><h2 id="superset-chart-editor-title">新建图表</h2></div><button id="close-superset-chart-editor" type="button" aria-label="关闭">×</button></header>
-      <form id="superset-chart-editor-form"><div class="wizard-grid">
+    <section class="chart-wizard chart-authoring-editor" role="dialog" aria-modal="true" aria-labelledby="superset-chart-editor-title">
+      <header><div><span>AgentBI 中文建图向导</span><h2 id="superset-chart-editor-title">创建业务分析图表</h2><p>从真实 Dataset 选择业务口径，图表将直接保存到 Superset。</p></div><button id="close-superset-chart-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="superset-chart-editor-form"><div class="authoring-layout"><div class="authoring-main">
+        <section class="authoring-section"><div class="authoring-section-title"><b>1</b><div><strong>选择数据与位置</strong><small>确定分析数据和图表所属仪表盘</small></div></div><div class="wizard-grid">
+          <label>真实 Dataset<select id="superset-chart-dataset" required></select></label>
+          <label>目标仪表盘<select id="superset-chart-dashboard" required></select></label>
+        </div><div id="superset-chart-dataset-summary" class="dataset-summary">正在读取 Dataset 字段…</div></section>
+        <section class="authoring-section"><div class="authoring-section-title"><b>2</b><div><strong>推荐分析</strong><small>可一键套用，也可以在下方自由配置</small></div></div><div id="superset-chart-presets" class="chart-preset-grid"></div></section>
+        <section class="authoring-section"><div class="authoring-section-title"><b>3</b><div><strong>配置图表口径</strong><small>维度决定“按什么看”，指标决定“看什么数”</small></div></div><div class="wizard-grid">
         <label class="wizard-full">图表名称<input id="superset-chart-title" required minlength="2" maxlength="250"></label>
-        <label>真实 Dataset<select id="superset-chart-dataset" required></select></label>
-        <label>目标仪表盘<select id="superset-chart-dashboard" required></select></label>
         <label>图表类型<select id="superset-chart-type"><option value="table">表格</option><option value="bar">柱状图</option><option value="line">折线图</option><option value="pie">饼图</option><option value="big_number">指标卡</option></select></label>
         <label>维度字段<small>用于分组或横轴</small><select id="superset-chart-dimension" required></select></label>
         <label>指标字段<small>用于计算业务指标</small><select id="superset-chart-metric-column" required></select></label>
         <label>聚合方式<select id="superset-chart-aggregation"><option value="SUM">求和 SUM</option><option value="AVG">平均 AVG</option><option value="COUNT">计数 COUNT</option><option value="MAX">最大 MAX</option><option value="MIN">最小 MIN</option></select></label>
-        <label class="wizard-full">时间字段<small>折线图、柱状图可选；不选择则按维度展示</small><select id="superset-chart-time-column"><option value="">不使用时间字段</option></select></label>
-      </div><aside class="draft-source-note">指标与维度在 AgentBI 中完成配置；颜色、标签和复杂筛选等高级样式可稍后进入中文版 Superset 调整。</aside><div id="superset-chart-editor-error" class="form-error" hidden></div><footer><button id="cancel-superset-chart-editor" type="button">取消</button><button class="primary-button" type="submit">创建图表</button></footer></form>
+        <label class="wizard-full">时间字段<small>可选；适用于标准日期或时间戳字段</small><select id="superset-chart-time-column"><option value="">不使用时间字段</option></select></label>
+      </div></section></div><aside class="authoring-preview"><span>创建预览</span><div class="preview-chart-icon">▥</div><h3 id="superset-chart-preview-title">尚未填写图表名称</h3><dl id="superset-chart-config-summary"></dl><p>创建后可在仪表盘中查看；颜色、标签和复杂筛选可进入中文版 Superset 调整。</p></aside></div><div id="superset-chart-editor-error" class="form-error" hidden></div><footer><button id="cancel-superset-chart-editor" type="button">取消</button><button class="primary-button" type="submit">创建图表</button></footer></form>
     </section>
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
@@ -407,6 +411,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260830.19" defer></script>
+  <script src="/app/assets/app.js?v=20260830.21" defer></script>
 </body>
 </html>
