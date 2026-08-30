@@ -131,7 +131,40 @@ function renderNativeChartVisual(chart) {
     visual.classList.add('native-big-number'); const strong = document.createElement('strong'); strong.textContent = formatNativeValue(rows[0][numeric]);
     const small = document.createElement('small'); small.textContent = numeric; visual.append(strong, small); return visual;
   }
-  if ((type.includes('bar') || type.includes('line') || type === 'pie') && numeric) {
+  if (type === 'pie' && numeric) {
+    const palette = ['#3478f6', '#20b5b9', '#7555e8', '#f5ad32', '#ef6c72', '#5f91ee', '#40bf83', '#9a67dc'];
+    const data = rows
+      .map(row => ({label: formatNativeValue(row[dimension]), value: Math.max(0, Number(row[numeric]) || 0)}))
+      .filter(item => item.value > 0)
+      .slice(0, palette.length);
+    const total = data.reduce((sum, item) => sum + item.value, 0);
+    if (!total) {
+      visual.classList.add('native-chart-warning');
+      visual.innerHTML = '<strong>暂无可绘制数据</strong><p>饼图指标值需要大于 0。</p>';
+      return visual;
+    }
+    visual.classList.add('native-pie');
+    const chart = document.createElement('div'); chart.className = 'native-pie-chart';
+    let cursor = 0;
+    chart.style.background = `conic-gradient(${data.map((item, index) => {
+      const start = cursor; cursor += item.value / total * 100;
+      return `${palette[index]} ${start}% ${cursor}%`;
+    }).join(',')})`;
+    const center = document.createElement('div'); center.className = 'native-pie-center';
+    const totalValue = document.createElement('strong'); totalValue.textContent = formatNativeValue(total);
+    const metric = document.createElement('small'); metric.textContent = numeric;
+    center.append(totalValue, metric); chart.append(center);
+    const legend = document.createElement('div'); legend.className = 'native-pie-legend';
+    data.forEach((item, index) => {
+      const row = document.createElement('div'); const dot = document.createElement('i'); dot.style.background = palette[index];
+      const label = document.createElement('span'); label.textContent = item.label;
+      const value = document.createElement('strong'); value.textContent = `${(item.value / total * 100).toFixed(1)}%`;
+      const amount = document.createElement('small'); amount.textContent = formatNativeValue(item.value);
+      row.append(dot, label, value, amount); legend.append(row);
+    });
+    visual.append(chart, legend); return visual;
+  }
+  if ((type.includes('bar') || type.includes('line')) && numeric) {
     visual.classList.add('native-bars'); const data = rows.slice(0, 12); const max = Math.max(...data.map(row => Number(row[numeric]) || 0), 1);
     data.forEach(row => { const item = document.createElement('div'); const label = document.createElement('span'); label.textContent = formatNativeValue(row[dimension]);
       const track = document.createElement('i'); const fill = document.createElement('b'); fill.style.width = `${Math.max(2, (Number(row[numeric]) || 0) / max * 100)}%`;
