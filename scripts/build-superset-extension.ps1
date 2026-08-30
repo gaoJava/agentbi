@@ -36,7 +36,6 @@ $manifest = [ordered]@{
     version = $extension.version
     license = $extension.license
     description = $extension.description
-    dependencies = @($extension.dependencies)
     permissions = @($extension.permissions)
     id = "$($extension.publisher).$($extension.name)"
     frontend = [ordered]@{
@@ -44,6 +43,9 @@ $manifest = [ordered]@{
         moduleFederationName = 'agentbi_insightPilot'
     }
     backend = [ordered]@{ entrypoint = 'agentbi.insight_pilot.entrypoint' }
+}
+if ($null -ne $extension.dependencies) {
+    $manifest.dependencies = @($extension.dependencies)
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $packageDist 'manifest.json') -Encoding utf8
 Write-Host "Superset extension package ready: $($extension.version) / $($remoteEntry[0].Name)" -ForegroundColor Green

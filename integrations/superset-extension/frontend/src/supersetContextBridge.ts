@@ -11,6 +11,7 @@ const DEFAULT_TIME_RANGE = '最近7天';
 const DEFAULT_SEMANTIC_MODEL_ID = 1;
 const ANALYZE_BUTTON_CLASS = 'agentbi-chart-analyze';
 const ANALYZE_STYLE_ID = 'agentbi-chart-analyze-style';
+const ANALYZE_MENU_CLASS = 'agentbi-chart-analyze-menu-item';
 
 interface ContextSettings {
   semanticModelId: number;
@@ -180,6 +181,28 @@ export function installSupersetContextBridge(): () => void {
     datasetId = closestAttribute(event.target, ['data-dataset-id']) ?? datasetId;
     publish();
   };
+  const selectChart = (container: HTMLElement, selectedChartId: string) => {
+    chartId = selectedChartId;
+    datasetId = attributeWithin(container, ['data-dataset-id']) ?? datasetId;
+    publish(true);
+    const dashboardId = dashboardIdFromLocation();
+    const targetOrigin = parentOrigin();
+    if (!dashboardId || !targetOrigin) return;
+    const settings = readSettings(dashboardId);
+    window.parent.postMessage({
+      type: CHART_SELECTED_MESSAGE,
+      version: 1,
+      title: chartTitle(container, selectedChartId),
+      context: {
+        dashboard_id: dashboardId,
+        chart_id: selectedChartId,
+        dataset_id: datasetId,
+        semantic_model_id: settings.semanticModelId,
+        time_range: settings.timeRange,
+        filters: filtersFromLocation(),
+      },
+    }, targetOrigin);
+  };
   const installAnalyzeButton = (container: HTMLElement) => {
     if (container.querySelector(`:scope > .${ANALYZE_BUTTON_CLASS}`)) return;
     const hoveredChartId = chartIdWithin(container);
@@ -199,26 +222,7 @@ export function installSupersetContextBridge(): () => void {
     analyzeButton.addEventListener('click', buttonEvent => {
       buttonEvent.preventDefault();
       buttonEvent.stopPropagation();
-      chartId = hoveredChartId;
-      datasetId = attributeWithin(container, ['data-dataset-id']) ?? datasetId;
-      publish(true);
-      const dashboardId = dashboardIdFromLocation();
-      const targetOrigin = parentOrigin();
-      if (!dashboardId || !targetOrigin) return;
-      const settings = readSettings(dashboardId);
-      window.parent.postMessage({
-        type: CHART_SELECTED_MESSAGE,
-        version: 1,
-        title: chartTitle(container, hoveredChartId),
-        context: {
-          dashboard_id: dashboardId,
-          chart_id: hoveredChartId,
-          dataset_id: datasetId,
-          semantic_model_id: settings.semanticModelId,
-          time_range: settings.timeRange,
-          filters: filtersFromLocation(),
-        },
-      }, targetOrigin);
+      selectChart(container, hoveredChartId);
     });
     container.appendChild(analyzeButton);
   };
@@ -231,6 +235,33 @@ export function installSupersetContextBridge(): () => void {
     const container = chartContainer(event.target);
     if (container) installAnalyzeButton(container);
   };
+  const installAnalyzeMenuItem = (container: HTMLElement, selectedChartId: string) => {
+    const menu = document.getElementById(`slice_${selectedChartId}-menu`);
+    if (!menu || menu.querySelector(`.${ANALYZE_MENU_CLASS}`)) return;
+    const item = document.createElement('li');
+    item.className = `${menu.querySelector('li')?.className || ''} ${ANALYZE_MENU_CLASS}`.trim();
+    item.setAttribute('role', 'menuitem');
+    item.setAttribute('data-menu-id', `agentbi-analyze-${selectedChartId}`);
+    item.tabIndex = -1;
+    item.textContent = '✦ AI 分析此图';
+    Object.assign(item.style, { cursor: 'pointer', color: '#155eef', fontWeight: '600' });
+    item.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectChart(container, selectedChartId);
+      menu.remove();
+    });
+    menu.insertBefore(item, menu.firstChild);
+  };
+  const onMenuTrigger = (event: MouseEvent) => {
+    if (!(event.target instanceof Element)) return;
+    const trigger = event.target.closest<HTMLElement>('button[id^="slice_"][id$="-controls"]');
+    const match = trigger?.id.match(/^slice_(\d+)-controls$/);
+    const container = trigger?.closest<HTMLElement>('.dashboard-component-chart-holder');
+    if (!match || !container) return;
+    window.setTimeout(() => installAnalyzeMenuItem(container, match[1]), 0);
+    window.setTimeout(() => installAnalyzeMenuItem(container, match[1]), 100);
+  };
   const onSettings = () => {
     lastFingerprint = '';
     publish();
@@ -239,6 +270,7 @@ export function installSupersetContextBridge(): () => void {
   const onPopState = () => publish();
 
   document.addEventListener('click', onClick, true);
+  document.addEventListener('click', onMenuTrigger, true);
   document.addEventListener('mouseover', onChartHover, true);
   if (!document.getElementById(ANALYZE_STYLE_ID)) {
     const style = document.createElement('style');
@@ -266,8 +298,10 @@ export function installSupersetContextBridge(): () => void {
 
   return () => {
     document.removeEventListener('click', onClick, true);
+    document.removeEventListener('click', onMenuTrigger, true);
     document.removeEventListener('mouseover', onChartHover, true);
     document.querySelectorAll(`.${ANALYZE_BUTTON_CLASS}`).forEach(button => button.remove());
+    document.querySelectorAll(`.${ANALYZE_MENU_CLASS}`).forEach(item => item.remove());
     document.getElementById(ANALYZE_STYLE_ID)?.remove();
     window.removeEventListener('popstate', onPopState);
     window.removeEventListener(CONTEXT_REQUEST_EVENT, onContextRequest);
