@@ -824,6 +824,30 @@ function closeSupersetChartEditor() {
   document.querySelector('#superset-chart-editor-error').hidden = true;
 }
 
+async function loadSupersetChartFields() {
+  const datasetId = Number(document.querySelector('#superset-chart-dataset').value);
+  const dimensionSelect = document.querySelector('#superset-chart-dimension');
+  const metricSelect = document.querySelector('#superset-chart-metric-column');
+  const timeSelect = document.querySelector('#superset-chart-time-column');
+  dimensionSelect.disabled = true; metricSelect.disabled = true; timeSelect.disabled = true;
+  try {
+    const body = await request(`/api/v1/admin/superset/datasets/${datasetId}`);
+    const columns = body.dataset?.columns || [];
+    if (!columns.length) throw new Error('当前 Dataset 没有可配置字段');
+    fillSelect(dimensionSelect, columns.map(column => ({...column, id: column.name})),
+      column => `${column.name} · ${column.type}`);
+    const numeric = columns.filter(column =>
+      /int|numeric|decimal|float|double|real|number/i.test(column.type));
+    fillSelect(metricSelect, (numeric.length ? numeric : columns)
+      .map(column => ({...column, id: column.name})), column => `${column.name} · ${column.type}`);
+    const timeColumns = columns.filter(column => column.is_time);
+    timeSelect.replaceChildren(new Option('不使用时间字段', ''),
+      ...timeColumns.map(column => new Option(`${column.name} · ${column.type}`, column.name)));
+  } finally {
+    dimensionSelect.disabled = false; metricSelect.disabled = false; timeSelect.disabled = false;
+  }
+}
+
 async function openSupersetChartEditor(dataset, dashboard) {
   try {
     if (!loadedDataSources.length) {
@@ -842,6 +866,7 @@ async function openSupersetChartEditor(dataset, dashboard) {
     document.querySelector('#superset-chart-editor-form').reset();
     if (dataset) document.querySelector('#superset-chart-dataset').value = String(dataset.superset_id);
     if (dashboard) document.querySelector('#superset-chart-dashboard').value = String(dashboard.superset_id);
+    await loadSupersetChartFields();
     document.querySelector('#superset-chart-editor-error').hidden = true;
     document.querySelector('#superset-chart-editor').hidden = false;
   } catch (error) { showManagementFeedback(error.message, true); }
@@ -1378,11 +1403,14 @@ document.querySelector('#superset-dashboard-editor-form').addEventListener('subm
 
 document.querySelector('#close-superset-chart-editor').addEventListener('click', closeSupersetChartEditor);
 document.querySelector('#cancel-superset-chart-editor').addEventListener('click', closeSupersetChartEditor);
+document.querySelector('#superset-chart-dataset').addEventListener('change', async () => {
+  const errorBox = document.querySelector('#superset-chart-editor-error'); errorBox.hidden = true;
+  try { await loadSupersetChartFields(); }
+  catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
+});
 document.querySelector('#superset-chart-editor-form').addEventListener('submit', async event => {
   event.preventDefault();
   const errorBox = document.querySelector('#superset-chart-editor-error'); errorBox.hidden = true;
-  const preview = window.open('', '_blank');
-  const supersetBase = supersetWorkspace?.view_url || supersetWorkspace?.edit_url;
   try {
     const body = await request('/api/v1/admin/superset/charts', {
       method: 'POST', headers: {
@@ -1393,18 +1421,17 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
         dataset_id: Number(document.querySelector('#superset-chart-dataset').value),
         dashboard_id: Number(document.querySelector('#superset-chart-dashboard').value),
         visualization_type: document.querySelector('#superset-chart-type').value,
+        dimension: document.querySelector('#superset-chart-dimension').value,
+        metric_column: document.querySelector('#superset-chart-metric-column').value,
+        aggregation: document.querySelector('#superset-chart-aggregation').value,
+        time_column: document.querySelector('#superset-chart-time-column').value || null,
       }),
     });
     closeSupersetChartEditor();
-    await refreshSupersetDashboardsAfterWrite(`${body.chart.title} 已创建，请继续配置指标与维度`);
-    if (preview && supersetBase) {
-      const target = new URL(body.chart.explore_path, supersetBase);
-      target.searchParams.set('lang', 'zh');
-      preview.location.href = target.href;
-    }
-    else preview?.close();
+    await refreshSupersetDashboardsAfterWrite(
+      `${body.chart.title} 已创建，指标与维度配置已保存到 Superset`);
   } catch (error) {
-    preview?.close(); errorBox.textContent = error.message; errorBox.hidden = false;
+    errorBox.textContent = error.message; errorBox.hidden = false;
   }
 });
 

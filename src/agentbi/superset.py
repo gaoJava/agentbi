@@ -255,13 +255,47 @@ class SupersetClient:
             raise SupersetApiError("仪表盘删除失败或无权操作")
 
     async def create_chart(
-        self, title: str, dataset_id: int, dashboard_id: int, visualization_type: str
+        self, title: str, dataset_id: int, dashboard_id: int, visualization_type: str,
+        dimension: str, metric_column: str, aggregation: str, time_column: str | None,
     ) -> dict[str, object]:
+        dataset = await self.get_dataset(dataset_id)
+        columns = {str(column["name"]): column for column in dataset["columns"]}
+        if dimension not in columns or metric_column not in columns:
+            raise SupersetApiError("维度或指标字段不属于当前 Dataset")
+        if time_column and (time_column not in columns or not columns[time_column]["is_time"]):
+            raise SupersetApiError("时间字段无效或不是日期时间类型")
         viz_type = {"line": "echarts_timeseries_line", "bar": "echarts_timeseries_bar",
                     "pie": "pie", "big_number": "big_number_total"}.get(
                         visualization_type, "table"
                     )
-        params = {"viz_type": viz_type, "datasource": f"{dataset_id}__table"}
+        metric = {
+            "expressionType": "SIMPLE",
+            "column": {
+                "column_name": metric_column,
+                "type": columns[metric_column]["type"],
+            },
+            "aggregate": aggregation,
+            "sqlExpression": None,
+            "label": f"{aggregation}({metric_column})",
+            "optionName": f"metric_{aggregation.lower()}_{metric_column}",
+        }
+        params: dict[str, object] = {
+            "viz_type": viz_type,
+            "datasource": f"{dataset_id}__table",
+            "metrics": [metric],
+            "row_limit": 10000,
+            "adhoc_filters": [],
+        }
+        if visualization_type in {"bar", "line"}:
+            params["x_axis"] = time_column or dimension
+            params["groupby"] = [] if time_column else [dimension]
+            if time_column:
+                params["time_grain_sqla"] = "P1D"
+        elif visualization_type == "pie":
+            params["metric"] = metric
+            params["groupby"] = [dimension]
+        elif visualization_type == "table":
+            params["groupby"] = [dimension]
         response = await self._authorized_request(
             "POST", "/api/v1/chart/",
             json={"slice_name": title.strip(), "viz_type": viz_type,
@@ -272,7 +306,9 @@ class SupersetClient:
             raise SupersetApiError("图表创建失败，请检查 Dataset、仪表盘和操作权限")
         chart_id = int(response.json().get("id"))
         return {"superset_id": chart_id, "title": title.strip(), "dashboard_id": dashboard_id,
-                "explore_path": f"/explore/?slice_id={chart_id}"}
+                "explore_path": f"/explore/?slice_id={chart_id}",
+                "configuration": {"dimension": dimension, "metric_column": metric_column,
+                                  "aggregation": aggregation, "time_column": time_column}}
 
     async def update_dataset(self, dataset_id: int, description: str) -> dict[str, object]:
         response = await self._authorized_request(

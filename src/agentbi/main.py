@@ -222,6 +222,10 @@ class SupersetChartAuthoringPayload(BaseModel):
     dataset_id: int = Field(gt=0)
     dashboard_id: int = Field(gt=0)
     visualization_type: Literal["table", "bar", "line", "pie", "big_number"] = "table"
+    dimension: str = Field(min_length=1, max_length=250)
+    metric_column: str = Field(min_length=1, max_length=250)
+    aggregation: Literal["SUM", "AVG", "COUNT", "MAX", "MIN"] = "SUM"
+    time_column: str | None = Field(default=None, max_length=250)
 
 
 class SemanticModelCreatePayload(BaseModel):
@@ -815,7 +819,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             chart = await app.state.superset_client.create_chart(
                 payload.title, payload.dataset_id, payload.dashboard_id,
-                payload.visualization_type,
+                payload.visualization_type, payload.dimension, payload.metric_column,
+                payload.aggregation, payload.time_column,
             )
         except SupersetApiError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

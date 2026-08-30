@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260830.18" in shell.text
+        assert "app.js?v=20260830.19" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -258,8 +258,14 @@ def test_admin_manages_real_superset_dashboards_and_charts() -> None:
         async def delete_dashboard(self, dashboard_id):
             assert dashboard_id == 32
 
-        async def create_chart(self, title, dataset_id, dashboard_id, visualization_type):
+        async def create_chart(
+            self, title, dataset_id, dashboard_id, visualization_type,
+            dimension, metric_column, aggregation, time_column,
+        ):
             assert (dataset_id, dashboard_id, visualization_type) == (21, 31, "bar")
+            assert (dimension, metric_column, aggregation, time_column) == (
+                "region", "revenue", "SUM", None
+            )
             return {"superset_id": 44, "title": title, "dashboard_id": dashboard_id,
                     "explore_path": "/explore/?slice_id=44"}
 
@@ -282,7 +288,9 @@ def test_admin_manages_real_superset_dashboards_and_charts() -> None:
         assert copied.status_code == 201
         chart = client.post("/api/v1/admin/superset/charts", headers=headers,
                             json={"title": "销售趋势", "dataset_id": 21,
-                                  "dashboard_id": 31, "visualization_type": "bar"})
+                                  "dashboard_id": 31, "visualization_type": "bar",
+                                  "dimension": "region", "metric_column": "revenue",
+                                  "aggregation": "SUM", "time_column": None})
         assert chart.status_code == 201
         assert chart.json()["chart"]["superset_id"] == 44
         assert client.delete("/api/v1/admin/superset/dashboards/32", headers=headers).status_code == 204
