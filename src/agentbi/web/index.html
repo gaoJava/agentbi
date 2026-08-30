@@ -73,7 +73,7 @@
     <section class="canvas-shell">
       <header class="topbar dashboard-section">
         <div><h1 id="dashboard-title">华东销售经营分析</h1><p id="dashboard-subtitle">实时洞察关键指标与业务变化</p></div>
-        <div class="top-actions"><span id="scope-badge" class="scope-badge">⌖ 数据范围：华东区域</span><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">在 Superset 中编辑</button></div>
+        <div class="top-actions"><button id="edit-dashboard" class="edit-button" data-permission="dashboard:manage">在 Superset 中编辑</button></div>
       </header>
       <section class="canvas-toolbar dashboard-section"><div><strong>经营总览</strong><small>图表创建、布局和筛选统一由 Superset 提供</small></div><button id="refresh-dashboard" type="button">⟳ 重新加载</button></section>
       <section class="dashboard-grid dashboard-section" id="sales-dashboard">
@@ -145,7 +145,7 @@
       <section id="chart-management-view" class="registry-view" hidden>
         <header class="registry-header">
           <div><h1>仪表盘管理</h1><p>同步 Superset 真实仪表盘，并管理 AgentBI 下钻配置</p></div>
-          <div><button id="sync-superset-dashboards" class="primary-small" type="button">⟳ 同步 Superset</button><button class="open-chart-wizard primary-small" type="button">＋ 新增下钻配置</button></div>
+          <div><button id="create-superset-dashboard" class="primary-small" type="button">＋ 新建仪表盘</button><button id="create-superset-chart" type="button">＋ 新建图表</button><button id="sync-superset-dashboards" type="button">⟳ 同步 Superset</button></div>
         </header>
         <div class="registry-content">
           <section class="registry-table-card">

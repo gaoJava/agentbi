@@ -162,7 +162,6 @@ function showWorkbench(user) {
   document.querySelector('#account-username').textContent = user.username;
   document.querySelector('#user-role').textContent = user.role_label;
   document.querySelector('#avatar').textContent = user.display_name.slice(0, 1);
-  document.querySelector('#scope-badge').textContent = `⌖ 数据范围：${user.data_scope}`;
   document.querySelector('#agent-scope').textContent = user.data_scope;
   const admin = user.role === 'admin';
   document.querySelector('#dashboard-title').textContent = admin ? '全域经营与系统治理' : '华东销售经营分析';
@@ -606,6 +605,8 @@ async function loadModuleView(view) {
         dataset.kind === 'virtual' ? '虚拟数据集' : '物理表', dataset.superset_id,
       ], dataset => {
         const group = document.createElement('div'); group.className = 'registry-actions';
+        group.append(actionButton('创建图表', 'module-action', () =>
+          openSupersetPath(`/explore/?datasource=${dataset.superset_id}__table`)));
         group.append(actionButton('查看字段', '', () => openDatasetDetail(dataset)));
         group.append(actionButton('修改说明', '', () => openDatasetDescriptionEditor(dataset)));
         group.append(actionButton('删除', 'danger-action', () => deleteSupersetAsset('datasets', dataset)));
@@ -704,6 +705,10 @@ function renderSupersetDashboardAssets() {
       dashboard.is_home ? '✓ 当前总览' : '—'];
     values.forEach(value => { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell); });
     const action = document.createElement('td'); action.className = 'registry-actions';
+    action.append(actionButton('打开', '', () => openSupersetPath(`/superset/dashboard/${dashboard.superset_id}/`)));
+    action.append(actionButton('编辑', '', () => openSupersetPath(`/superset/dashboard/${dashboard.superset_id}/?edit=true`)));
+    action.append(actionButton('添加图表', '', () => openSupersetPath(`/chart/add?dashboard_id=${dashboard.superset_id}`)));
+    action.append(actionButton('管理/删除', 'warning-action', () => openSupersetPath('/dashboard/list/')));
     const home = actionButton('设为经营总览', '', async () => {
       try {
         await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}/home`, {
@@ -718,6 +723,20 @@ function renderSupersetDashboardAssets() {
     home.disabled = dashboard.is_home || !dashboard.published || !dashboard.available;
     action.append(home); row.append(action); return row;
   }));
+}
+
+function openSupersetPath(path) {
+  const base = supersetWorkspace?.view_url || supersetWorkspace?.edit_url;
+  if (!base) {
+    showManagementFeedback('尚未连接 Superset，请返回分析工作台重新加载后再试', true);
+    return;
+  }
+  const target = new URL(path, base);
+  if (target.origin !== new URL(base).origin) {
+    showManagementFeedback('Superset 地址校验失败', true);
+    return;
+  }
+  window.open(target.href, '_blank', 'noopener,noreferrer');
 }
 
 async function loadSupersetDashboardAssets() {
@@ -1212,6 +1231,10 @@ document.querySelector('#edit-dashboard').addEventListener('click', () => {
   }
   switchView('chart-management');
 });
+document.querySelector('#create-superset-dashboard').addEventListener('click', () =>
+  openSupersetPath('/dashboard/new'));
+document.querySelector('#create-superset-chart').addEventListener('click', () =>
+  openSupersetPath('/chart/add'));
 
 document.querySelector('#sync-superset-dashboards').addEventListener('click', async event => {
   const button = event.currentTarget;

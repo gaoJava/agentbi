@@ -1278,7 +1278,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "available": True,
                 "status": "ready",
                 "view_url": f"{settings.superset_base_url}{path}{separator}standalone=3",
-                "edit_url": f"{settings.superset_base_url}{path}",
+                "edit_url": f"{settings.superset_base_url}{path}{separator}edit=true",
                 "can_edit": "dashboard:manage" in identity.permissions,
                 "dashboard_id": home_dashboard["superset_id"] if home_dashboard else None,
                 "dashboard_title": home_dashboard["title"] if home_dashboard else "Superset 仪表盘",
