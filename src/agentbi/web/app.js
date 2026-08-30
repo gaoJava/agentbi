@@ -25,6 +25,8 @@ let loadedLlmProviders = [];
 let editingLlmProviderId;
 let editingSupersetDatabaseId;
 let editingSupersetDataset;
+let editingSupersetDashboard;
+let supersetDashboardEditorMode = 'create';
 let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
@@ -606,7 +608,7 @@ async function loadModuleView(view) {
       ], dataset => {
         const group = document.createElement('div'); group.className = 'registry-actions';
         group.append(actionButton('创建图表', 'module-action', () =>
-          openSupersetPath(`/explore/?datasource=${dataset.superset_id}__table`)));
+          openSupersetChartEditor(dataset)));
         group.append(actionButton('查看字段', '', () => openDatasetDetail(dataset)));
         group.append(actionButton('修改说明', '', () => openDatasetDescriptionEditor(dataset)));
         group.append(actionButton('删除', 'danger-action', () => deleteSupersetAsset('datasets', dataset)));
@@ -706,9 +708,12 @@ function renderSupersetDashboardAssets() {
     values.forEach(value => { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell); });
     const action = document.createElement('td'); action.className = 'registry-actions';
     action.append(actionButton('打开', '', () => openSupersetPath(`/superset/dashboard/${dashboard.superset_id}/`)));
-    action.append(actionButton('编辑', '', () => openSupersetPath(`/superset/dashboard/${dashboard.superset_id}/?edit=true`)));
-    action.append(actionButton('添加图表', '', () => openSupersetPath(`/chart/add?dashboard_id=${dashboard.superset_id}`)));
-    action.append(actionButton('管理/删除', 'warning-action', () => openSupersetPath('/dashboard/list/')));
+    action.append(actionButton('修改', '', () => openSupersetDashboardEditor('edit', dashboard)));
+    action.append(actionButton('添加图表', '', () => openSupersetChartEditor(undefined, dashboard)));
+    action.append(actionButton(dashboard.published ? '下线' : '发布', 'warning-action', () =>
+      updateSupersetDashboardState(dashboard, !dashboard.published)));
+    action.append(actionButton('复制', '', () => openSupersetDashboardEditor('copy', dashboard)));
+    action.append(actionButton('删除', 'danger-action', () => deleteSupersetDashboard(dashboard)));
     const home = actionButton('设为经营总览', '', async () => {
       try {
         await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}/home`, {
@@ -737,6 +742,85 @@ function openSupersetPath(path) {
     return;
   }
   window.open(target.href, '_blank', 'noopener,noreferrer');
+}
+
+function closeSupersetDashboardEditor() {
+  document.querySelector('#superset-dashboard-editor').hidden = true;
+  document.querySelector('#superset-dashboard-editor-error').hidden = true;
+}
+
+function openSupersetDashboardEditor(mode, dashboard) {
+  supersetDashboardEditorMode = mode;
+  editingSupersetDashboard = dashboard;
+  const copy = mode === 'copy';
+  document.querySelector('#superset-dashboard-editor-title').textContent =
+    mode === 'create' ? '新建仪表盘' : copy ? '复制仪表盘' : '修改仪表盘';
+  document.querySelector('#superset-dashboard-title').value = dashboard
+    ? `${dashboard.title}${copy ? ' - 副本' : ''}` : '';
+  document.querySelector('#superset-dashboard-published').checked = dashboard?.published || false;
+  document.querySelector('#superset-dashboard-copy-charts-row').hidden = !copy;
+  document.querySelector('#superset-dashboard-copy-charts').checked = false;
+  document.querySelector('#superset-dashboard-editor-error').hidden = true;
+  document.querySelector('#superset-dashboard-editor').hidden = false;
+}
+
+async function refreshSupersetDashboardsAfterWrite(message) {
+  const body = await request('/api/v1/admin/superset/dashboards/sync', {
+    method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+  });
+  loadedSupersetDashboards = body.dashboards || [];
+  renderSupersetDashboardAssets();
+  supersetWorkspace = undefined;
+  window.AgentBI.supersetWorkspace.clear();
+  showManagementFeedback(message);
+}
+
+async function updateSupersetDashboardState(dashboard, published) {
+  try {
+    await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}`, {
+      method: 'PUT', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({title: dashboard.title, published}),
+    });
+    await refreshSupersetDashboardsAfterWrite(`${dashboard.title} 已${published ? '发布' : '下线'}`);
+  } catch (error) { showManagementFeedback(error.message, true); }
+}
+
+async function deleteSupersetDashboard(dashboard) {
+  if (!window.confirm(`确认永久删除 Superset 仪表盘“${dashboard.title}”吗？`)) return;
+  try {
+    await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}`, {
+      method: 'DELETE', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
+    });
+    await refreshSupersetDashboardsAfterWrite(`${dashboard.title} 已删除`);
+  } catch (error) { showManagementFeedback(error.message, true); }
+}
+
+function closeSupersetChartEditor() {
+  document.querySelector('#superset-chart-editor').hidden = true;
+  document.querySelector('#superset-chart-editor-error').hidden = true;
+}
+
+async function openSupersetChartEditor(dataset, dashboard) {
+  try {
+    if (!loadedDataSources.length) {
+      const assets = window.AgentBI.parseSupersetDataAssets(
+        await request('/api/v1/admin/superset/data-assets'));
+      loadedDataSources = assets.datasets;
+    }
+    if (!loadedSupersetDashboards.length) await loadSupersetDashboardAssets();
+    fillSelect(document.querySelector('#superset-chart-dataset'),
+      loadedDataSources.map(item => ({...item, id: item.superset_id})),
+      item => `${item.name} · ${item.database_name}`);
+    fillSelect(document.querySelector('#superset-chart-dashboard'),
+      loadedSupersetDashboards.filter(item => item.available)
+        .map(item => ({...item, id: item.superset_id})),
+      item => item.title);
+    document.querySelector('#superset-chart-editor-form').reset();
+    if (dataset) document.querySelector('#superset-chart-dataset').value = String(dataset.superset_id);
+    if (dashboard) document.querySelector('#superset-chart-dashboard').value = String(dashboard.superset_id);
+    document.querySelector('#superset-chart-editor-error').hidden = true;
+    document.querySelector('#superset-chart-editor').hidden = false;
+  } catch (error) { showManagementFeedback(error.message, true); }
 }
 
 async function loadSupersetDashboardAssets() {
@@ -1232,9 +1316,59 @@ document.querySelector('#edit-dashboard').addEventListener('click', () => {
   switchView('chart-management');
 });
 document.querySelector('#create-superset-dashboard').addEventListener('click', () =>
-  openSupersetPath('/dashboard/new'));
+  openSupersetDashboardEditor('create'));
 document.querySelector('#create-superset-chart').addEventListener('click', () =>
-  openSupersetPath('/chart/add'));
+  openSupersetChartEditor());
+
+document.querySelector('#close-superset-dashboard-editor').addEventListener('click', closeSupersetDashboardEditor);
+document.querySelector('#cancel-superset-dashboard-editor').addEventListener('click', closeSupersetDashboardEditor);
+document.querySelector('#superset-dashboard-editor-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = document.querySelector('#superset-dashboard-editor-error'); errorBox.hidden = true;
+  const title = document.querySelector('#superset-dashboard-title').value.trim();
+  const published = document.querySelector('#superset-dashboard-published').checked;
+  try {
+    let endpoint = '/api/v1/admin/superset/dashboards';
+    let method = 'POST';
+    let payload = {title, published};
+    if (supersetDashboardEditorMode === 'edit') {
+      endpoint += `/${editingSupersetDashboard.superset_id}`; method = 'PUT';
+    } else if (supersetDashboardEditorMode === 'copy') {
+      endpoint += `/${editingSupersetDashboard.superset_id}/copy`;
+      payload = {title, duplicate_charts: document.querySelector('#superset-dashboard-copy-charts').checked};
+    }
+    await request(endpoint, {method, headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify(payload)});
+    closeSupersetDashboardEditor();
+    await refreshSupersetDashboardsAfterWrite(`${title} 已保存到 Superset`);
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
+});
+
+document.querySelector('#close-superset-chart-editor').addEventListener('click', closeSupersetChartEditor);
+document.querySelector('#cancel-superset-chart-editor').addEventListener('click', closeSupersetChartEditor);
+document.querySelector('#superset-chart-editor-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = document.querySelector('#superset-chart-editor-error'); errorBox.hidden = true;
+  const preview = window.open('', '_blank');
+  const supersetBase = supersetWorkspace?.view_url || supersetWorkspace?.edit_url;
+  try {
+    const body = await request('/api/v1/admin/superset/charts', {
+      method: 'POST', headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({
+        title: document.querySelector('#superset-chart-title').value.trim(),
+        dataset_id: Number(document.querySelector('#superset-chart-dataset').value),
+        dashboard_id: Number(document.querySelector('#superset-chart-dashboard').value),
+        visualization_type: document.querySelector('#superset-chart-type').value,
+      }),
+    });
+    closeSupersetChartEditor();
+    await refreshSupersetDashboardsAfterWrite(`${body.chart.title} 已创建，请继续配置指标与维度`);
+    if (preview && supersetBase) preview.location.href = new URL(body.chart.explore_path, supersetBase).href;
+    else preview?.close();
+  } catch (error) {
+    preview?.close(); errorBox.textContent = error.message; errorBox.hidden = false;
+  }
+});
 
 document.querySelector('#sync-superset-dashboards').addEventListener('click', async event => {
   const button = event.currentTarget;

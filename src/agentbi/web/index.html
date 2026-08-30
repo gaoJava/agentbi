@@ -365,6 +365,27 @@
       <footer><button id="cancel-delete-asset" type="button">取消</button><button id="confirm-delete-asset" class="danger-button" type="button">确认删除</button></footer>
     </section>
   </div>
+  <div id="superset-dashboard-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="superset-dashboard-editor-title">
+      <header><div><span>真实 Superset 资产</span><h2 id="superset-dashboard-editor-title">新建仪表盘</h2></div><button id="close-superset-dashboard-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="superset-dashboard-editor-form"><div class="wizard-grid">
+        <label class="wizard-full">仪表盘名称<small>保存到 Superset，可后续继续拖拽布局</small><input id="superset-dashboard-title" required minlength="2" maxlength="500"></label>
+        <label class="account-state wizard-full"><input id="superset-dashboard-published" type="checkbox"> 创建或保存后立即发布</label>
+        <label id="superset-dashboard-copy-charts-row" class="account-state wizard-full" hidden><input id="superset-dashboard-copy-charts" type="checkbox"> 同时复制仪表盘中的图表</label>
+      </div><div id="superset-dashboard-editor-error" class="form-error" hidden></div><footer><button id="cancel-superset-dashboard-editor" type="button">取消</button><button class="primary-button" type="submit">保存到 Superset</button></footer></form>
+    </section>
+  </div>
+  <div id="superset-chart-editor" class="modal-backdrop" hidden>
+    <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="superset-chart-editor-title">
+      <header><div><span>真实 Dataset → Superset Chart</span><h2 id="superset-chart-editor-title">新建图表</h2></div><button id="close-superset-chart-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="superset-chart-editor-form"><div class="wizard-grid">
+        <label class="wizard-full">图表名称<input id="superset-chart-title" required minlength="2" maxlength="250"></label>
+        <label>真实 Dataset<select id="superset-chart-dataset" required></select></label>
+        <label>目标仪表盘<select id="superset-chart-dashboard" required></select></label>
+        <label class="wizard-full">图表类型<select id="superset-chart-type"><option value="table">表格</option><option value="bar">柱状图</option><option value="line">折线图</option><option value="pie">饼图</option><option value="big_number">指标卡</option></select></label>
+      </div><aside class="draft-source-note">创建后将打开 Superset Explore，继续选择指标、维度、时间字段和样式。</aside><div id="superset-chart-editor-error" class="form-error" hidden></div><footer><button id="cancel-superset-chart-editor" type="button">取消</button><button class="primary-button" type="submit">创建并继续配置</button></footer></form>
+    </section>
+  </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
   <script src="/app/assets/generated/workbench-runtime.js?v=20260829.7" defer></script>
   <div id="sonic-database-editor" class="modal-backdrop" hidden>
@@ -375,6 +396,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260830.15" defer></script>
+  <script src="/app/assets/app.js?v=20260830.16" defer></script>
 </body>
 </html>

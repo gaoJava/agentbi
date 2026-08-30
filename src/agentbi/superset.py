@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -211,6 +212,68 @@ class SupersetClient:
         body = response.json()
         return {"superset_id": body.get("id"), "name": table_name.strip()}
 
+    async def create_dashboard(self, title: str, published: bool) -> dict[str, object]:
+        response = await self._authorized_request(
+            "POST", "/api/v1/dashboard/",
+            json={"dashboard_title": title.strip(), "published": published},
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("仪表盘创建失败，名称可能重复或当前账号无权限")
+        dashboard_id = int(response.json().get("id"))
+        return {"superset_id": dashboard_id, "title": title.strip(), "published": published}
+
+    async def update_dashboard(
+        self, dashboard_id: int, title: str, published: bool
+    ) -> dict[str, object]:
+        response = await self._authorized_request(
+            "PUT", f"/api/v1/dashboard/{dashboard_id}",
+            json={"dashboard_title": title.strip(), "published": published},
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("仪表盘修改失败或无权操作")
+        return {"superset_id": dashboard_id, "title": title.strip(), "published": published}
+
+    async def copy_dashboard(
+        self, dashboard_id: int, title: str, duplicate_charts: bool
+    ) -> dict[str, object]:
+        response = await self._authorized_request(
+            "POST", f"/api/v1/dashboard/{dashboard_id}/copy/",
+            json={"dashboard_title": title.strip(), "json_metadata": "{}",
+                  "duplicate_slices": duplicate_charts},
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("仪表盘复制失败或无权操作")
+        body = response.json()
+        dashboard_id = (body.get("result") or {}).get("id") or body.get("id")
+        if not dashboard_id:
+            raise SupersetApiError("Superset 仪表盘复制响应无效")
+        return {"superset_id": int(dashboard_id), "title": title.strip()}
+
+    async def delete_dashboard(self, dashboard_id: int) -> None:
+        response = await self._authorized_request("DELETE", f"/api/v1/dashboard/{dashboard_id}")
+        if response.status_code >= 400:
+            raise SupersetApiError("仪表盘删除失败或无权操作")
+
+    async def create_chart(
+        self, title: str, dataset_id: int, dashboard_id: int, visualization_type: str
+    ) -> dict[str, object]:
+        viz_type = {"line": "echarts_timeseries_line", "bar": "echarts_timeseries_bar",
+                    "pie": "pie", "big_number": "big_number_total"}.get(
+                        visualization_type, "table"
+                    )
+        params = {"viz_type": viz_type, "datasource": f"{dataset_id}__table"}
+        response = await self._authorized_request(
+            "POST", "/api/v1/chart/",
+            json={"slice_name": title.strip(), "viz_type": viz_type,
+                  "datasource_id": dataset_id, "datasource_type": "table",
+                  "dashboards": [dashboard_id], "params": json.dumps(params)},
+        )
+        if response.status_code >= 400:
+            raise SupersetApiError("图表创建失败，请检查 Dataset、仪表盘和操作权限")
+        chart_id = int(response.json().get("id"))
+        return {"superset_id": chart_id, "title": title.strip(), "dashboard_id": dashboard_id,
+                "explore_path": f"/explore/?slice_id={chart_id}"}
+
     async def update_dataset(self, dataset_id: int, description: str) -> dict[str, object]:
         response = await self._authorized_request(
             "PUT", f"/api/v1/dataset/{dataset_id}", json={"description": description.strip()}
@@ -300,6 +363,15 @@ class SupersetClient:
                     raise SupersetApiError("Superset 登录响应无效")
                 headers = dict(kwargs.pop("headers", {}) or {})
                 headers["Authorization"] = f"Bearer {token}"
+                if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+                    csrf_response = await client.get(
+                        "/api/v1/security/csrf_token/", headers=headers
+                    )
+                    csrf_response.raise_for_status()
+                    csrf_token = csrf_response.json().get("result")
+                    if not csrf_token:
+                        raise SupersetApiError("Superset CSRF 安全令牌响应无效")
+                    headers["X-CSRFToken"] = str(csrf_token)
                 return await client.request(method, path, headers=headers, **kwargs)
         except SupersetApiError:
             raise

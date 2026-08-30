@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260829.7" in shell.text
-        assert "app.js?v=20260830.15" in shell.text
+        assert "app.js?v=20260830.16" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -234,6 +234,51 @@ def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
         selected = client.post("/api/v1/admin/superset/dashboards/7/home", headers=headers)
         assert selected.status_code == 200
         assert selected.json()["dashboard"]["is_home"] is True
+
+
+def test_admin_manages_real_superset_dashboards_and_charts() -> None:
+    class FakeSupersetClient:
+        async def create_dashboard(self, title, published):
+            return {"superset_id": 31, "title": title, "published": published}
+
+        async def update_dashboard(self, dashboard_id, title, published):
+            return {"superset_id": dashboard_id, "title": title, "published": published}
+
+        async def copy_dashboard(self, dashboard_id, title, duplicate_charts):
+            assert (dashboard_id, duplicate_charts) == (31, True)
+            return {"superset_id": 32, "title": title}
+
+        async def delete_dashboard(self, dashboard_id):
+            assert dashboard_id == 32
+
+        async def create_chart(self, title, dataset_id, dashboard_id, visualization_type):
+            assert (dataset_id, dashboard_id, visualization_type) == (21, 31, "bar")
+            return {"superset_id": 44, "title": title, "dashboard_id": dashboard_id,
+                    "explore_path": "/explore/?slice_id=44"}
+
+    app = create_app(settings())
+    app.state.superset_client = FakeSupersetClient()
+    with TestClient(app) as client:
+        admin = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        ).json()["user"]
+        headers = {"X-AgentBI-CSRF": admin["csrf_token"]}
+        created = client.post("/api/v1/admin/superset/dashboards", headers=headers,
+                              json={"title": "经营驾驶舱", "published": False})
+        assert created.status_code == 201
+        assert created.json()["dashboard"]["superset_id"] == 31
+        updated = client.put("/api/v1/admin/superset/dashboards/31", headers=headers,
+                             json={"title": "经营驾驶舱", "published": True})
+        assert updated.status_code == 200
+        copied = client.post("/api/v1/admin/superset/dashboards/31/copy", headers=headers,
+                             json={"title": "经营驾驶舱副本", "duplicate_charts": True})
+        assert copied.status_code == 201
+        chart = client.post("/api/v1/admin/superset/charts", headers=headers,
+                            json={"title": "销售趋势", "dataset_id": 21,
+                                  "dashboard_id": 31, "visualization_type": "bar"})
+        assert chart.status_code == 201
+        assert chart.json()["chart"]["superset_id"] == 44
+        assert client.delete("/api/v1/admin/superset/dashboards/32", headers=headers).status_code == 204
 
 
 def test_admin_reads_real_superset_data_assets_without_secrets() -> None:

@@ -201,6 +201,29 @@ class SupersetDatasetUpdatePayload(BaseModel):
     description: str = Field(default="", max_length=1000)
 
 
+class SupersetDashboardPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=500)
+    published: bool = False
+
+
+class SupersetDashboardCopyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=500)
+    duplicate_charts: bool = False
+
+
+class SupersetChartAuthoringPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=250)
+    dataset_id: int = Field(gt=0)
+    dashboard_id: int = Field(gt=0)
+    visualization_type: Literal["table", "bar", "line", "pie", "big_number"] = "table"
+
+
 class SemanticModelCreatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
@@ -711,6 +734,95 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "count": len(inventory),
             "message": "Superset 仪表盘同步完成",
         }
+
+    @app.post("/api/v1/admin/superset/dashboards", status_code=status.HTTP_201_CREATED)
+    async def create_superset_dashboard(
+        payload: SupersetDashboardPayload,
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dashboard = await app.state.superset_client.create_dashboard(
+                payload.title, payload.published
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_dashboard_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "",
+                       detail=str(dashboard["superset_id"]))
+        return {"dashboard": dashboard, "message": "Superset 仪表盘已创建"}
+
+    @app.put("/api/v1/admin/superset/dashboards/{superset_id}")
+    async def update_superset_dashboard(
+        superset_id: int,
+        payload: SupersetDashboardPayload,
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dashboard = await app.state.superset_client.update_dashboard(
+                superset_id, payload.title, payload.published
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_dashboard_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(superset_id))
+        return {"dashboard": dashboard, "message": "Superset 仪表盘已更新"}
+
+    @app.post("/api/v1/admin/superset/dashboards/{superset_id}/copy",
+              status_code=status.HTTP_201_CREATED)
+    async def copy_superset_dashboard(
+        superset_id: int,
+        payload: SupersetDashboardCopyPayload,
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            dashboard = await app.state.superset_client.copy_dashboard(
+                superset_id, payload.title, payload.duplicate_charts
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_dashboard_copied", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(superset_id))
+        return {"dashboard": dashboard, "message": "Superset 仪表盘已复制"}
+
+    @app.delete("/api/v1/admin/superset/dashboards/{superset_id}", status_code=204)
+    async def delete_superset_dashboard(
+        superset_id: int,
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            await app.state.superset_client.delete_dashboard(superset_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_dashboard_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(superset_id))
+        return Response(status_code=204)
+
+    @app.post("/api/v1/admin/superset/charts", status_code=status.HTTP_201_CREATED)
+    async def create_superset_chart(
+        payload: SupersetChartAuthoringPayload,
+        request: Request,
+        identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            chart = await app.state.superset_client.create_chart(
+                payload.title, payload.dataset_id, payload.dashboard_id,
+                payload.visualization_type,
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_chart_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "",
+                       detail=str(chart["superset_id"]))
+        return {"chart": chart, "message": "Superset 图表已创建"}
 
     @app.post("/api/v1/admin/superset/dashboards/{superset_id}/home")
     async def set_home_superset_dashboard(
