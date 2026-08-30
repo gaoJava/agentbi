@@ -1446,6 +1446,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                        detail=f"dashboard={dashboard_id},chart={chart_id}")
         return Response(status_code=204)
 
+    @app.put("/api/v1/admin/superset/dashboards/{dashboard_id}/charts/{chart_id}")
+    async def update_superset_chart_asset(
+        dashboard_id: int, chart_id: int, payload: SupersetChartAuthoringPayload,
+        request: Request, identity: SessionIdentity = dashboard_management_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        if payload.dashboard_id != dashboard_id:
+            raise HTTPException(status_code=422, detail="目标仪表盘与请求路径不一致")
+        try:
+            chart = await app.state.superset_client.update_chart(
+                chart_id, dashboard_id, payload.title, payload.dataset_id,
+                payload.visualization_type, payload.dimension, payload.metric_column,
+                payload.aggregation, payload.time_column,
+            )
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("superset_chart_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(chart_id))
+        return {"chart": chart, "message": "Superset 图表已更新"}
+
     @app.post("/api/v1/admin/semantic-models/{model_name}/sync")
     async def sync_semantic_model(
         model_name: str,

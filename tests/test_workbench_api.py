@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260830.24" in shell.text
+        assert "app.js?v=20260830.25" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -294,6 +294,14 @@ def test_admin_manages_real_superset_dashboards_and_charts() -> None:
         async def delete_chart(self, chart_id, dashboard_id):
             assert (chart_id, dashboard_id) == (44, 31)
 
+        async def update_chart(
+            self, chart_id, dashboard_id, title, dataset_id, visualization_type,
+            dimension, metric_column, aggregation, time_column,
+        ):
+            assert (chart_id, dashboard_id, dataset_id) == (44, 31, 21)
+            assert (dimension, metric_column, aggregation) == ("region", "revenue", "SUM")
+            return {"superset_id": chart_id, "dashboard_id": dashboard_id, "title": title}
+
     app = create_app(settings())
     app.state.superset_client = FakeSupersetClient()
     with TestClient(app) as client:
@@ -320,6 +328,15 @@ def test_admin_manages_real_superset_dashboards_and_charts() -> None:
         assert chart.json()["chart"]["superset_id"] == 44
         native = client.get("/api/v1/admin/superset/dashboards/31/native")
         assert native.status_code == 200
+        modified_chart = client.put(
+            "/api/v1/admin/superset/dashboards/31/charts/44", headers=headers,
+            json={"title": "销售趋势（更新）", "dataset_id": 21,
+                  "dashboard_id": 31, "visualization_type": "bar",
+                  "dimension": "region", "metric_column": "revenue",
+                  "aggregation": "SUM", "time_column": None},
+        )
+        assert modified_chart.status_code == 200
+        assert modified_chart.json()["chart"]["title"] == "销售趋势（更新）"
         deleted_chart = client.delete(
             "/api/v1/admin/superset/dashboards/31/charts/44", headers=headers
         )

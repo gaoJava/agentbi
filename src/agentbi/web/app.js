@@ -29,6 +29,7 @@ let editingSupersetDashboard;
 let supersetDashboardEditorMode = 'create';
 let pendingSupersetDashboardDelete;
 let managingSupersetDashboard;
+let editingSupersetChart;
 let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
@@ -807,7 +808,7 @@ async function openDashboardChartManager(dashboard) {
       const info = document.createElement('div'); const title = document.createElement('strong'); title.textContent = chart.title;
       const meta = document.createElement('small'); meta.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询可用' : '需要重新配置'}`;
       info.append(title, meta); const actions = document.createElement('div');
-      const ai = actionButton('AI 分析', '', () => { switchView('dashboard'); selectNativeChart(chart, dashboard.superset_id); });
+      const edit = actionButton('修改图表', '', () => openSupersetChartEditor(undefined, dashboard, chart));
       const remove = actionButton('删除图表', 'danger-action', async () => {
         if (!window.confirm(`确认永久删除图表“${chart.title}”吗？\n该操作会同步删除数据引擎中的图表资产。`)) return;
         remove.disabled = true;
@@ -819,7 +820,7 @@ async function openDashboardChartManager(dashboard) {
           await openDashboardChartManager(dashboard);
         } catch (error) { showManagementFeedback(error.message, true); remove.disabled = false; }
       });
-      actions.append(ai, remove); card.append(info, actions); return card;
+      actions.append(edit, remove); card.append(info, actions); return card;
     }));
   } catch (error) {
     body.innerHTML = ''; const message = document.createElement('div'); message.className = 'dashboard-chart-loading'; message.textContent = error.message; body.append(message);
@@ -917,6 +918,7 @@ async function confirmSupersetDashboardDelete() {
 function closeSupersetChartEditor() {
   document.querySelector('#superset-chart-editor').hidden = true;
   document.querySelector('#superset-chart-editor-error').hidden = true;
+  editingSupersetChart = undefined;
 }
 
 function updateSupersetChartPreview() {
@@ -1006,8 +1008,9 @@ async function loadSupersetChartFields() {
   }
 }
 
-async function openSupersetChartEditor(dataset, dashboard) {
+async function openSupersetChartEditor(dataset, dashboard, chart) {
   try {
+    editingSupersetChart = chart ? {chart, dashboard} : undefined;
     if (!loadedDataSources.length) {
       const assets = window.AgentBI.parseSupersetDataAssets(
         await request('/api/v1/admin/superset/data-assets'));
@@ -1022,9 +1025,28 @@ async function openSupersetChartEditor(dataset, dashboard) {
         .map(item => ({...item, id: item.superset_id})),
       item => item.title);
     document.querySelector('#superset-chart-editor-form').reset();
-    if (dataset) document.querySelector('#superset-chart-dataset').value = String(dataset.superset_id);
+    const configuration = chart?.configuration || {};
+    const selectedDatasetId = configuration.dataset_id || dataset?.superset_id;
+    if (selectedDatasetId) document.querySelector('#superset-chart-dataset').value = String(selectedDatasetId);
     if (dashboard) document.querySelector('#superset-chart-dashboard').value = String(dashboard.superset_id);
     await loadSupersetChartFields();
+    if (chart) {
+      const type = String(chart.visualization_type || 'table');
+      const chartType = type.includes('bar') ? 'bar' : type.includes('line') ? 'line'
+        : type.includes('big_number') ? 'big_number' : type === 'pie' ? 'pie' : 'table';
+      document.querySelector('#superset-chart-editor-title').textContent = `修改图表 · ${chart.title}`;
+      document.querySelector('#superset-chart-title').value = chart.title;
+      document.querySelector('#superset-chart-type').value = chartType;
+      if (configuration.dimension) document.querySelector('#superset-chart-dimension').value = configuration.dimension;
+      if (configuration.metric_column) document.querySelector('#superset-chart-metric-column').value = configuration.metric_column;
+      if (configuration.aggregation) document.querySelector('#superset-chart-aggregation').value = configuration.aggregation;
+      document.querySelector('#superset-chart-time-column').value = configuration.time_column || '';
+      document.querySelector('#superset-chart-dashboard').disabled = true;
+      updateSupersetChartPreview();
+    } else {
+      document.querySelector('#superset-chart-editor-title').textContent = '创建业务分析图表';
+      document.querySelector('#superset-chart-dashboard').disabled = false;
+    }
     document.querySelector('#superset-chart-editor-error').hidden = true;
     document.querySelector('#superset-chart-editor').hidden = false;
   } catch (error) { showManagementFeedback(error.message, true); }
@@ -1579,8 +1601,12 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
     const targetDashboardId = Number(document.querySelector('#superset-chart-dashboard').value);
     const targetDashboard = loadedSupersetDashboards.find(
       dashboard => dashboard.superset_id === targetDashboardId);
-    const body = await request('/api/v1/admin/superset/charts', {
-      method: 'POST', headers: {
+    const editing = editingSupersetChart;
+    const endpoint = editing
+      ? `/api/v1/admin/superset/dashboards/${editing.dashboard.superset_id}/charts/${editing.chart.superset_id}`
+      : '/api/v1/admin/superset/charts';
+    const body = await request(endpoint, {
+      method: editing ? 'PUT' : 'POST', headers: {
         'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token,
       },
       body: JSON.stringify({
@@ -1596,7 +1622,11 @@ document.querySelector('#superset-chart-editor-form').addEventListener('submit',
     });
     closeSupersetChartEditor();
     await refreshSupersetDashboardsAfterWrite(
-      `${body.chart.title} 已创建并加入 ${targetDashboard?.title || '目标仪表盘'}`);
+      `${body.chart.title} 已${editing ? '更新' : '创建并加入'} ${targetDashboard?.title || '目标仪表盘'}`);
+    if (editing) {
+      await openDashboardChartManager(editing.dashboard);
+      return;
+    }
     if (targetDashboard?.is_home) {
       switchView('dashboard');
       await loadSupersetWorkspace({ force: true });
