@@ -19,6 +19,7 @@ let activeSemanticDraft;
 let loadedDataSources = [];
 let semanticCatalogDatabases = [];
 let semanticCatalogDomains = [];
+let semanticEditingDomainId = null;
 let loadedRoles = [];
 let loadedPermissions = [];
 let loadedSupersetDashboards = [];
@@ -2769,15 +2770,9 @@ document.querySelector('#open-semantic-domain').addEventListener('click', () =>
 document.querySelector('#create-semantic-domain').addEventListener('click', () => openSemanticDomainEditor());
 
 function renderSemanticDomainEditor(selectedId = '') {
-  const select = document.querySelector('#semantic-domain-existing');
-  select.innerHTML = '<option value="">＋ 新建主题域</option>';
-  semanticCatalogDomains.forEach(item => {
-    const option = document.createElement('option');
-    option.value = String(item.id); option.textContent = `${item.name}（ID ${item.id}）`;
-    select.append(option);
-  });
-  select.value = selectedId ? String(selectedId) : '';
-  const selected = semanticCatalogDomains.find(item => item.id === Number(select.value));
+  semanticEditingDomainId = selectedId ? Number(selectedId) : null;
+  const selected = semanticCatalogDomains.find(item => item.id === semanticEditingDomainId);
+  document.querySelector('#semantic-domain-title').textContent = selected ? '修改主题域' : '新增主题域';
   document.querySelector('#semantic-domain-name').value = selected?.name || '';
   document.querySelector('#semantic-domain-biz-name').value = selected?.biz_name || '';
   document.querySelector('#semantic-domain-description').value = selected?.description || '';
@@ -2789,13 +2784,12 @@ function closeSemanticDomainEditor() {
   document.querySelector('#semantic-domain-editor').hidden = true;
 }
 
-document.querySelector('#semantic-domain-existing').addEventListener('change', event => renderSemanticDomainEditor(event.target.value));
 document.querySelector('#close-semantic-domain').addEventListener('click', closeSemanticDomainEditor);
 document.querySelector('#cancel-semantic-domain').addEventListener('click', closeSemanticDomainEditor);
 document.querySelector('#semantic-domain-form').addEventListener('submit', async event => {
   event.preventDefault();
   const error = document.querySelector('#semantic-domain-error');
-  const selectedId = document.querySelector('#semantic-domain-existing').value;
+  const selectedId = semanticEditingDomainId;
   const button = document.querySelector('#save-semantic-domain');
   error.hidden = true; button.disabled = true;
   try {
@@ -2844,8 +2838,7 @@ async function deleteSemanticDomain(selected) {
   }
 }
 document.querySelector('#delete-semantic-domain').addEventListener('click', () => {
-  const selectedId = document.querySelector('#semantic-domain-existing').value;
-  deleteSemanticDomain(semanticCatalogDomains.find(item => item.id === Number(selectedId)));
+  deleteSemanticDomain(semanticCatalogDomains.find(item => item.id === semanticEditingDomainId));
 });
 document.querySelector('#open-sonic-database').addEventListener('click', () => {
   document.querySelector('#sonic-database-error').hidden = true;
