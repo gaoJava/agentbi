@@ -820,6 +820,7 @@ async function loadModuleView(view) {
       renderSemanticDomainRows();
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
         model.id, model.name, model.domain_name,
+        '全局复用（未绑定）',
         `${model.database_name || '未知连接'}${model.database_id ? `（ID ${model.database_id}）` : ''}`,
         model.biz_name || '—',
         model.status === 'active' ? '● 已启用' : '● 已下线',
@@ -2776,6 +2777,7 @@ function renderSemanticDomainRows() {
     domain.name,
     domain.biz_name || '—',
     domain.description || '—',
+    '全局复用（未绑定）',
     loadedSemanticModels.filter(model => Number(model.domain_id) === Number(domain.id)).length,
   ], domain => {
     const group = document.createElement('div');
@@ -2789,7 +2791,7 @@ function renderSemanticDomainRows() {
     return group;
   });
   document.querySelectorAll('#semantic-domain-table-body tr').forEach(row => {
-    const countCell = row.children[4];
+    const countCell = row.children[5];
     const count = countCell.textContent;
     countCell.textContent = '';
     const badge = document.createElement('span');
