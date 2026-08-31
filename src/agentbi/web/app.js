@@ -735,7 +735,10 @@ function renderModuleRows(bodyId, items, valuesFor, actionFor) {
   body.replaceChildren(...items.map(item => {
     const row = document.createElement('tr');
     valuesFor(item).forEach(value => {
-      const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell);
+      const cell = document.createElement('td');
+      if (value instanceof Node) cell.append(value);
+      else cell.textContent = String(value);
+      row.append(cell);
     });
     if (actionFor) {
       const action = document.createElement('td'); action.append(actionFor(item)); row.append(action);
@@ -816,7 +819,9 @@ async function loadModuleView(view) {
       renderLlmProviderRows();
       renderSemanticDomainRows();
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
-        model.id, model.name, model.domain_name, model.biz_name || '—',
+        model.id, model.name, model.domain_name,
+        `${model.database_name || '未知连接'}${model.database_id ? `（ID ${model.database_id}）` : ''}`,
+        model.biz_name || '—',
         model.status === 'active' ? '● 已启用' : '● 已下线',
       ]);
     } else if (view === 'data-sources') {
@@ -855,8 +860,12 @@ async function loadModuleView(view) {
           String(source.name || '').trim().toLowerCase() === String(database.name || '').trim().toLowerCase() &&
           String(source.backend || '').trim().toLowerCase() === String(database.type || '').trim().toLowerCase()
         );
+        const linkedModels = database.model_names || [];
+        const relation = document.createElement('span');
+        relation.textContent = linkedModels.length ? `${linkedModels.length} 个 · ${linkedModels.join('、')}` : '暂无关联';
+        relation.title = linkedModels.length ? linkedModels.join('\n') : '当前没有语义模型使用该连接';
         return [database.name, database.type || '—', match?.name || '—',
-          match ? '● 已匹配' : '● 未匹配', database.model_count || 0, database.id];
+          match ? '● 已匹配' : '● 未匹配', relation, database.id];
       }, database => {
         const group = document.createElement('div'); group.className = 'registry-actions';
         const edit = actionButton('修改', '', () => openSonicDatabaseEditor(database));

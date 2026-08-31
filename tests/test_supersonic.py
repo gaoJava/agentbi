@@ -80,11 +80,15 @@ class SuperSonicClientTest(unittest.TestCase):
                     "code": 200,
                     "data": [{"id": 1, "name": "超音数", "viewers": ["private-user"]}],
                 })
+            if request.url.path.endswith("/getDatabaseList"):
+                return httpx.Response(200, json={
+                    "code": 200, "data": [{"id": 2, "name": "业务库", "password": "secret"}],
+                })
             return httpx.Response(200, json={
                 "code": 200,
                 "data": [{
                     "id": 3, "name": "停留时长统计", "bizName": "stay_time",
-                    "description": "受治理模型", "status": 1,
+                    "description": "受治理模型", "status": 1, "databaseId": 2,
                     "modelDetail": {"sqlQuery": "SELECT secret"},
                     "viewers": ["private-user"],
                 }],
@@ -98,6 +102,7 @@ class SuperSonicClientTest(unittest.TestCase):
             "id": 3, "key": "supersonic:3", "name": "停留时长统计",
             "biz_name": "stay_time", "description": "受治理模型",
             "domain_id": 1, "domain_name": "超音数", "status": "active",
+            "database_id": 2, "database_name": "业务库",
         }])
         self.assertNotIn("sql", str(models).lower())
         self.assertNotIn("private-user", str(models))

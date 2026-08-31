@@ -92,8 +92,16 @@ class SuperSonicClient:
         """Return a sanitized inventory of live SuperSonic semantic models."""
 
         domains = await self._request_data("GET", "/api/semantic/schema/domain/list")
+        databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
         if not isinstance(domains, list):
             raise UpstreamError("SuperSonic returned an invalid domain inventory")
+        database_names = {
+            item["id"]: str(item.get("name") or item["id"])[:128]
+            for item in databases
+            if isinstance(databases, list)
+            and isinstance(item, dict)
+            and isinstance(item.get("id"), int)
+        }
         inventory: list[dict[str, Any]] = []
         for domain in domains[:100]:
             if not isinstance(domain, dict) or not isinstance(domain.get("id"), int):
@@ -116,6 +124,8 @@ class SuperSonicClient:
                         "description": str(model.get("description") or "")[:512],
                         "domain_id": domain_id,
                         "domain_name": str(domain.get("name") or domain_id)[:128],
+                        "database_id": model.get("databaseId"),
+                        "database_name": database_names.get(model.get("databaseId"), "未知连接"),
                         "status": "active" if model.get("status") == 1 else "offline",
                     }
                 )
@@ -128,7 +138,7 @@ class SuperSonicClient:
         databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
         if not isinstance(domains, list) or not isinstance(databases, list):
             raise UpstreamError("SuperSonic returned an invalid modeling catalog")
-        model_counts: dict[int, int] = {}
+        model_names: dict[int, list[str]] = {}
         for domain in domains[:100]:
             if not isinstance(domain, dict) or not isinstance(domain.get("id"), int):
                 continue
@@ -142,7 +152,9 @@ class SuperSonicClient:
                     continue
                 database_id = model.get("databaseId")
                 if isinstance(database_id, int):
-                    model_counts[database_id] = model_counts.get(database_id, 0) + 1
+                    model_names.setdefault(database_id, []).append(
+                        str(model.get("name") or model.get("bizName") or model.get("id"))[:128]
+                    )
         return {
             "domains": [
                 {
@@ -164,7 +176,8 @@ class SuperSonicClient:
                     "database": str(item.get("database") or "")[:250],
                     "username": str(item.get("username") or "")[:250],
                     "description": str(item.get("description") or "")[:512],
-                    "model_count": model_counts.get(item["id"], 0),
+                    "model_count": len(model_names.get(item["id"], [])),
+                    "model_names": model_names.get(item["id"], []),
                     "editable": bool(item.get("hasEditPermission")) and item.get("type") != "h2",
                 }
                 for item in databases[:100]
