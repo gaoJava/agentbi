@@ -128,6 +128,21 @@ class SuperSonicClient:
         databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
         if not isinstance(domains, list) or not isinstance(databases, list):
             raise UpstreamError("SuperSonic returned an invalid modeling catalog")
+        model_counts: dict[int, int] = {}
+        for domain in domains[:100]:
+            if not isinstance(domain, dict) or not isinstance(domain.get("id"), int):
+                continue
+            models = await self._request_data(
+                "GET", f"/api/semantic/model/getModelList/{domain['id']}"
+            )
+            if not isinstance(models, list):
+                continue
+            for model in models:
+                if not isinstance(model, dict):
+                    continue
+                database_id = model.get("databaseId")
+                if isinstance(database_id, int):
+                    model_counts[database_id] = model_counts.get(database_id, 0) + 1
         return {
             "domains": [
                 {
@@ -144,6 +159,13 @@ class SuperSonicClient:
                     "id": item["id"],
                     "name": str(item.get("name") or item["id"])[:128],
                     "type": str(item.get("type") or "")[:64],
+                    "host": str(item.get("host") or "")[:253],
+                    "port": str(item.get("port") or "")[:16],
+                    "database": str(item.get("database") or "")[:250],
+                    "username": str(item.get("username") or "")[:250],
+                    "description": str(item.get("description") or "")[:512],
+                    "model_count": model_counts.get(item["id"], 0),
+                    "editable": bool(item.get("hasEditPermission")) and item.get("type") != "h2",
                 }
                 for item in databases[:100]
                 if isinstance(item, dict) and isinstance(item.get("id"), int)
@@ -218,7 +240,9 @@ class SuperSonicClient:
             raise UpstreamError("SuperSonic returned invalid table metadata")
         return {str(item["name"]) for item in rows if isinstance(item, dict) and item.get("name")}
 
-    async def create_database(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def create_database(
+        self, payload: dict[str, Any], database_id: int | None = None
+    ) -> dict[str, Any]:
         """Test a one-shot secret, then create the connection; never return credentials."""
 
         connected = await self._request_data(
@@ -234,7 +258,10 @@ class SuperSonicClient:
         databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
         if not isinstance(databases, list):
             raise UpstreamError("SuperSonic returned invalid database inventory")
-        existing = self._matching_database(databases, payload)
+        existing = next(
+            (item for item in databases if isinstance(item, dict) and item.get("id") == database_id),
+            None,
+        ) if database_id is not None else self._matching_database(databases, payload)
         saved_payload = dict(payload)
         if existing is not None:
             saved_payload["id"] = existing["id"]
@@ -259,6 +286,22 @@ class SuperSonicClient:
             "name": str(created.get("name") or payload["name"])[:128],
             "type": str(created.get("type") or payload["type"])[:64],
         }
+
+    async def delete_database(self, database_id: int) -> None:
+        databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
+        if not isinstance(databases, list):
+            raise UpstreamError("SuperSonic returned invalid database inventory")
+        target = next(
+            (item for item in databases if isinstance(item, dict) and item.get("id") == database_id),
+            None,
+        )
+        if target is None:
+            raise UpstreamError("SuperSonic database does not exist")
+        if target.get("type") == "h2":
+            raise UpstreamError("SuperSonic built-in database cannot be deleted")
+        deleted = await self._request_data("DELETE", f"/api/semantic/database/{database_id}")
+        if deleted is not True:
+            raise UpstreamError("SuperSonic rejected database deletion")
 
     @staticmethod
     def _matching_database(

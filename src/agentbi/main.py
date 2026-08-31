@@ -1210,6 +1210,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"database": database, "message": "同源连接已保存到 SuperSonic"}
 
+    @app.put("/api/v1/admin/semantic-drafts/databases/{database_id}")
+    async def update_supersonic_database(
+        database_id: int,
+        payload: SuperSonicDatabasePayload,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        upstream = payload.model_dump()
+        upstream["type"] = "mysql" if upstream.pop("engine") == "doris" else payload.engine
+        upstream["port"] = str(upstream["port"])
+        upstream["admins"] = [identity.username]
+        upstream["viewers"] = [identity.username]
+        try:
+            database = await app.state.supersonic_client.create_database(upstream, database_id)
+        except UpstreamError as exc:
+            raise HTTPException(status_code=422, detail="同源连接修改失败，请检查连接信息") from exc
+        sessions.audit("supersonic_database_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(database_id))
+        return {"database": database, "message": "SuperSonic 同源连接已更新"}
+
+    @app.delete(
+        "/api/v1/admin/semantic-drafts/databases/{database_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def delete_supersonic_database(
+        database_id: int,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            await app.state.supersonic_client.delete_database(database_id)
+        except UpstreamError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="该连接为内置数据库或仍被语义模型引用，不能删除",
+            ) from exc
+        sessions.audit("supersonic_database_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(database_id))
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.post("/api/v1/admin/semantic-drafts/generate")
     async def generate_semantic_draft(
         payload: SemanticDraftRequest,

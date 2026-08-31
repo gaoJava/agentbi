@@ -18,6 +18,7 @@ let loadedLiveSemanticModels = [];
 let activeSemanticDraft;
 let loadedDataSources = [];
 let semanticCatalogDatabases = [];
+let editingSonicDatabaseId;
 let semanticCatalogDomains = [];
 let semanticEditingDomainId = null;
 let loadedRoles = [];
@@ -854,7 +855,18 @@ async function loadModuleView(view) {
           String(source.name || '').trim().toLowerCase() === String(database.name || '').trim().toLowerCase() &&
           String(source.backend || '').trim().toLowerCase() === String(database.type || '').trim().toLowerCase()
         );
-        return [database.name, database.type || '—', match?.name || '—', match ? '● 已匹配' : '● 未匹配', database.id];
+        return [database.name, database.type || '—', match?.name || '—',
+          match ? '● 已匹配' : '● 未匹配', database.model_count || 0, database.id];
+      }, database => {
+        const group = document.createElement('div'); group.className = 'registry-actions';
+        const edit = actionButton('修改', '', () => openSonicDatabaseEditor(database));
+        edit.disabled = !database.editable;
+        if (edit.disabled) edit.title = '内置数据库不在 AgentBI 中修改';
+        const remove = actionButton('删除', 'danger-action', () => deleteSonicDatabase(database));
+        remove.disabled = !database.editable || database.model_count > 0;
+        if (remove.disabled) remove.title = database.model_count > 0
+          ? `仍被 ${database.model_count} 个语义模型引用，不能删除` : '内置数据库不能删除';
+        group.append(edit, remove); return group;
       });
       renderModuleRows('data-source-table-body', loadedDataSources, dataset => [
         dataset.name, dataset.database_name, dataset.schema,
@@ -2852,12 +2864,41 @@ document.querySelector('#delete-semantic-domain').addEventListener('click', () =
   deleteSemanticDomain(semanticCatalogDomains.find(item => item.id === semanticEditingDomainId));
 });
 document.querySelector('#open-sonic-database').addEventListener('click', () => {
+  openSonicDatabaseEditor();
+});
+function openSonicDatabaseEditor(database) {
+  editingSonicDatabaseId = database?.id;
+  const form = document.querySelector('#sonic-database-form');
+  form.reset();
+  document.querySelector('#sonic-db-port').value = '5432';
+  document.querySelector('#sonic-database-title').textContent = database
+    ? `修改同源连接 · ${database.name}` : '配置 SuperSonic 同源连接';
+  if (database) {
+    document.querySelector('#sonic-db-name').value = database.name || '';
+    document.querySelector('#sonic-db-engine').value = database.type === 'mysql' ? 'mysql' : database.type;
+    document.querySelector('#sonic-db-host').value = database.host || '';
+    document.querySelector('#sonic-db-port').value = database.port || (database.type === 'postgresql' ? '5432' : '3306');
+    document.querySelector('#sonic-db-database').value = database.database || '';
+    document.querySelector('#sonic-db-username').value = database.username || '';
+  }
   document.querySelector('#sonic-database-error').hidden = true;
   document.querySelector('#sonic-database-editor').hidden = false;
-});
+  document.querySelector('#sonic-db-password').focus();
+}
 function closeSonicDatabaseEditor() {
+  editingSonicDatabaseId = undefined;
   document.querySelector('#sonic-db-password').value = '';
   document.querySelector('#sonic-database-editor').hidden = true;
+}
+async function deleteSonicDatabase(database) {
+  if (!window.confirm(`确定删除 SuperSonic 同源连接“${database.name}”吗？\n只删除 SuperSonic 中的连接，不会删除 Superset 数据库或业务数据。`)) return;
+  try {
+    await request(`/api/v1/admin/semantic-drafts/databases/${database.id}`, {
+      method: 'DELETE', headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+    });
+    await loadModuleView('data-sources');
+    showManagementFeedback(`${database.name} 已从 SuperSonic 删除`);
+  } catch (cause) { showManagementFeedback(cause.message, true); }
 }
 document.querySelector('#close-sonic-database').addEventListener('click', closeSonicDatabaseEditor);
 document.querySelector('#cancel-sonic-database').addEventListener('click', closeSonicDatabaseEditor);
@@ -2879,8 +2920,11 @@ document.querySelector('#sonic-database-form').addEventListener('submit', async 
       username: document.querySelector('#sonic-db-username').value.trim(),
       password: document.querySelector('#sonic-db-password').value,
     };
-    const body = await request('/api/v1/admin/semantic-drafts/databases', {
-      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+    const databaseId = editingSonicDatabaseId;
+    const body = await request(databaseId
+      ? `/api/v1/admin/semantic-drafts/databases/${databaseId}`
+      : '/api/v1/admin/semantic-drafts/databases', {
+      method: databaseId ? 'PUT' : 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
       body: JSON.stringify(payload),
     });
     closeSonicDatabaseEditor();
@@ -2892,6 +2936,7 @@ document.querySelector('#sonic-database-form').addEventListener('submit', async 
     if (!document.querySelector('#semantic-draft-database').value) {
       document.querySelector('#semantic-draft-database').value = String(body.database.id);
     }
+    await loadModuleView('data-sources');
     showManagementFeedback(`${body.database.name} 已通过测试并保存到 SuperSonic`);
   } catch (cause) {
     error.textContent = cause.message; error.hidden = false;
