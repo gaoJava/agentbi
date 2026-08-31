@@ -27,7 +27,8 @@ class SemanticDraftLlm:
         )
         self._client = httpx.AsyncClient(
             transport=transport,
-            timeout=settings.request_timeout_seconds,
+            # Reasoning models can legitimately need longer than BI metadata APIs.
+            timeout=max(settings.request_timeout_seconds, 120),
             trust_env=False,
         )
 
@@ -125,22 +126,27 @@ class SemanticDraftLlm:
             },
             {"role": "user", "content": json.dumps(schema, ensure_ascii=False)},
         ]
+        completion_payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            # Some OpenAI-compatible providers (including Zhipu) reject zero.
+            "temperature": 0.1,
+            "max_tokens": 4096,
+            "response_format": {"type": "json_object"},
+        }
         try:
             response = await self._client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model,
-                    "messages": messages,
-                    # Some OpenAI-compatible providers (including Zhipu) reject zero.
-                    "temperature": 0.1,
-                    "response_format": {"type": "json_object"},
-                },
+                json=completion_payload,
             )
             if response.is_error:
                 raise self._provider_error(response)
             body = response.json()
-            content = body["choices"][0]["message"]["content"]
+            message = body["choices"][0]["message"]
+            content = message.get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise SemanticLlmError("模型未返回最终 JSON 内容，请检查输出额度或深度思考设置")
             result = self._parse_json_content(content)
         except SemanticLlmError:
             raise
