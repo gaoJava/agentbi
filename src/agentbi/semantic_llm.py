@@ -65,6 +65,7 @@ class SemanticDraftLlm:
             }
             if self._supports_thinking_control(base_url, model):
                 payload["thinking"] = {"type": "disabled"}
+                payload.pop("temperature", None)
             response = await self._client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -141,6 +142,7 @@ class SemanticDraftLlm:
             # GLM-5 defaults to deep thinking, which can exhaust the output budget before
             # emitting the requested JSON. Structured metadata extraction does not need it.
             completion_payload["thinking"] = {"type": "disabled"}
+            completion_payload.pop("temperature", None)
         try:
             response = await self._client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
