@@ -20,6 +20,7 @@ let loadedDataSources = [];
 let loadedRoles = [];
 let loadedPermissions = [];
 let loadedSupersetDashboards = [];
+let supersetHomeSnapshot;
 let loadedSupersetDatabases = [];
 let loadedLlmProviders = [];
 let editingLlmProviderId;
@@ -325,6 +326,8 @@ async function loadSupersetWorkspace({ force = false } = {}) {
     document.querySelector('#superset-loading').hidden = true; document.querySelector('#superset-unavailable').hidden = true;
     document.querySelector('#superset-frame').hidden = true; document.querySelector('#superset-mode-label').textContent = '原生模式 · 真实查询';
     renderNativeDashboard(native.dashboard); document.querySelector('#agent-dashboard-name').textContent = native.dashboard.title || '经营总览';
+    supersetHomeSnapshot = native.dashboard;
+    renderSupersetAssetSummary();
     supersetWorkspaceDirty = false;
   } catch (error) {
     showSupersetUnavailable(error.message);
@@ -849,8 +852,6 @@ function renderManagedDashboardCharts() {
 }
 
 function renderChartManagement() {
-  document.querySelector('#dynamic-chart-total').textContent = String(managedCharts.length);
-  document.querySelector('#managed-drill-total').textContent = '0';
   const body = document.querySelector('#managed-chart-table-body');
   const typeLabels = { bar: '柱状图', line: '折线图', donut: '环图', table: '指标表格' };
   body.replaceChildren(...managedCharts.map(chart => {
@@ -877,8 +878,44 @@ function renderChartManagement() {
   }));
 }
 
+function renderSupersetAssetSummary() {
+  const home = loadedSupersetDashboards.find(dashboard => dashboard.is_home);
+  const available = loadedSupersetDashboards.filter(dashboard => dashboard.available).length;
+  const charts = home && Number(supersetHomeSnapshot?.superset_id) === Number(home.superset_id)
+    ? (supersetHomeSnapshot.charts || []) : undefined;
+  const ready = charts?.filter(chart => chart.status === 'ready').length;
+  document.querySelector('#superset-summary-dashboard-total').textContent = String(loadedSupersetDashboards.length);
+  document.querySelector('#superset-summary-dashboard-note').textContent =
+    `${available} 个可访问 · 来自 Superset`;
+  document.querySelector('#superset-summary-home-chart-total').textContent = home ? String(home.chart_count) : '—';
+  document.querySelector('#superset-summary-home-chart-note').textContent = home
+    ? `${home.title} · Dashboard ${home.superset_id}` : '尚未设置经营总览';
+  document.querySelector('#superset-summary-ready-total').textContent = ready === undefined ? '—' : String(ready);
+  document.querySelector('#superset-summary-ready-note').textContent = charts
+    ? `共 ${charts.length} 张图表已执行真实查询` : '等待验证经营总览查询';
+  const connection = document.querySelector('#superset-summary-connection');
+  const connected = loadedSupersetDashboards.length > 0 && available > 0;
+  connection.textContent = connected ? '正常' : '不可用';
+  connection.classList.toggle('healthy-number', connected);
+  document.querySelector('#superset-summary-connection-note').textContent = connected
+    ? `${available}/${loadedSupersetDashboards.length} 个仪表盘可访问` : '请检查 Superset 服务与账号配置';
+}
+
+async function loadSupersetHomeSummary() {
+  const home = loadedSupersetDashboards.find(dashboard => dashboard.is_home && dashboard.available);
+  if (!home) { supersetHomeSnapshot = undefined; renderSupersetAssetSummary(); return; }
+  try {
+    const response = await request(`/api/v1/admin/superset/dashboards/${home.superset_id}/native`);
+    supersetHomeSnapshot = response.dashboard;
+  } catch {
+    supersetHomeSnapshot = undefined;
+  }
+  renderSupersetAssetSummary();
+}
+
 function renderSupersetDashboardAssets() {
   document.querySelector('#superset-dashboard-total').textContent = `${loadedSupersetDashboards.length} 个仪表盘`;
+  renderSupersetAssetSummary();
   const body = document.querySelector('#superset-dashboard-table-body');
   if (!loadedSupersetDashboards.length) {
     const row = document.createElement('tr');
@@ -928,6 +965,10 @@ async function openDashboardChartManager(dashboard) {
   section.hidden = false; section.scrollIntoView({behavior: 'smooth', block: 'start'});
   try {
     const response = await request(`/api/v1/admin/superset/dashboards/${dashboard.superset_id}/native`);
+    if (dashboard.is_home) {
+      supersetHomeSnapshot = response.dashboard;
+      renderSupersetAssetSummary();
+    }
     const charts = response.dashboard?.charts || [];
     if (!charts.length) {
       body.innerHTML = '<div class="dashboard-chart-loading">当前仪表盘还没有图表，可点击上方“添加图表”。</div>';
@@ -1000,7 +1041,9 @@ async function refreshSupersetDashboardsAfterWrite(message) {
     method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
   });
   loadedSupersetDashboards = body.dashboards || [];
+  supersetHomeSnapshot = undefined;
   renderSupersetDashboardAssets();
+  await loadSupersetHomeSummary();
   supersetWorkspace = undefined;
   supersetWorkspaceDirty = true;
   window.AgentBI.supersetWorkspace.clear();
@@ -1195,6 +1238,7 @@ async function loadSupersetDashboardAssets() {
   const body = await request('/api/v1/admin/superset/dashboards');
   loadedSupersetDashboards = body.dashboards || [];
   renderSupersetDashboardAssets();
+  await loadSupersetHomeSummary();
 }
 
 function actionButton(label, className, handler) {
@@ -1784,7 +1828,9 @@ document.querySelector('#sync-superset-dashboards').addEventListener('click', as
       method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
     });
     loadedSupersetDashboards = body.dashboards || [];
+    supersetHomeSnapshot = undefined;
     renderSupersetDashboardAssets();
+    await loadSupersetHomeSummary();
     supersetWorkspace = undefined;
     supersetWorkspaceDirty = true;
     window.AgentBI.supersetWorkspace.clear();

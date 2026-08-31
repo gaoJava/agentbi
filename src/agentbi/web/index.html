@@ -158,10 +158,10 @@
             <div id="dashboard-chart-manager-body" class="dashboard-chart-manager-grid"></div>
           </section>
           <section class="registry-summary">
-            <article><span>内置模拟图表</span><strong>0</strong><small>模拟资产已全部停用</small></article>
-            <article><span>新增图表</span><strong id="dynamic-chart-total">0</strong><small>保存在 AgentBI 数据库</small></article>
-            <article><span>真实下钻可用</span><strong id="managed-drill-total">0</strong><small>真实查询验证后开放</small></article>
-            <article><span>数据连接</span><strong class="healthy-number">正常</strong><small>本地 SQLite 已连接</small></article>
+            <article><span>Superset 仪表盘</span><strong id="superset-summary-dashboard-total">—</strong><small id="superset-summary-dashboard-note">正在同步真实资产</small></article>
+            <article><span>当前总览图表</span><strong id="superset-summary-home-chart-total">—</strong><small id="superset-summary-home-chart-note">以经营总览为准</small></article>
+            <article><span>真实查询可用</span><strong id="superset-summary-ready-total">—</strong><small id="superset-summary-ready-note">正在验证图表查询</small></article>
+            <article><span>Superset 连接</span><strong id="superset-summary-connection">检测中</strong><small id="superset-summary-connection-note">正在读取服务状态</small></article>
           </section>
           <section class="registry-table-card">
             <header><div><strong>AgentBI 下钻配置</strong><small>为图表声明语义模型和维度路径，不替代 Superset 绘图</small></div><span class="registry-version">数据库管理</span></header>
@@ -416,6 +416,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260831.3" defer></script>
+  <script src="/app/assets/app.js?v=20260831.4" defer></script>
 </body>
 </html>
