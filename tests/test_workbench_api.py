@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260831.7" in shell.text
+        assert "app.js?v=20260831.9" in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
         runtime = client.get("/app/assets/generated/workbench-runtime.js")
         assert runtime.status_code == 200
@@ -1017,6 +1017,55 @@ def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
         assert publish.status_code == 201
         assert sonic.published["modelDetail"]["tableQuery"] == "public.sales_orders"
         assert sonic.published["modelDetail"]["measures"][0]["bizName"] == "revenue"
+
+
+def test_admin_manages_real_supersonic_domains_with_reference_guard() -> None:
+    class FakeSuperSonicClient:
+        domains = [{"id": 1, "name": "销售域", "biz_name": "sales", "description": ""}]
+
+        async def list_modeling_catalog(self):
+            return {"domains": self.domains, "databases": []}
+
+        async def save_domain(self, **payload):
+            domain_id = payload.get("domain_id") or 2
+            item = {
+                "id": domain_id,
+                "name": payload["name"],
+                "biz_name": payload["biz_name"],
+                "description": payload["description"],
+            }
+            self.domains = [entry for entry in self.domains if entry["id"] != domain_id] + [item]
+            return item
+
+        async def list_semantic_models(self):
+            return []
+
+        async def delete_domain(self, domain_id):
+            self.domains = [entry for entry in self.domains if entry["id"] != domain_id]
+
+    app = create_app(settings())
+    app.state.supersonic_client = FakeSuperSonicClient()
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
+        headers = {"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]}
+        created = client.post(
+            "/api/v1/admin/semantic-drafts/domains",
+            headers=headers,
+            json={"name": "游戏销售域", "biz_name": "game_sales", "description": "游戏分析"},
+        )
+        assert created.status_code == 201
+        assert created.json()["domain"]["id"] == 2
+        updated = client.put(
+            "/api/v1/admin/semantic-drafts/domains/2",
+            headers=headers,
+            json={"name": "游戏经营域", "biz_name": "game_ops", "description": "经营分析"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["domain"]["name"] == "游戏经营域"
+        deleted = client.delete("/api/v1/admin/semantic-drafts/domains/2", headers=headers)
+        assert deleted.status_code == 204
 
 
 def test_admin_creates_supersonic_database_without_echoing_secret() -> None:

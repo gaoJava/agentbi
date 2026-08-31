@@ -17,6 +17,8 @@ let loadedSemanticModels = [];
 let loadedLiveSemanticModels = [];
 let activeSemanticDraft;
 let loadedDataSources = [];
+let semanticCatalogDatabases = [];
+let semanticCatalogDomains = [];
 let loadedRoles = [];
 let loadedPermissions = [];
 let loadedSupersetDashboards = [];
@@ -454,6 +456,9 @@ async function openSemanticDraftEditor() {
     ]);
     const assets = window.AgentBI.parseSupersetDataAssets(assetsBody);
     loadedDataSources = assets.datasets;
+    loadedSupersetDatabases = assets.databases;
+    semanticCatalogDatabases = catalog.databases || [];
+    semanticCatalogDomains = catalog.domains || [];
     fillSelect(document.querySelector('#semantic-draft-dataset'),
       loadedDataSources.map(item => ({...item, id: item.superset_id})),
       item => `${item.name}（${item.database_name} · ID ${item.superset_id}）`);
@@ -467,9 +472,9 @@ async function openSemanticDraftEditor() {
       providerSelect.append(option);
     });
     providerSelect.value = provider.active_id ? String(provider.active_id) : '';
-    fillSelect(document.querySelector('#semantic-draft-domain'), catalog.domains || [],
+    fillSelect(document.querySelector('#semantic-draft-domain'), semanticCatalogDomains,
       item => `${item.name}（ID ${item.id}）`);
-    fillSelect(document.querySelector('#semantic-draft-database'), catalog.databases || [],
+    fillSelect(document.querySelector('#semantic-draft-database'), semanticCatalogDatabases,
       item => `${item.name}${item.type ? ` · ${item.type}` : ''}（ID ${item.id}）`);
     if (!loadedDataSources.length || !(catalog.domains || []).length || !(catalog.databases || []).length) {
       throw new Error('建模前至少需要一个 Superset Dataset、SuperSonic 主题域和数据库连接');
@@ -482,9 +487,29 @@ async function openSemanticDraftEditor() {
     };
     providerSelect.onchange = updateProviderNote;
     updateProviderNote();
+    syncSemanticDatabaseSelection();
   } catch (cause) {
     error.textContent = cause.message; error.hidden = false;
   }
+}
+
+function syncSemanticDatabaseSelection() {
+  const datasetSelect = document.querySelector('#semantic-draft-dataset');
+  const databaseSelect = document.querySelector('#semantic-draft-database');
+  const note = document.querySelector('#semantic-database-match');
+  const dataset = loadedDataSources.find(item => item.superset_id === Number(datasetSelect.value));
+  const source = loadedSupersetDatabases.find(item => item.superset_id === dataset?.database_id);
+  const sourceName = String(dataset?.database_name || '').trim().toLowerCase();
+  const sourceType = String(source?.backend || '').trim().toLowerCase();
+  const match = semanticCatalogDatabases.find(item =>
+    String(item.name || '').trim().toLowerCase() === sourceName &&
+    String(item.type || '').trim().toLowerCase() === sourceType
+  );
+  databaseSelect.value = match ? String(match.id) : '';
+  note.classList.toggle('match-ok', Boolean(match));
+  note.textContent = match
+    ? `已匹配同源连接：${match.name} · ${match.type}`
+    : `未找到与 Superset「${dataset?.database_name || '未知来源'} · ${source?.backend || '未知类型'}」对应的 SuperSonic 连接，请先配置同源连接。`;
 }
 
 function closeSemanticDraftEditor() {
@@ -2700,6 +2725,87 @@ document.querySelector('#open-semantic-draft').addEventListener('click', openSem
 document.querySelector('#close-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
 document.querySelector('#cancel-semantic-draft').addEventListener('click', closeSemanticDraftEditor);
 document.querySelector('#generate-semantic-draft').addEventListener('click', generateSemanticDraft);
+document.querySelector('#semantic-draft-dataset').addEventListener('change', syncSemanticDatabaseSelection);
+document.querySelector('#open-semantic-domain').addEventListener('click', () => {
+  document.querySelector('#semantic-domain-error').hidden = true;
+  renderSemanticDomainEditor(document.querySelector('#semantic-draft-domain').value);
+  document.querySelector('#semantic-domain-editor').hidden = false;
+});
+
+function renderSemanticDomainEditor(selectedId = '') {
+  const select = document.querySelector('#semantic-domain-existing');
+  select.innerHTML = '<option value="">＋ 新建主题域</option>';
+  semanticCatalogDomains.forEach(item => {
+    const option = document.createElement('option');
+    option.value = String(item.id); option.textContent = `${item.name}（ID ${item.id}）`;
+    select.append(option);
+  });
+  select.value = selectedId ? String(selectedId) : '';
+  const selected = semanticCatalogDomains.find(item => item.id === Number(select.value));
+  document.querySelector('#semantic-domain-name').value = selected?.name || '';
+  document.querySelector('#semantic-domain-biz-name').value = selected?.biz_name || '';
+  document.querySelector('#semantic-domain-description').value = selected?.description || '';
+  document.querySelector('#delete-semantic-domain').hidden = !selected;
+  document.querySelector('#save-semantic-domain').textContent = selected ? '保存修改' : '创建主题域';
+}
+
+function closeSemanticDomainEditor() {
+  document.querySelector('#semantic-domain-editor').hidden = true;
+}
+
+document.querySelector('#semantic-domain-existing').addEventListener('change', event => renderSemanticDomainEditor(event.target.value));
+document.querySelector('#close-semantic-domain').addEventListener('click', closeSemanticDomainEditor);
+document.querySelector('#cancel-semantic-domain').addEventListener('click', closeSemanticDomainEditor);
+document.querySelector('#semantic-domain-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const error = document.querySelector('#semantic-domain-error');
+  const selectedId = document.querySelector('#semantic-domain-existing').value;
+  const button = document.querySelector('#save-semantic-domain');
+  error.hidden = true; button.disabled = true;
+  try {
+    const payload = {
+      name: document.querySelector('#semantic-domain-name').value.trim(),
+      biz_name: document.querySelector('#semantic-domain-biz-name').value.trim(),
+      description: document.querySelector('#semantic-domain-description').value.trim(),
+    };
+    const body = await request(`/api/v1/admin/semantic-drafts/domains${selectedId ? `/${selectedId}` : ''}`, {
+      method: selectedId ? 'PUT' : 'POST',
+      headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify(payload),
+    });
+    const catalog = await request('/api/v1/admin/semantic-drafts/catalog');
+    semanticCatalogDomains = catalog.domains || [];
+    fillSelect(document.querySelector('#semantic-draft-domain'), semanticCatalogDomains,
+      item => `${item.name}（ID ${item.id}）`);
+    document.querySelector('#semantic-draft-domain').value = String(body.domain.id);
+    closeSemanticDomainEditor();
+    showManagementFeedback(`${body.domain.name} 已保存到 SuperSonic 主题域`);
+  } catch (cause) {
+    error.textContent = cause.message; error.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+document.querySelector('#delete-semantic-domain').addEventListener('click', async () => {
+  const selectedId = document.querySelector('#semantic-domain-existing').value;
+  const selected = semanticCatalogDomains.find(item => item.id === Number(selectedId));
+  if (!selected || !window.confirm(`确定删除主题域“${selected.name}”吗？已有语义模型引用时系统会拒绝删除。`)) return;
+  const error = document.querySelector('#semantic-domain-error');
+  error.hidden = true;
+  try {
+    await request(`/api/v1/admin/semantic-drafts/domains/${selectedId}`, {
+      method: 'DELETE', headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+    });
+    const catalog = await request('/api/v1/admin/semantic-drafts/catalog');
+    semanticCatalogDomains = catalog.domains || [];
+    fillSelect(document.querySelector('#semantic-draft-domain'), semanticCatalogDomains,
+      item => `${item.name}（ID ${item.id}）`);
+    closeSemanticDomainEditor();
+    showManagementFeedback(`${selected.name} 已删除`);
+  } catch (cause) {
+    error.textContent = cause.message; error.hidden = false;
+  }
+});
 document.querySelector('#open-sonic-database').addEventListener('click', () => {
   document.querySelector('#sonic-database-error').hidden = true;
   document.querySelector('#sonic-database-editor').hidden = false;
@@ -2734,9 +2840,13 @@ document.querySelector('#sonic-database-form').addEventListener('submit', async 
     });
     closeSonicDatabaseEditor();
     const catalog = await request('/api/v1/admin/semantic-drafts/catalog');
-    fillSelect(document.querySelector('#semantic-draft-database'), catalog.databases || [],
+    semanticCatalogDatabases = catalog.databases || [];
+    fillSelect(document.querySelector('#semantic-draft-database'), semanticCatalogDatabases,
       item => `${item.name}${item.type ? ` · ${item.type}` : ''}（ID ${item.id}）`);
-    document.querySelector('#semantic-draft-database').value = String(body.database.id);
+    syncSemanticDatabaseSelection();
+    if (!document.querySelector('#semantic-draft-database').value) {
+      document.querySelector('#semantic-draft-database').value = String(body.database.id);
+    }
     showManagementFeedback(`${body.database.name} 已通过测试并保存到 SuperSonic`);
   } catch (cause) {
     error.textContent = cause.message; error.hidden = false;

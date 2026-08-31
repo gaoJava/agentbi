@@ -130,7 +130,12 @@ class SuperSonicClient:
             raise UpstreamError("SuperSonic returned an invalid modeling catalog")
         return {
             "domains": [
-                {"id": item["id"], "name": str(item.get("name") or item["id"])[:128]}
+                {
+                    "id": item["id"],
+                    "name": str(item.get("name") or item["id"])[:128],
+                    "biz_name": str(item.get("bizName") or "")[:128],
+                    "description": str(item.get("description") or "")[:512],
+                }
                 for item in domains[:100]
                 if isinstance(item, dict) and isinstance(item.get("id"), int)
             ],
@@ -144,6 +149,54 @@ class SuperSonicClient:
                 if isinstance(item, dict) and isinstance(item.get("id"), int)
             ],
         }
+
+    async def save_domain(
+        self,
+        *,
+        name: str,
+        biz_name: str,
+        description: str,
+        username: str,
+        domain_id: int | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "name": name,
+            "bizName": biz_name,
+            "description": description,
+            "parentId": 0,
+            "isOpen": 1,
+            "status": 1,
+            "typeEnum": "DOMAIN",
+            "viewers": [username],
+            "admins": [username],
+            "viewOrgs": [],
+            "adminOrgs": [],
+        }
+        path = "/api/semantic/domain/createDomain"
+        if domain_id is not None:
+            payload["id"] = domain_id
+            path = "/api/semantic/domain/updateDomain"
+        saved = await self._request_data("POST", path, payload=payload)
+        if saved is not True:
+            raise UpstreamError("SuperSonic rejected semantic domain")
+        catalog = await self.list_modeling_catalog()
+        match = next(
+            (item for item in catalog["domains"] if item["id"] == domain_id),
+            None,
+        ) if domain_id is not None else next(
+            (item for item in catalog["domains"] if item.get("biz_name") == biz_name),
+            None,
+        )
+        if match is None:
+            raise UpstreamError("SuperSonic did not return the saved semantic domain")
+        return match
+
+    async def delete_domain(self, domain_id: int) -> None:
+        deleted = await self._request_data(
+            "DELETE", f"/api/semantic/domain/deleteDomain/{domain_id}"
+        )
+        if deleted is not True:
+            raise UpstreamError("SuperSonic rejected semantic domain deletion")
 
     async def publish_semantic_model(self, payload: dict[str, Any]) -> None:
         """Publish an administrator-reviewed model through SuperSonic's governed API."""

@@ -273,6 +273,13 @@ class SuperSonicDatabasePayload(BaseModel):
     description: str = Field(default="AgentBI 同源语义连接", max_length=512)
 
 
+class SemanticDomainPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=128)
+    biz_name: str = Field(min_length=2, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    description: str = Field(default="", max_length=512)
+
+
 class SemanticDraftPublishPayload(BaseModel):
     """Administrator-reviewed values; no SQL or credentials are accepted."""
 
@@ -949,6 +956,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await app.state.supersonic_client.list_modeling_catalog()
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 建模目录不可用") from exc
+
+    @app.post("/api/v1/admin/semantic-drafts/domains", status_code=status.HTTP_201_CREATED)
+    async def create_semantic_domain(
+        payload: SemanticDomainPayload,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            domain = await app.state.supersonic_client.save_domain(
+                name=payload.name,
+                biz_name=payload.biz_name,
+                description=payload.description,
+                username=identity.username,
+            )
+        except UpstreamError as exc:
+            raise HTTPException(status_code=502, detail="SuperSonic 创建主题域失败") from exc
+        sessions.audit("semantic_domain_created", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=payload.biz_name)
+        return {"domain": domain}
+
+    @app.put("/api/v1/admin/semantic-drafts/domains/{domain_id}")
+    async def update_semantic_domain(
+        domain_id: int,
+        payload: SemanticDomainPayload,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            domain = await app.state.supersonic_client.save_domain(
+                domain_id=domain_id,
+                name=payload.name,
+                biz_name=payload.biz_name,
+                description=payload.description,
+                username=identity.username,
+            )
+        except UpstreamError as exc:
+            raise HTTPException(status_code=502, detail="SuperSonic 修改主题域失败") from exc
+        sessions.audit("semantic_domain_updated", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(domain_id))
+        return {"domain": domain}
+
+    @app.delete("/api/v1/admin/semantic-drafts/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_semantic_domain(
+        domain_id: int,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> Response:
+        enforce_csrf(request, identity)
+        try:
+            models = await app.state.supersonic_client.list_semantic_models()
+            if any(item.get("domain_id") == domain_id for item in models):
+                raise HTTPException(status_code=409, detail="主题域已有语义模型引用，不能删除")
+            await app.state.supersonic_client.delete_domain(domain_id)
+        except HTTPException:
+            raise
+        except UpstreamError as exc:
+            raise HTTPException(status_code=502, detail="SuperSonic 删除主题域失败") from exc
+        sessions.audit("semantic_domain_deleted", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=str(domain_id))
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/v1/admin/llm-provider")
     async def get_llm_provider(_: SessionIdentity = semantic_session) -> dict[str, object]:
