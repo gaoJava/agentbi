@@ -160,8 +160,12 @@ class SemanticDraftLlm:
             raise
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             raise SemanticLlmError("LLM 语义增强服务不可用或返回格式无效") from exc
-        self._validate(result, field_names)
         baseline_model = draft["model"]
+        if isinstance(result, dict) and not isinstance(result.get("model"), dict):
+            # Model naming is editable review metadata. Preserve the governed baseline
+            # when a provider emits a string/null here; field references remain strict.
+            result["model"] = {}
+        self._validate(result, field_names)
         proposed_model = result["model"]
         proposed_biz_name = str(proposed_model.get("biz_name") or "").strip()
         if not proposed_biz_name or not proposed_biz_name[0].isalpha():

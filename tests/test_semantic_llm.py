@@ -200,6 +200,24 @@ def test_glm_semantic_enrichment_reserves_final_output_budget() -> None:
     asyncio.run(client.close())
 
 
+def test_invalid_model_metadata_falls_back_without_weakening_field_validation() -> None:
+    result = {
+        "model": "orders_model",
+        "identifiers": baseline()["identifiers"],
+        "dimensions": [],
+        "measures": baseline()["measures"],
+        "drilldown_path": [],
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(result)}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    enriched = asyncio.run(client.enrich(baseline()))
+    assert enriched["model"] == baseline()["model"]
+    assert enriched["generation"]["ai_generated"] is True
+    asyncio.run(client.close())
+
+
 def test_connection_accepts_reasoning_model_before_final_content() -> None:
     transport = httpx.MockTransport(
         lambda _: httpx.Response(
