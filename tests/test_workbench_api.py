@@ -38,8 +38,8 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260831.13" in shell.text
-        assert "prototype.css?v=20260831.4" in shell.text
+        assert "app.js?v=20260831.14" in shell.text
+        assert "prototype.css?v=20260831.5" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
         assert "尚未绑定真实下钻数据" in shell.text

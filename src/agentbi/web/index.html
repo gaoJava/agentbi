@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260831.4">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260831.5">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -186,18 +186,18 @@
       </section>
 
       <section id="data-sources-view" class="registry-view module-view" hidden>
-        <header class="registry-header"><div><h1>数据源</h1><p>统一管理 Superset 数据资产及 SuperSonic 同源连接</p></div><div><button id="open-sonic-database" type="button">＋ SuperSonic 同源连接</button><button id="open-dataset-editor" type="button">＋ 创建 Dataset</button><button id="open-database-editor" class="primary-small" type="button">＋ Superset 数据库</button><button class="module-refresh" data-module="data-sources" type="button">⟳ 同步</button></div></header>
+        <header class="registry-header"><div><h1>数据源</h1><p>统一管理 Superset 数据资产及 SuperSonic 同源连接</p></div><div><button id="open-dataset-editor" type="button">＋ 创建 Dataset</button><button id="open-database-editor" class="primary-small" type="button">＋ Superset 数据库</button><button class="module-refresh" data-module="data-sources" type="button">⟳ 同步</button></div></header>
         <div class="registry-content">
           <nav class="source-system-tabs" aria-label="数据源系统分类"><button class="active" data-source-system="superset" type="button">Superset 数据资产</button><button data-source-system="supersonic" type="button">SuperSonic 语义连接</button></nav>
           <div id="superset-source-panel" class="source-system-panel">
           <aside class="registry-note"><strong>Superset 数据资产</strong><p>直接读取 Superset API，不展示连接 URI、用户名或密码。当前可用连接器：<span id="available-engine-list">正在读取…</span></p></aside>
           <section class="registry-summary"><article><span>数据库连接</span><strong id="real-database-total">0</strong><small>来自 Superset</small></article><article><span>真实 Dataset</span><strong id="real-dataset-total">0</strong><small>物理表与虚拟数据集</small></article><article><span>当前引擎</span><strong id="real-database-engines">—</strong><small>不会暴露连接密钥</small></article><article><span>同步状态</span><strong id="real-source-status" class="healthy-number">待同步</strong><small>只读元数据同步</small></article></section>
           <section class="registry-table-card"><header><div><strong>数据库连接</strong><small>存在 Dataset、图表或仪表盘引用时禁止删除</small></div><span class="registry-version">真实资产</span></header><table><thead><tr><th>连接名称</th><th>数据库引擎</th><th>Dataset 数量</th><th>SQL Lab</th><th>Superset ID</th><th>操作</th></tr></thead><tbody id="superset-database-table-body"></tbody></table></section>
-          <section class="registry-table-card dataset-catalog-card"><header><div><strong>Dataset 清单</strong><small>搜索与分页展示，避免大量表一次铺满页面</small></div><div class="dataset-catalog-tools"><label class="dataset-search"><span>⌕</span><input id="dataset-catalog-search" type="search" placeholder="搜索名称、连接或 Schema"></label><select id="dataset-catalog-page-size" aria-label="每页显示数量"><option value="10">10 条 / 页</option><option value="20">20 条 / 页</option><option value="50">50 条 / 页</option><option value="100">100 条 / 页</option></select></div></header><table><thead><tr><th>Dataset</th><th>所属连接</th><th>Schema</th><th>类型</th><th>Superset ID</th><th>操作</th></tr></thead><tbody id="data-source-table-body"></tbody></table><footer class="dataset-pager"><span id="dataset-page-summary">0 条</span><div><button id="dataset-page-prev" type="button">‹ 上一页</button><span id="dataset-page-number">第 1 页</span><button id="dataset-page-next" type="button">下一页 ›</button></div></footer></section>
+          <section class="registry-table-card dataset-catalog-card"><header><div><strong>Dataset 清单</strong><small>搜索与分页展示，避免大量表一次铺满页面</small></div><div class="dataset-catalog-tools"><label class="dataset-search"><span aria-hidden="true">⌕</span><input id="dataset-catalog-search" type="search" placeholder="搜索 Dataset"></label><span class="tool-divider" aria-hidden="true"></span><select id="dataset-catalog-page-size" aria-label="每页显示数量"><option value="10">每页 10 条</option><option value="20">每页 20 条</option><option value="50">每页 50 条</option><option value="100">每页 100 条</option></select></div></header><table><thead><tr><th>Dataset</th><th>所属连接</th><th>Schema</th><th>类型</th><th>Superset ID</th><th>操作</th></tr></thead><tbody id="data-source-table-body"></tbody></table><footer class="dataset-pager"><span id="dataset-page-summary">0 条</span><div><button id="dataset-page-prev" type="button">‹ 上一页</button><span id="dataset-page-number">第 1 页</span><button id="dataset-page-next" type="button">下一页 ›</button></div></footer></section>
           </div>
           <div id="supersonic-source-panel" class="source-system-panel" hidden>
           <aside class="registry-note"><strong>SuperSonic 语义连接</strong><p>连接配置独立保存在 SuperSonic，用于语义模型执行；应与 Superset 数据库指向同一业务数据源。</p></aside>
-          <section class="registry-table-card sonic-source-card"><header><div><strong>SuperSonic 同源连接</strong><small>与 Superset 连接按名称和数据库类型匹配，凭据由两个系统分别保存</small></div><span id="sonic-database-count" class="registry-version">0 个连接</span></header><table><thead><tr><th>连接别名</th><th>数据库类型</th><th>匹配的 Superset 连接</th><th>匹配状态</th><th>关联模型</th><th>SuperSonic ID</th><th>操作</th></tr></thead><tbody id="sonic-database-table-body"></tbody></table></section>
+          <section class="registry-table-card sonic-source-card"><header><div><strong>SuperSonic 同源连接</strong><small>与 Superset 连接按名称和数据库类型匹配，凭据由两个系统分别保存</small></div><div class="card-header-actions"><span id="sonic-database-count" class="registry-version">0 个连接</span><button id="open-sonic-database" class="primary-small" type="button">＋ 新增同源连接</button></div></header><table><thead><tr><th>连接别名</th><th>数据库类型</th><th>匹配的 Superset 连接</th><th>匹配状态</th><th>关联模型</th><th>SuperSonic ID</th><th>操作</th></tr></thead><tbody id="sonic-database-table-body"></tbody></table></section>
           </div>
         </div>
       </section>
@@ -427,6 +427,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260831.13" defer></script>
+  <script src="/app/assets/app.js?v=20260831.14" defer></script>
 </body>
 </html>
