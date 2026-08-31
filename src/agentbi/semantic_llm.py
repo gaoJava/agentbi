@@ -63,8 +63,7 @@ class SemanticDraftLlm:
                 # Reasoning models may consume their first tokens before emitting content.
                 "max_tokens": 256,
             }
-            if self._supports_thinking_control(base_url, model):
-                payload["thinking"] = {"type": "disabled"}
+            if self._is_zhipu_glm(base_url, model):
                 payload.pop("temperature", None)
             response = await self._client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
@@ -135,13 +134,13 @@ class SemanticDraftLlm:
             "messages": messages,
             # Some OpenAI-compatible providers (including Zhipu) reject zero.
             "temperature": 0.1,
-            "max_tokens": 4096,
+            "max_tokens": 16384 if self._is_zhipu_glm(base_url, model) else 4096,
             "response_format": {"type": "json_object"},
         }
-        if self._supports_thinking_control(base_url, model):
-            # GLM-5 defaults to deep thinking, which can exhaust the output budget before
-            # emitting the requested JSON. Structured metadata extraction does not need it.
-            completion_payload["thinking"] = {"type": "disabled"}
+        if self._is_zhipu_glm(base_url, model):
+            # GLM-5 consumes output tokens for reasoning before emitting final JSON. Some
+            # provider-side model aliases reject thinking controls, so preserve their
+            # default mode and reserve enough output budget for the final structured result.
             completion_payload.pop("temperature", None)
         try:
             response = await self._client.post(
@@ -189,7 +188,7 @@ class SemanticDraftLlm:
         return result
 
     @staticmethod
-    def _supports_thinking_control(base_url: str, model: str) -> bool:
+    def _is_zhipu_glm(base_url: str, model: str) -> bool:
         return "bigmodel.cn" in base_url.lower() and model.lower().startswith("glm-")
 
     @staticmethod
