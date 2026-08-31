@@ -6,7 +6,7 @@ import json
 import secrets
 import asyncio
 from typing import Any, ClassVar
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -117,6 +117,26 @@ class SupersetClient:
                 database_response, dataset_rows, dataset_total = await self._get_data_assets(
                     client, headers
                 )
+                database_rows = database_response.json().get("result", [])[:200]
+                connection_responses = await asyncio.gather(
+                    *(
+                        client.get(f"/api/v1/database/{int(item['id'])}/connection", headers=headers)
+                        for item in database_rows
+                    ),
+                    return_exceptions=True,
+                )
+                physical_databases: dict[int, str] = {}
+                for item, response in zip(database_rows, connection_responses, strict=True):
+                    if not isinstance(response, httpx.Response) or response.status_code >= 400:
+                        continue
+                    try:
+                        connection = response.json().get("result") or {}
+                        path = urlsplit(str(connection.get("sqlalchemy_uri") or "")).path
+                        physical_name = unquote(path.strip("/").split("/")[-1]) if path else ""
+                    except (TypeError, ValueError):
+                        continue
+                    if physical_name:
+                        physical_databases[int(item["id"])] = physical_name[:250]
                 available_response = await client.get("/api/v1/database/available/", headers=headers)
                 available_response.raise_for_status()
                 databases = [
@@ -124,11 +144,12 @@ class SupersetClient:
                         "superset_id": int(item["id"]),
                         "name": str(item.get("database_name") or f"Database {item['id']}"),
                         "backend": str(item.get("backend") or "unknown"),
+                        "database": physical_databases.get(int(item["id"]), "—"),
                         "expose_in_sqllab": bool(item.get("expose_in_sqllab", False)),
                         "allow_file_upload": bool(item.get("allow_file_upload", False)),
                         "dataset_count": 0,
                     }
-                    for item in database_response.json().get("result", [])[:200]
+                    for item in database_rows
                 ]
                 database_by_id = {item["superset_id"]: item for item in databases}
                 datasets = []

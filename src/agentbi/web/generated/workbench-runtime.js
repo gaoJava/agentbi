@@ -206,7 +206,8 @@ var AgentBI;
         const raw = value;
         const databases = objectList(raw.databases, 'Database').map(item => ({
             superset_id: requiredNumber(item, 'superset_id'), name: requiredText(item, 'name'),
-            backend: requiredText(item, 'backend'), expose_in_sqllab: requiredBoolean(item, 'expose_in_sqllab'),
+            backend: requiredText(item, 'backend'), database: requiredText(item, 'database'),
+            expose_in_sqllab: requiredBoolean(item, 'expose_in_sqllab'),
             allow_file_upload: requiredBoolean(item, 'allow_file_upload'),
             dataset_count: requiredNumber(item, 'dataset_count'),
         }));

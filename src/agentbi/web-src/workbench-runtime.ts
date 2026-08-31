@@ -32,7 +32,7 @@ namespace AgentBI {
     metrics: string[]; charts: number; is_system: boolean;
   }
   export interface SupersetDatabaseAsset {
-    superset_id: number; name: string; backend: string; expose_in_sqllab: boolean;
+    superset_id: number; name: string; backend: string; database: string; expose_in_sqllab: boolean;
     allow_file_upload: boolean; dataset_count: number;
   }
   export interface SupersetDatasetAsset {
@@ -323,7 +323,8 @@ namespace AgentBI {
     const raw = value as Record<string, unknown>;
     const databases = objectList(raw.databases, 'Database').map(item => ({
       superset_id: requiredNumber(item, 'superset_id'), name: requiredText(item, 'name'),
-      backend: requiredText(item, 'backend'), expose_in_sqllab: requiredBoolean(item, 'expose_in_sqllab'),
+      backend: requiredText(item, 'backend'), database: requiredText(item, 'database'),
+      expose_in_sqllab: requiredBoolean(item, 'expose_in_sqllab'),
       allow_file_upload: requiredBoolean(item, 'allow_file_upload'),
       dataset_count: requiredNumber(item, 'dataset_count'),
     }));

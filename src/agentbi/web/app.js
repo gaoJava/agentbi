@@ -889,7 +889,7 @@ async function loadModuleView(view) {
       document.querySelector('#available-engine-list').textContent =
         (assets.available_engines || []).map(engine => engine.name).join('、') || '未发现可用连接器';
       renderModuleRows('superset-database-table-body', databases, database => [
-        database.name, database.backend, database.dataset_count,
+        database.name, database.backend, database.database, database.dataset_count,
         database.expose_in_sqllab ? '● 已开放' : '—', database.superset_id,
       ], database => {
         const group = document.createElement('div'); group.className = 'registry-actions';

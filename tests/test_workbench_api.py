@@ -37,8 +37,8 @@ def test_product_shell_and_user_session_flow() -> None:
     with TestClient(create_app(settings())) as client:
         shell = client.get("/app")
         assert shell.status_code == 200
-        assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260831.18" in shell.text
+        assert "generated/workbench-runtime.js?v=20260831.9" in shell.text
+        assert "app.js?v=20260831.19" in shell.text
         assert "prototype.css?v=20260831.7" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
@@ -356,6 +356,7 @@ def test_admin_reads_real_superset_data_assets_without_secrets() -> None:
                         "superset_id": 1,
                         "name": "examples",
                         "backend": "postgresql",
+                        "database": "examples",
                         "expose_in_sqllab": True,
                         "allow_file_upload": True,
                         "dataset_count": 1,
@@ -382,6 +383,7 @@ def test_admin_reads_real_superset_data_assets_without_secrets() -> None:
         response = client.get("/api/v1/admin/superset/data-assets")
         assert response.status_code == 200
         assert response.json()["databases"][0]["name"] == "examples"
+        assert response.json()["databases"][0]["database"] == "examples"
         assert response.json()["datasets"][0]["name"] == "video_game_sales"
         assert "password" not in response.text
 
