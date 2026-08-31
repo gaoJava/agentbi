@@ -38,6 +38,41 @@ def analyze_request() -> AnalyzeRequest:
 
 
 class SuperSonicClientTest(unittest.TestCase):
+    def test_resolves_generated_database_id_and_reuses_same_source(self):
+        requests: list[tuple[str, dict | None]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content) if request.content else None
+            requests.append((request.url.path, payload))
+            if request.url.path.endswith("/testConnect"):
+                return httpx.Response(200, json={"code": 200, "data": True})
+            if request.url.path.endswith("/getDatabaseList"):
+                return httpx.Response(200, json={
+                    "code": 200,
+                    "data": [{
+                        "id": 2, "name": "examples", "type": "postgresql",
+                        "host": "127.0.0.1", "port": "5432", "database": "examples",
+                        "username": "superset",
+                    }],
+                })
+            return httpx.Response(200, json={
+                "code": 200,
+                "data": {"id": None, "name": "examples", "type": "postgresql"},
+            })
+
+        payload = {
+            "name": "examples", "type": "postgresql", "host": "127.0.0.1",
+            "port": "5432", "database": "examples", "username": "superset",
+            "password": "secret", "admins": ["admin"], "viewers": ["admin"],
+        }
+        client = SuperSonicClient(settings(), httpx.MockTransport(handler))
+        created = asyncio.run(client.create_database(payload))
+        asyncio.run(client.close())
+
+        self.assertEqual(created, {"id": 2, "name": "examples", "type": "postgresql"})
+        save_payload = next(body for path, body in requests if path.endswith("createOrUpdateDatabase"))
+        self.assertEqual(save_payload["id"], 2)
+
     def test_lists_sanitized_live_semantic_models(self):
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path.endswith("/domain/list"):

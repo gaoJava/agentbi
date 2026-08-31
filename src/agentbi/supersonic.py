@@ -226,16 +226,64 @@ class SuperSonicClient:
         )
         if connected is not True:
             raise UpstreamError("SuperSonic database connection test failed")
+
+        # SuperSonic's create endpoint returns the request-shaped object before the
+        # generated id is copied back into it. It also allows identical connections
+        # to be inserted repeatedly. Resolve an existing same-source connection first
+        # so retries update it, then fall back to the refreshed inventory for new rows.
+        databases = await self._request_data("GET", "/api/semantic/database/getDatabaseList")
+        if not isinstance(databases, list):
+            raise UpstreamError("SuperSonic returned invalid database inventory")
+        existing = self._matching_database(databases, payload)
+        saved_payload = dict(payload)
+        if existing is not None:
+            saved_payload["id"] = existing["id"]
         created = await self._request_data(
-            "POST", "/api/semantic/database/createOrUpdateDatabase", payload=payload
+            "POST", "/api/semantic/database/createOrUpdateDatabase", payload=saved_payload
         )
-        if not isinstance(created, dict) or not isinstance(created.get("id"), int):
+        if not isinstance(created, dict):
             raise UpstreamError("SuperSonic returned invalid database metadata")
+        database_id = created.get("id")
+        if not isinstance(database_id, int):
+            refreshed = await self._request_data(
+                "GET", "/api/semantic/database/getDatabaseList"
+            )
+            if not isinstance(refreshed, list):
+                raise UpstreamError("SuperSonic returned invalid database inventory")
+            match = self._matching_database(refreshed, payload, newest=True)
+            database_id = match.get("id") if match is not None else None
+        if not isinstance(database_id, int):
+            raise UpstreamError("SuperSonic did not return the saved database")
         return {
-            "id": created["id"],
+            "id": database_id,
             "name": str(created.get("name") or payload["name"])[:128],
             "type": str(created.get("type") or payload["type"])[:64],
         }
+
+    @staticmethod
+    def _matching_database(
+        databases: list[Any], payload: dict[str, Any], *, newest: bool = False
+    ) -> dict[str, Any] | None:
+        def normalized(value: Any) -> str:
+            return str(value or "").strip().lower()
+
+        matches = [
+            item
+            for item in databases
+            if isinstance(item, dict)
+            and isinstance(item.get("id"), int)
+            and normalized(item.get("name")) == normalized(payload.get("name"))
+            and normalized(item.get("type")) == normalized(payload.get("type"))
+            and normalized(item.get("host")) == normalized(payload.get("host"))
+            and normalized(item.get("port")) == normalized(payload.get("port"))
+            and normalized(item.get("database")) == normalized(payload.get("database"))
+            and normalized(item.get("username")) == normalized(payload.get("username"))
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item["id"]) if newest else min(
+            matches, key=lambda item: item["id"]
+        )
 
     def _conversation(self, request: AnalyzeRequest) -> tuple[int, str, list[str]]:
         """Resolve an unguessable conversation id bound to the authenticated actor."""

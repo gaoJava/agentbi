@@ -1199,7 +1199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             database = await app.state.supersonic_client.create_database(upstream)
         except UpstreamError as exc:
             raise HTTPException(
-                status_code=422, detail="数据库连接测试失败，未保存到 SuperSonic"
+                status_code=422, detail="同源连接验证或保存失败，请检查连接信息后重试"
             ) from exc
         sessions.audit(
             "supersonic_database_created",
