@@ -467,6 +467,7 @@ async function openSemanticDraftEditor() {
       loadedDataSources.map(item => ({...item, id: item.superset_id})),
       item => `${item.name}（${item.database_name} · ID ${item.superset_id}）`);
     const providerSelect = document.querySelector('#semantic-draft-provider');
+    const reasoningModeSelect = document.querySelector('#semantic-draft-reasoning-mode');
     providerSelect.innerHTML = '<option value="">仅用字段元数据推断</option>';
     (provider.items || []).forEach(item => {
       const option = document.createElement('option');
@@ -485,11 +486,14 @@ async function openSemanticDraftEditor() {
     }
     const updateProviderNote = () => {
       const option = providerSelect.selectedOptions[0];
+      reasoningModeSelect.disabled = !option?.value;
+      const modeLabel = reasoningModeSelect.value === 'deep' ? '深度模式' : '快速模式';
       document.querySelector('#semantic-generation-source').textContent = option?.value
-        ? `本次将使用 ${option.dataset.model} 推荐维度、指标、同义词和下钻路径；不会改变系统默认模型。仅发送 Dataset 名称和字段元数据。`
+        ? `本次将使用 ${option.dataset.model} 的${modeLabel}推荐维度、指标、同义词和下钻路径；不会改变系统默认模型。仅发送 Dataset 名称和字段元数据。`
         : '本次不调用 LLM，仅使用可解释的 Dataset 字段元数据推断。';
     };
     providerSelect.onchange = updateProviderNote;
+    reasoningModeSelect.onchange = updateProviderNote;
     updateProviderNote();
     syncSemanticDatabaseSelection();
   } catch (cause) {
@@ -528,12 +532,14 @@ async function generateSemanticDraft() {
   try {
     const datasetId = Number(document.querySelector('#semantic-draft-dataset').value);
     const providerValue = document.querySelector('#semantic-draft-provider').value;
+    const reasoningMode = document.querySelector('#semantic-draft-reasoning-mode').value;
     const body = await request('/api/v1/admin/semantic-drafts/generate', {
       method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
       body: JSON.stringify({
         dataset_id: datasetId,
         provider_id: providerValue ? Number(providerValue) : null,
         use_llm: Boolean(providerValue),
+        reasoning_mode: reasoningMode,
       }),
     });
     activeSemanticDraft = body.draft;

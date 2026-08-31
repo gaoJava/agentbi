@@ -249,6 +249,7 @@ class SemanticDraftRequest(BaseModel):
     dataset_id: int = Field(gt=0)
     provider_id: int | None = Field(default=None, gt=0)
     use_llm: bool = True
+    reasoning_mode: Literal["fast", "deep"] = "fast"
 
 
 class LlmProviderPayload(BaseModel):
@@ -1281,9 +1282,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             str(selected_provider["encrypted_api_key"])
                         ),
                         model=str(selected_provider["model"]),
+                        reasoning_mode=payload.reasoning_mode,
                     )
                 else:
-                    draft = await app.state.semantic_llm.enrich(draft)
+                    draft = await app.state.semantic_llm.enrich(
+                        draft, reasoning_mode=payload.reasoning_mode
+                    )
             except SemanticLlmError as exc:
                 draft["generation"]["label"] = "非 AI 草稿 · LLM 失败后按字段规则推断"
                 draft["warnings"].append(
