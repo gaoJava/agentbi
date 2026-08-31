@@ -18,7 +18,7 @@ let loadedLiveSemanticModels = [];
 let activeSemanticDraft;
 let loadedDataSources = [];
 let datasetCatalogPage = 1;
-let datasetCatalogPageSize = 20;
+let datasetCatalogPageSize = 10;
 let semanticCatalogDatabases = [];
 let editingSonicDatabaseId;
 let semanticCatalogDomains = [];
