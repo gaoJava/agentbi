@@ -819,8 +819,12 @@ async function loadModuleView(view) {
         model.status === 'active' ? '● 已启用' : '● 已下线',
       ]);
     } else if (view === 'data-sources') {
+      const [assetsBody, catalog] = await Promise.all([
+        request('/api/v1/admin/superset/data-assets'),
+        request('/api/v1/admin/semantic-drafts/catalog'),
+      ]);
       const assets = window.AgentBI.parseSupersetDataAssets(
-        await request('/api/v1/admin/superset/data-assets'),
+        assetsBody,
       );
       loadedDataSources = assets.datasets;
       const databases = assets.databases;
@@ -842,6 +846,15 @@ async function loadModuleView(view) {
         remove.disabled = database.dataset_count > 0;
         if (remove.disabled) remove.title = `仍有 ${database.dataset_count} 个 Dataset，不能删除`;
         group.append(remove); return group;
+      });
+      semanticCatalogDatabases = catalog.databases || [];
+      document.querySelector('#sonic-database-count').textContent = `${semanticCatalogDatabases.length} 个连接`;
+      renderModuleRows('sonic-database-table-body', semanticCatalogDatabases, database => {
+        const match = databases.find(source =>
+          String(source.name || '').trim().toLowerCase() === String(database.name || '').trim().toLowerCase() &&
+          String(source.backend || '').trim().toLowerCase() === String(database.type || '').trim().toLowerCase()
+        );
+        return [database.name, database.type || '—', match?.name || '—', match ? '● 已匹配' : '● 未匹配', database.id];
       });
       renderModuleRows('data-source-table-body', loadedDataSources, dataset => [
         dataset.name, dataset.database_name, dataset.schema,
@@ -2765,8 +2778,6 @@ function renderSemanticDomainRows() {
   });
 }
 
-document.querySelector('#open-semantic-domain').addEventListener('click', () =>
-  openSemanticDomainEditor(document.querySelector('#semantic-draft-domain').value));
 document.querySelector('#create-semantic-domain').addEventListener('click', () => openSemanticDomainEditor());
 
 function renderSemanticDomainEditor(selectedId = '') {

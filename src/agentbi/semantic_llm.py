@@ -56,16 +56,19 @@ class SemanticDraftLlm:
     async def test_connection(self, *, base_url: str, api_key: str, model: str) -> None:
         """Verify authentication and model availability without semantic validation."""
         try:
+            payload: dict[str, Any] = {
+                "model": model,
+                "messages": [{"role": "user", "content": "仅回复 OK"}],
+                "temperature": 0.1,
+                # Reasoning models may consume their first tokens before emitting content.
+                "max_tokens": 256,
+            }
+            if self._supports_thinking_control(base_url, model):
+                payload["thinking"] = {"type": "disabled"}
             response = await self._client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": "仅回复 OK"}],
-                    "temperature": 0.1,
-                    # Reasoning models may consume their first tokens before emitting content.
-                    "max_tokens": 256,
-                },
+                json=payload,
             )
             if response.is_error:
                 raise self._provider_error(response)
@@ -134,6 +137,10 @@ class SemanticDraftLlm:
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
+        if self._supports_thinking_control(base_url, model):
+            # GLM-5 defaults to deep thinking, which can exhaust the output budget before
+            # emitting the requested JSON. Structured metadata extraction does not need it.
+            completion_payload["thinking"] = {"type": "disabled"}
         try:
             response = await self._client.post(
                 f"{base_url.rstrip('/')}/chat/completions",
@@ -178,6 +185,10 @@ class SemanticDraftLlm:
         }
         result["warnings"] = []
         return result
+
+    @staticmethod
+    def _supports_thinking_control(base_url: str, model: str) -> bool:
+        return "bigmodel.cn" in base_url.lower() and model.lower().startswith("glm-")
 
     @staticmethod
     def _parse_json_content(content: object) -> object:

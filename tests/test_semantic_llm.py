@@ -164,6 +164,7 @@ def test_connection_checks_chat_protocol_without_requiring_semantic_draft() -> N
         payload = json.loads(request.content)
         assert payload["model"] == "glm-5.3"
         assert "response_format" not in payload
+        assert payload["thinking"] == {"type": "disabled"}
         return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
 
     client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
@@ -174,6 +175,25 @@ def test_connection_checks_chat_protocol_without_requiring_semantic_draft() -> N
             model="glm-5.3",
         )
     )
+    asyncio.run(client.close())
+
+
+def test_glm_semantic_enrichment_disables_deep_thinking() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["thinking"] == {"type": "disabled"}
+        result = {
+            "model": {}, "identifiers": baseline()["identifiers"], "dimensions": [],
+            "measures": baseline()["measures"], "drilldown_path": [],
+        }
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
+
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    enriched = asyncio.run(client.enrich_with(
+        baseline(), base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key="secret", model="glm-5.3",
+    ))
+    assert enriched["generation"]["ai_generated"] is True
     asyncio.run(client.close())
 
 

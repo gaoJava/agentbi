@@ -1241,6 +1241,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else:
                     draft = await app.state.semantic_llm.enrich(draft)
             except SemanticLlmError as exc:
+                draft["generation"]["label"] = "LLM 调用失败，已回退字段元数据推断"
                 draft["warnings"].append(
                     f"LLM 增强失败：{exc}。已安全降级为字段元数据推断。"
                 )
