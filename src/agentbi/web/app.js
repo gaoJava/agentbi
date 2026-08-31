@@ -447,9 +447,10 @@ async function openSemanticDraftEditor() {
   document.querySelector('#semantic-generation-source').textContent = '正在读取真实 Superset Dataset 与 SuperSonic 建模目录…';
   document.querySelector('#semantic-draft-editor').hidden = false;
   try {
-    const [assetsBody, catalog] = await Promise.all([
+    const [assetsBody, catalog, provider] = await Promise.all([
       request('/api/v1/admin/superset/data-assets'),
       request('/api/v1/admin/semantic-drafts/catalog'),
+      request('/api/v1/admin/llm-provider'),
     ]);
     const assets = window.AgentBI.parseSupersetDataAssets(assetsBody);
     loadedDataSources = assets.datasets;
@@ -463,7 +464,11 @@ async function openSemanticDraftEditor() {
     if (!loadedDataSources.length || !(catalog.domains || []).length || !(catalog.databases || []).length) {
       throw new Error('建模前至少需要一个 Superset Dataset、SuperSonic 主题域和数据库连接');
     }
-    document.querySelector('#semantic-generation-source').textContent = '请选择 Dataset 生成草稿。当前未配置 LLM，将使用可解释的字段元数据推断。';
+    document.querySelector('#semantic-generation-source').textContent = provider.enabled
+      ? `请选择 Dataset 生成草稿。当前将使用 ${provider.model} 推荐维度、指标、同义词和下钻路径。`
+      : provider.configured
+        ? '请选择 Dataset 生成草稿。模型服务已保存但尚未启用，将使用可解释的字段元数据推断。'
+        : '请选择 Dataset 生成草稿。当前未配置 LLM，将使用可解释的字段元数据推断。';
   } catch (cause) {
     error.textContent = cause.message; error.hidden = false;
   }
