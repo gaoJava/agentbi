@@ -17,6 +17,8 @@ let loadedSemanticModels = [];
 let loadedLiveSemanticModels = [];
 let activeSemanticDraft;
 let loadedDataSources = [];
+let datasetCatalogPage = 1;
+let datasetCatalogPageSize = 20;
 let semanticCatalogDatabases = [];
 let editingSonicDatabaseId;
 let semanticCatalogDomains = [];
@@ -747,6 +749,34 @@ function renderModuleRows(bodyId, items, valuesFor, actionFor) {
   }));
 }
 
+function renderDatasetCatalog() {
+  const query = document.querySelector('#dataset-catalog-search').value.trim().toLowerCase();
+  const filtered = loadedDataSources.filter(dataset => !query || [
+    dataset.name, dataset.database_name, dataset.schema, dataset.kind, dataset.superset_id,
+  ].some(value => String(value || '').toLowerCase().includes(query)));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / datasetCatalogPageSize));
+  datasetCatalogPage = Math.min(datasetCatalogPage, totalPages);
+  const start = (datasetCatalogPage - 1) * datasetCatalogPageSize;
+  const pageItems = filtered.slice(start, start + datasetCatalogPageSize);
+  renderModuleRows('data-source-table-body', pageItems, dataset => [
+    dataset.name, dataset.database_name, dataset.schema,
+    dataset.kind === 'virtual' ? '虚拟数据集' : '物理表', dataset.superset_id,
+  ], dataset => {
+    const group = document.createElement('div'); group.className = 'registry-actions';
+    group.append(actionButton('创建图表', 'module-action', () => openSupersetChartEditor(dataset)));
+    group.append(actionButton('查看字段', '', () => openDatasetDetail(dataset)));
+    group.append(actionButton('修改说明', '', () => openDatasetDescriptionEditor(dataset)));
+    group.append(actionButton('删除', 'danger-action', () => deleteSupersetAsset('datasets', dataset)));
+    return group;
+  });
+  document.querySelector('#dataset-page-summary').textContent = query
+    ? `筛选到 ${filtered.length} 条，共同步 ${loadedDataSources.length} 条`
+    : `共 ${filtered.length} 条`;
+  document.querySelector('#dataset-page-number').textContent = `第 ${datasetCatalogPage} / ${totalPages} 页`;
+  document.querySelector('#dataset-page-prev').disabled = datasetCatalogPage <= 1;
+  document.querySelector('#dataset-page-next').disabled = datasetCatalogPage >= totalPages;
+}
+
 async function runModuleAction(button, url, successView) {
   const original = button.textContent;
   button.disabled = true; button.textContent = '检查中…';
@@ -878,18 +908,8 @@ async function loadModuleView(view) {
           ? `仍被 ${database.model_count} 个语义模型引用，不能删除` : '内置数据库不能删除';
         group.append(edit, remove); return group;
       });
-      renderModuleRows('data-source-table-body', loadedDataSources, dataset => [
-        dataset.name, dataset.database_name, dataset.schema,
-        dataset.kind === 'virtual' ? '虚拟数据集' : '物理表', dataset.superset_id,
-      ], dataset => {
-        const group = document.createElement('div'); group.className = 'registry-actions';
-        group.append(actionButton('创建图表', 'module-action', () =>
-          openSupersetChartEditor(dataset)));
-        group.append(actionButton('查看字段', '', () => openDatasetDetail(dataset)));
-        group.append(actionButton('修改说明', '', () => openDatasetDescriptionEditor(dataset)));
-        group.append(actionButton('删除', 'danger-action', () => deleteSupersetAsset('datasets', dataset)));
-        return group;
-      });
+      datasetCatalogPage = 1;
+      renderDatasetCatalog();
     } else if (view === 'user-roles') {
       const [userBody, roleBody, permissionBody] = await Promise.all([
         request('/api/v1/admin/users'), request('/api/v1/admin/roles'),
@@ -2876,6 +2896,27 @@ document.querySelector('#delete-semantic-domain').addEventListener('click', () =
 });
 document.querySelector('#open-sonic-database').addEventListener('click', () => {
   openSonicDatabaseEditor();
+});
+document.querySelectorAll('[data-source-system]').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('[data-source-system]').forEach(item =>
+      item.classList.toggle('active', item === button));
+    const showSuperset = button.dataset.sourceSystem === 'superset';
+    document.querySelector('#superset-source-panel').hidden = !showSuperset;
+    document.querySelector('#supersonic-source-panel').hidden = showSuperset;
+  });
+});
+document.querySelector('#dataset-catalog-search').addEventListener('input', () => {
+  datasetCatalogPage = 1; renderDatasetCatalog();
+});
+document.querySelector('#dataset-catalog-page-size').addEventListener('change', event => {
+  datasetCatalogPageSize = Number(event.target.value); datasetCatalogPage = 1; renderDatasetCatalog();
+});
+document.querySelector('#dataset-page-prev').addEventListener('click', () => {
+  datasetCatalogPage = Math.max(1, datasetCatalogPage - 1); renderDatasetCatalog();
+});
+document.querySelector('#dataset-page-next').addEventListener('click', () => {
+  datasetCatalogPage += 1; renderDatasetCatalog();
 });
 function openSonicDatabaseEditor(database) {
   editingSonicDatabaseId = database?.id;

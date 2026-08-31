@@ -114,7 +114,7 @@ class SupersetClient:
                 if not token:
                     raise SupersetApiError("Superset 登录响应无效")
                 headers = {"Authorization": f"Bearer {token}"}
-                database_response, dataset_response = await self._get_data_assets(
+                database_response, dataset_rows, dataset_total = await self._get_data_assets(
                     client, headers
                 )
                 available_response = await client.get("/api/v1/database/available/", headers=headers)
@@ -132,7 +132,7 @@ class SupersetClient:
                 ]
                 database_by_id = {item["superset_id"]: item for item in databases}
                 datasets = []
-                for item in dataset_response.json().get("result", [])[:500]:
+                for item in dataset_rows:
                     database = item.get("database") or {}
                     database_id = int(database.get("id", 0))
                     if database_id in database_by_id:
@@ -158,7 +158,12 @@ class SupersetClient:
                     }
                     for item in available_response.json().get("databases", [])
                 ]
-                return {"databases": databases, "datasets": datasets, "available_engines": available_engines}
+                return {
+                    "databases": databases,
+                    "datasets": datasets,
+                    "dataset_total": dataset_total,
+                    "available_engines": available_engines,
+                }
         except SupersetApiError:
             raise
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
@@ -666,13 +671,32 @@ class SupersetClient:
     @staticmethod
     async def _get_data_assets(
         client: httpx.AsyncClient, headers: dict[str, str]
-    ) -> tuple[httpx.Response, httpx.Response]:
+    ) -> tuple[httpx.Response, list[dict[str, object]], int]:
         database_response = await client.get(
             "/api/v1/database/", params={"q": "(page:0,page_size:100)"}, headers=headers
         )
-        dataset_response = await client.get(
-            "/api/v1/dataset/", params={"q": "(page:0,page_size:500)"}, headers=headers
-        )
         database_response.raise_for_status()
-        dataset_response.raise_for_status()
-        return database_response, dataset_response
+        # Superset paginates Dataset metadata. Read it in bounded batches so a
+        # catalog with thousands of tables is synchronized without one giant response.
+        page_size = 500
+        page = 0
+        rows: list[dict[str, object]] = []
+        total = 0
+        while page < 100:
+            response = await client.get(
+                "/api/v1/dataset/",
+                params={"q": f"(page:{page},page_size:{page_size})"},
+                headers=headers,
+            )
+            response.raise_for_status()
+            body = response.json()
+            batch = body.get("result", [])
+            if not isinstance(batch, list):
+                raise SupersetApiError("Superset Dataset 列表响应无效")
+            if page == 0:
+                total = int(body.get("count", len(batch)))
+            rows.extend(item for item in batch if isinstance(item, dict))
+            if len(rows) >= total or len(batch) < page_size:
+                break
+            page += 1
+        return database_response, rows, total
