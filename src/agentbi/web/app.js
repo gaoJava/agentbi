@@ -548,11 +548,16 @@ async function generateSemanticDraft() {
     const source = document.querySelector('#semantic-generation-source');
     source.textContent = `${draft.generation.label}。所有推荐项必须由管理员审核后才能发布。`;
     source.classList.toggle('ai-source', Boolean(draft.generation.ai_generated));
+    source.classList.toggle('fallback-source', !draft.generation.ai_generated);
     const warnings = document.querySelector('#semantic-draft-warnings');
     warnings.hidden = !draft.warnings.length;
     warnings.textContent = draft.warnings.join(' ');
     document.querySelector('#semantic-draft-review').hidden = false;
-    document.querySelector('#publish-semantic-draft').disabled = draft.measures.length === 0;
+    const publishButton = document.querySelector('#publish-semantic-draft');
+    publishButton.disabled = draft.measures.length === 0;
+    publishButton.textContent = draft.generation.ai_generated
+      ? '审核并发布到 SuperSonic'
+      : '审核规则草稿并发布';
   } catch (cause) {
     error.textContent = cause.message; error.hidden = false;
   } finally {

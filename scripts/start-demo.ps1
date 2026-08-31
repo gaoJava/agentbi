@@ -140,7 +140,19 @@ $env:SUPERSET_DASHBOARD_PATH = '/superset/dashboard/1/'
 $env:SUPERSET_USER = 'admin'
 $env:SUPERSET_PASSWORD = 'admin'
 $env:AGENTBI_DATABASE_URL = 'sqlite:///./data/agentbi.db'
-$env:AGENTBI_SESSION_SECRET = $env:AGENTBI_API_KEY
+$dataDir = Join-Path $projectRoot 'data'
+$sessionSecretPath = Join-Path $dataDir '.agentbi-session-secret'
+New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+if (Test-Path -LiteralPath $sessionSecretPath) {
+    $sessionSecret = (Get-Content -LiteralPath $sessionSecretPath -Raw).Trim()
+    if ($sessionSecret.Length -lt 32) { throw 'Persisted AgentBI session secret is invalid.' }
+}
+else {
+    $sessionSecret = New-SessionApiKey
+    Set-Content -LiteralPath $sessionSecretPath -Value $sessionSecret -NoNewline
+}
+# Keep the provider-key encryption key stable across demo restarts. The API key remains ephemeral.
+$env:AGENTBI_SESSION_SECRET = $sessionSecret
 $env:AGENTBI_ALLOWED_ORIGINS = 'http://localhost:8088,http://127.0.0.1:8088,http://127.0.0.1:8090'
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
 
