@@ -1259,6 +1259,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         identity: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
+        generation_started = time.perf_counter()
         try:
             dataset = await app.state.superset_client.get_dataset(payload.dataset_id)
         except SupersetApiError as exc:
@@ -1270,6 +1271,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if selected_provider is None:
                 raise HTTPException(status_code=404, detail="所选 LLM 模型配置不存在")
         if payload.use_llm and (selected_provider is not None or app.state.semantic_llm.configured):
+            llm_started = time.perf_counter()
             try:
                 if selected_provider is not None:
                     draft = await app.state.semantic_llm.enrich_with(
@@ -1287,6 +1289,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 draft["warnings"].append(
                     f"LLM 增强失败：{exc}。已安全降级为字段元数据推断。"
                 )
+            draft["generation"]["llm_duration_ms"] = round(
+                (time.perf_counter() - llm_started) * 1000
+            )
+        draft["generation"]["duration_ms"] = round(
+            (time.perf_counter() - generation_started) * 1000
+        )
         sessions.audit(
             "semantic_draft_generated",
             "success",
@@ -1328,8 +1336,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=422,
                 detail="所选 SuperSonic 数据库中找不到该 Dataset 对应的物理表，请先配置同源连接",
             ) from exc
-        if not reviewed_fields.issubset(target_columns):
-            raise HTTPException(status_code=422, detail="Superset 与 SuperSonic 的同名表字段不一致")
+        missing_columns = sorted(str(item) for item in reviewed_fields - target_columns)
+        if missing_columns:
+            preview = "、".join(missing_columns[:8])
+            suffix = f"等 {len(missing_columns)} 个字段" if len(missing_columns) > 8 else ""
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"SuperSonic 物理表缺少字段：{preview}{suffix}。"
+                    "请确认两端连接指向同一数据库、Schema 和表；若 Superset Dataset 是虚拟数据集，"
+                    "请在 SuperSonic 中配置对应物理表后再发布。"
+                ),
+            )
 
         def reviewed(items: list[dict[str, object]]) -> list[dict[str, object]]:
             if any(item.get("field") not in reviewed_fields for item in items):

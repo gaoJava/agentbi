@@ -111,9 +111,18 @@ class SemanticDraftLlm:
             "dataset": draft["dataset"],
             "fields": fields,
             "baseline": {
-                "identifiers": draft["identifiers"],
-                "dimensions": draft["dimensions"],
-                "measures": draft["measures"],
+                "identifiers": [
+                    {key: item[key] for key in ("name", "field", "type") if key in item}
+                    for item in draft["identifiers"]
+                ],
+                "dimensions": [
+                    {key: item[key] for key in ("name", "field", "type") if key in item}
+                    for item in draft["dimensions"]
+                ],
+                "measures": [
+                    {key: item[key] for key in ("name", "field", "aggregation") if key in item}
+                    for item in draft["measures"]
+                ],
                 "drilldown_path": draft["drilldown_path"],
             },
         }
@@ -134,13 +143,13 @@ class SemanticDraftLlm:
             "messages": messages,
             # Some OpenAI-compatible providers (including Zhipu) reject zero.
             "temperature": 0.1,
-            "max_tokens": 16384 if self._is_zhipu_glm(base_url, model) else 4096,
+            "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
         if self._is_zhipu_glm(base_url, model):
-            # GLM-5 consumes output tokens for reasoning before emitting final JSON. Some
-            # provider-side model aliases reject thinking controls, so preserve their
-            # default mode and reserve enough output budget for the final structured result.
+            # Semantic classification is a constrained extraction task. Disabling GLM's
+            # default deep reasoning avoids spending most latency on hidden thought tokens.
+            completion_payload["thinking"] = {"type": "disabled"}
             completion_payload.pop("temperature", None)
         try:
             response = await self._client.post(

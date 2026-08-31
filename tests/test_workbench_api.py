@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260831.15" in shell.text
+        assert "app.js?v=20260831.16" in shell.text
         assert "prototype.css?v=20260831.7" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
@@ -1000,6 +1000,7 @@ def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
         assert generated.status_code == 200
         draft = generated.json()["draft"]
         assert draft["generation"]["ai_generated"] is False
+        assert draft["generation"]["duration_ms"] >= 0
         publish = client.post(
             "/api/v1/admin/semantic-drafts/publish",
             headers=headers,

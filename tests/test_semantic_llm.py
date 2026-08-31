@@ -179,12 +179,12 @@ def test_connection_checks_chat_protocol_without_requiring_semantic_draft() -> N
     asyncio.run(client.close())
 
 
-def test_glm_semantic_enrichment_reserves_final_output_budget() -> None:
+def test_glm_semantic_enrichment_uses_fast_non_reasoning_mode() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        assert "thinking" not in payload
+        assert payload["thinking"] == {"type": "disabled"}
         assert "temperature" not in payload
-        assert payload["max_tokens"] == 16384
+        assert payload["max_tokens"] == 4096
         result = {
             "model": {}, "identifiers": baseline()["identifiers"], "dimensions": [],
             "measures": baseline()["measures"], "drilldown_path": [],

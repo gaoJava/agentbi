@@ -546,7 +546,9 @@ async function generateSemanticDraft() {
     document.querySelector('#semantic-draft-measures').value = formatDraftItems(draft.measures, item => `:${item.aggregation}`);
     document.querySelector('#semantic-draft-drilldown').value = draft.drilldown_path.join('，');
     const source = document.querySelector('#semantic-generation-source');
-    source.textContent = `${draft.generation.label}。所有推荐项必须由管理员审核后才能发布。`;
+    const elapsedMs = Number(draft.generation.llm_duration_ms ?? draft.generation.duration_ms ?? 0);
+    const elapsedText = elapsedMs > 0 ? ` · 用时 ${(elapsedMs / 1000).toFixed(1)} 秒` : '';
+    source.textContent = `${draft.generation.label}${elapsedText}。所有推荐项必须由管理员审核后才能发布。`;
     source.classList.toggle('ai-source', Boolean(draft.generation.ai_generated));
     source.classList.toggle('fallback-source', !draft.generation.ai_generated);
     const warnings = document.querySelector('#semantic-draft-warnings');
