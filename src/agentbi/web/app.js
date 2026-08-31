@@ -486,10 +486,12 @@ async function openSemanticDraftEditor() {
     }
     const updateProviderNote = () => {
       const option = providerSelect.selectedOptions[0];
-      reasoningModeSelect.disabled = !option?.value;
+      const providerDefaultDeep = String(option?.dataset.model || '').toLowerCase().startsWith('glm-5.3');
+      if (providerDefaultDeep) reasoningModeSelect.value = 'deep';
+      reasoningModeSelect.disabled = !option?.value || providerDefaultDeep;
       const modeLabel = reasoningModeSelect.value === 'deep' ? '深度模式' : '快速模式';
       document.querySelector('#semantic-generation-source').textContent = option?.value
-        ? `本次将使用 ${option.dataset.model} 的${modeLabel}推荐维度、指标、同义词和下钻路径；不会改变系统默认模型。仅发送 Dataset 名称和字段元数据。`
+        ? `本次将使用 ${option.dataset.model} 的${modeLabel}推荐维度、指标、同义词和下钻路径；${providerDefaultDeep ? '当前服务别名不接受思考开关，已锁定深度模式。' : ''}不会改变系统默认模型。仅发送 Dataset 名称和字段元数据。`
         : '本次不调用 LLM，仅使用可解释的 Dataset 字段元数据推断。';
     };
     providerSelect.onchange = updateProviderNote;

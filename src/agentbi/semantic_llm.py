@@ -150,7 +150,15 @@ class SemanticDraftLlm:
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
-        if self._is_zhipu_glm(base_url, model):
+        effective_reasoning_mode = reasoning_mode
+        compatibility_mode = self._uses_provider_default_thinking(base_url, model)
+        if compatibility_mode:
+            # Some provider aliases (currently glm-5.3) reject the documented thinking
+            # control object. Their successful behavior is the provider's default deep mode.
+            effective_reasoning_mode = "deep"
+            completion_payload["max_tokens"] = 16384
+            completion_payload.pop("temperature", None)
+        elif self._is_zhipu_glm(base_url, model):
             deep_reasoning = reasoning_mode == "deep"
             completion_payload["thinking"] = {
                 "type": "enabled" if deep_reasoning else "disabled"
@@ -201,10 +209,11 @@ class SemanticDraftLlm:
         result["generation"] = {
             "source": "llm",
             "ai_generated": True,
-            "reasoning_mode": reasoning_mode,
+            "reasoning_mode": effective_reasoning_mode,
             "label": (
                 f"真实 LLM 增强（{model} · "
-                f"{'深度模式' if reasoning_mode == 'deep' else '快速模式'}）"
+                f"{'深度模式' if effective_reasoning_mode == 'deep' else '快速模式'}"
+                f"{'· 模型兼容' if compatibility_mode else ''}）"
             ),
         }
         result["warnings"] = []
@@ -213,6 +222,10 @@ class SemanticDraftLlm:
     @staticmethod
     def _is_zhipu_glm(base_url: str, model: str) -> bool:
         return "bigmodel.cn" in base_url.lower() and model.lower().startswith("glm-")
+
+    @staticmethod
+    def _uses_provider_default_thinking(base_url: str, model: str) -> bool:
+        return "bigmodel.cn" in base_url.lower() and model.lower().startswith("glm-5.3")
 
     @staticmethod
     def _parse_json_content(content: object) -> object:

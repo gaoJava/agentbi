@@ -194,7 +194,7 @@ def test_glm_semantic_enrichment_uses_fast_non_reasoning_mode() -> None:
     client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
     enriched = asyncio.run(client.enrich_with(
         baseline(), base_url="https://open.bigmodel.cn/api/paas/v4",
-        api_key="secret", model="glm-5.3",
+        api_key="secret", model="glm-5.2",
     ))
     assert enriched["generation"]["ai_generated"] is True
     asyncio.run(client.close())
@@ -214,10 +214,31 @@ def test_glm_semantic_enrichment_supports_deep_reasoning_mode() -> None:
     client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
     enriched = asyncio.run(client.enrich_with(
         baseline(), base_url="https://open.bigmodel.cn/api/paas/v4",
-        api_key="secret", model="glm-5.3", reasoning_mode="deep",
+        api_key="secret", model="glm-5.2", reasoning_mode="deep",
     ))
     assert enriched["generation"]["reasoning_mode"] == "deep"
     assert "深度模式" in enriched["generation"]["label"]
+    asyncio.run(client.close())
+
+
+def test_glm_53_alias_uses_provider_default_deep_mode() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "thinking" not in payload
+        assert payload["max_tokens"] == 16384
+        result = {
+            "model": {}, "identifiers": baseline()["identifiers"], "dimensions": [],
+            "measures": baseline()["measures"], "drilldown_path": [],
+        }
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
+
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    enriched = asyncio.run(client.enrich_with(
+        baseline(), base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key="secret", model="glm-5.3", reasoning_mode="fast",
+    ))
+    assert enriched["generation"]["reasoning_mode"] == "deep"
+    assert "模型兼容" in enriched["generation"]["label"]
     asyncio.run(client.close())
 
 

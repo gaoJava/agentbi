@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260830.8" in shell.text
-        assert "app.js?v=20260831.17" in shell.text
+        assert "app.js?v=20260831.18" in shell.text
         assert "prototype.css?v=20260831.7" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
