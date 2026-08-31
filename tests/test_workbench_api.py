@@ -1067,6 +1067,10 @@ def test_admin_manages_real_supersonic_domains_with_reference_guard() -> None:
         )
         assert updated.status_code == 200
         assert updated.json()["domain"]["name"] == "游戏经营域"
+        catalog = client.get("/api/v1/admin/semantic-drafts/catalog")
+        assert catalog.status_code == 200
+        saved_domain = next(item for item in catalog.json()["domains"] if item["id"] == 2)
+        assert saved_domain["description"] == "经营分析"
         deleted = client.delete("/api/v1/admin/semantic-drafts/domains/2", headers=headers)
         assert deleted.status_code == 204
 

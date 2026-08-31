@@ -953,7 +953,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: SessionIdentity = semantic_session,
     ) -> dict[str, object]:
         try:
-            return await app.state.supersonic_client.list_modeling_catalog()
+            catalog = await app.state.supersonic_client.list_modeling_catalog()
+            descriptions = sessions.repository.list_semantic_domain_descriptions()
+            for domain in catalog.get("domains", []):
+                domain["description"] = descriptions.get(domain["id"], domain.get("description", ""))
+            return catalog
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 建模目录不可用") from exc
 
@@ -973,6 +977,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 创建主题域失败") from exc
+        sessions.repository.save_semantic_domain_description(
+            domain["id"], payload.description, identity.subject
+        )
+        domain["description"] = payload.description
         sessions.audit("semantic_domain_created", "success", actor_user_id=identity.subject,
                        source_ip=request.client.host if request.client else "", detail=payload.biz_name)
         return {"domain": domain}
@@ -995,6 +1003,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 修改主题域失败") from exc
+        sessions.repository.save_semantic_domain_description(
+            domain_id, payload.description, identity.subject
+        )
+        domain["description"] = payload.description
         sessions.audit("semantic_domain_updated", "success", actor_user_id=identity.subject,
                        source_ip=request.client.host if request.client else "", detail=str(domain_id))
         return {"domain": domain}
@@ -1015,6 +1027,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise
         except UpstreamError as exc:
             raise HTTPException(status_code=502, detail="SuperSonic 删除主题域失败") from exc
+        sessions.repository.delete_semantic_domain_description(domain_id)
         sessions.audit("semantic_domain_deleted", "success", actor_user_id=identity.subject,
                        source_ip=request.client.host if request.client else "", detail=str(domain_id))
         return Response(status_code=status.HTTP_204_NO_CONTENT)

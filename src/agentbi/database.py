@@ -255,6 +255,16 @@ class LlmProviderConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class SemanticDomainMetadata(Base):
+    """AgentBI metadata missing from the current SuperSonic domain table."""
+
+    __tablename__ = "semantic_domain_metadata"
+    domain_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    description: Mapped[str] = mapped_column(String(512), default="")
+    updated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 @dataclass(frozen=True, slots=True)
 class AccountRecord:
     id: str
@@ -431,6 +441,31 @@ class IdentityRepository:
             if item.enabled:
                 raise PermissionError("active LLM provider cannot be deleted")
             db.delete(item)
+
+    def list_semantic_domain_descriptions(self) -> dict[int, str]:
+        with Session(self.engine) as db:
+            return {
+                item.domain_id: item.description
+                for item in db.scalars(select(SemanticDomainMetadata)).all()
+            }
+
+    def save_semantic_domain_description(
+        self, domain_id: int, description: str, actor_user_id: str
+    ) -> None:
+        with Session(self.engine) as db, db.begin():
+            item = db.get(SemanticDomainMetadata, domain_id)
+            if item is None:
+                item = SemanticDomainMetadata(domain_id=domain_id)
+                db.add(item)
+            item.description = description.strip()
+            item.updated_by = actor_user_id
+            item.updated_at = utc_now()
+
+    def delete_semantic_domain_description(self, domain_id: int) -> None:
+        with Session(self.engine) as db, db.begin():
+            item = db.get(SemanticDomainMetadata, domain_id)
+            if item is not None:
+                db.delete(item)
 
     def conversation_context(
         self, conversation_id: int, actor_user_id: str
