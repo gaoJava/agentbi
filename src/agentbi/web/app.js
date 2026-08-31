@@ -34,6 +34,7 @@ let pendingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
 let supersetWorkspace;
+let supersetWorkspaceDirty = true;
 let supersetFrameMode = 'view';
 const managedChartKeys = new Set();
 let activeView = 'dashboard';
@@ -70,6 +71,7 @@ function showLogin() {
   window.AgentBI.session.clear();
   window.AgentBI.supersetWorkspace.clear();
   supersetWorkspace = undefined;
+  supersetWorkspaceDirty = true;
   const frame = document.querySelector('#superset-frame');
   frame.removeAttribute('src');
   frame.hidden = true;
@@ -323,6 +325,7 @@ async function loadSupersetWorkspace({ force = false } = {}) {
     document.querySelector('#superset-loading').hidden = true; document.querySelector('#superset-unavailable').hidden = true;
     document.querySelector('#superset-frame').hidden = true; document.querySelector('#superset-mode-label').textContent = '原生模式 · 真实查询';
     renderNativeDashboard(native.dashboard); document.querySelector('#agent-dashboard-name').textContent = native.dashboard.title || '经营总览';
+    supersetWorkspaceDirty = false;
   } catch (error) {
     showSupersetUnavailable(error.message);
   }
@@ -359,7 +362,6 @@ function showWorkbench(user) {
   loginView.hidden = true;
   workbenchView.hidden = false;
   switchView('dashboard');
-  selectDashboardCanvas('superset');
   loadManagedCharts();
   loadLiveSemanticModels().catch(error => showManagementFeedback(error.message, true));
 }
@@ -533,6 +535,7 @@ function switchView(view) {
     document.querySelector('#user-permissions').hidden = admin;
     document.querySelector('#admin-permissions').hidden = !admin;
     renderDashboardCanvasMode();
+    loadSupersetWorkspace({force: supersetWorkspaceDirty});
   }
   if (registry) renderRegistryCenter();
   if (chartManagement) {
@@ -903,6 +906,7 @@ function renderSupersetDashboardAssets() {
           method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
         });
         supersetWorkspace = undefined;
+        supersetWorkspaceDirty = true;
         window.AgentBI.supersetWorkspace.clear();
         await loadSupersetDashboardAssets();
         switchView('dashboard');
@@ -998,7 +1002,9 @@ async function refreshSupersetDashboardsAfterWrite(message) {
   loadedSupersetDashboards = body.dashboards || [];
   renderSupersetDashboardAssets();
   supersetWorkspace = undefined;
+  supersetWorkspaceDirty = true;
   window.AgentBI.supersetWorkspace.clear();
+  if (activeView === 'dashboard') await loadSupersetWorkspace({force: true});
   showManagementFeedback(message);
 }
 
@@ -1780,6 +1786,7 @@ document.querySelector('#sync-superset-dashboards').addEventListener('click', as
     loadedSupersetDashboards = body.dashboards || [];
     renderSupersetDashboardAssets();
     supersetWorkspace = undefined;
+    supersetWorkspaceDirty = true;
     window.AgentBI.supersetWorkspace.clear();
     showManagementFeedback(`已同步 ${body.count} 个 Superset 仪表盘`);
   } catch (error) {
