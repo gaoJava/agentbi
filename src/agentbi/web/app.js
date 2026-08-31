@@ -2753,6 +2753,15 @@ function renderSemanticDomainRows() {
     group.append(remove);
     return group;
   });
+  document.querySelectorAll('#semantic-domain-table-body tr').forEach(row => {
+    const countCell = row.children[4];
+    const count = countCell.textContent;
+    countCell.textContent = '';
+    const badge = document.createElement('span');
+    badge.className = 'semantic-model-count';
+    badge.textContent = `${count} 个`;
+    countCell.append(badge);
+  });
 }
 
 document.querySelector('#open-semantic-domain').addEventListener('click', () =>
