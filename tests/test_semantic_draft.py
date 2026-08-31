@@ -21,5 +21,7 @@ def test_builds_reviewable_metadata_draft_without_claiming_ai() -> None:
     assert draft["identifiers"][0]["field"] == "order_id"
     assert draft["dimensions"][0]["type"] == "time"
     assert draft["measures"][0]["field"] == "revenue"
+    assert draft["model"]["name"] == "销售订单"
+    assert draft["model"]["biz_name"] == "sales_orders_model"
     assert draft["drilldown_path"] == ["区域", "渠道"]
     assert draft["warnings"] == []

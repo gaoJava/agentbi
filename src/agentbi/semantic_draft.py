@@ -49,6 +49,10 @@ _LABELS = {
     "other": "其他",
     "rank": "排名",
 }
+_DATASET_LABELS = {
+    "sales_orders": "销售订单",
+    "video_game_sales": "视频游戏销量",
+}
 
 
 def _display_name(value: str) -> str:
@@ -63,6 +67,13 @@ def _synonyms(name: str, display_name: str) -> list[str]:
     if spaced and spaced.lower() != name.lower():
         values.append(spaced)
     return list(dict.fromkeys(value[:64] for value in values if value))[:5]
+
+
+def _model_biz_name(value: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9_]", "_", value).strip("_") or "semantic"
+    if not base[0].isalpha():
+        base = f"model_{base}"
+    return f"{base[:122]}_model"
 
 
 def build_semantic_draft(dataset: dict[str, Any]) -> dict[str, Any]:
@@ -145,8 +156,8 @@ def build_semantic_draft(dataset: dict[str, Any]) -> dict[str, Any]:
             "database_name": str(dataset.get("database_name") or ""),
         },
         "model": {
-            "name": _display_name(dataset_name),
-            "biz_name": re.sub(r"[^A-Za-z0-9_]", "_", dataset_name).strip("_")[:128],
+            "name": _DATASET_LABELS.get(dataset_name.lower(), _display_name(dataset_name)),
+            "biz_name": _model_biz_name(dataset_name),
             "description": f"基于 Superset Dataset {dataset_name} 生成的待审核语义草稿",
         },
         "identifiers": identifiers[:5],

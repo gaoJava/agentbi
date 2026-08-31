@@ -510,7 +510,7 @@ async function generateSemanticDraft() {
     activeSemanticDraft = body.draft;
     const draft = activeSemanticDraft;
     document.querySelector('#semantic-draft-name').value = draft.model.name;
-    document.querySelector('#semantic-draft-biz-name').value = `${draft.model.biz_name}_model`;
+    document.querySelector('#semantic-draft-biz-name').value = draft.model.biz_name;
     document.querySelector('#semantic-draft-description').value = draft.model.description;
     document.querySelector('#semantic-draft-identifiers').value = formatDraftItems(draft.identifiers, () => '');
     document.querySelector('#semantic-draft-dimensions').value = formatDraftItems(draft.dimensions, item => `:${item.type}`);

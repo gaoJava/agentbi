@@ -353,10 +353,10 @@
         <aside id="semantic-generation-source" class="draft-source-note">尚未生成。系统会明确区分元数据推断和真实 LLM 生成。</aside>
         <div id="semantic-draft-review" hidden>
           <div class="wizard-grid">
-            <label>模型名称<input id="semantic-draft-name" maxlength="128" required></label>
-            <label>业务标识<input id="semantic-draft-biz-name" maxlength="128" pattern="[A-Za-z][A-Za-z0-9_]*" required></label>
-            <label>SuperSonic 主题域<select id="semantic-draft-domain" required></select></label>
-            <label>SuperSonic 数据库<select id="semantic-draft-database" required></select><button id="open-sonic-database" class="inline-link" type="button">＋ 配置同源连接</button></label>
+            <label>模型名称<small>系统推荐，可按业务重新命名</small><input id="semantic-draft-name" maxlength="128" required></label>
+            <label>业务标识<small>系统推荐，可修改；发布后用于查询</small><input id="semantic-draft-biz-name" maxlength="128" pattern="[A-Za-z][A-Za-z0-9_]*" required></label>
+            <label>SuperSonic 主题域<small>来自真实治理目录，用于业务分类</small><select id="semantic-draft-domain" required></select></label>
+            <label>SuperSonic 数据库<small>真实物理连接，可配置清晰的连接别名</small><select id="semantic-draft-database" required></select><button id="open-sonic-database" class="inline-link" type="button">＋ 配置同源连接</button></label>
             <label class="wizard-full">模型说明<textarea id="semantic-draft-description" maxlength="512"></textarea></label>
             <label class="wizard-full">标识符（每行：名称=字段）<textarea id="semantic-draft-identifiers" required></textarea></label>
             <label class="wizard-full">维度（每行：名称=字段:categorical 或 time）<textarea id="semantic-draft-dimensions"></textarea></label>
@@ -416,6 +416,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260831.6" defer></script>
+  <script src="/app/assets/app.js?v=20260831.7" defer></script>
 </body>
 </html>

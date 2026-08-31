@@ -153,6 +153,22 @@ class SemanticDraftLlm:
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             raise SemanticLlmError("LLM 语义增强服务不可用或返回格式无效") from exc
         self._validate(result, field_names)
+        baseline_model = draft["model"]
+        proposed_model = result["model"]
+        proposed_biz_name = str(proposed_model.get("biz_name") or "").strip()
+        if not proposed_biz_name or not proposed_biz_name[0].isalpha():
+            proposed_biz_name = str(baseline_model["biz_name"])
+        proposed_biz_name = "".join(
+            character if character.isalnum() or character == "_" else "_"
+            for character in proposed_biz_name
+        )[:128]
+        result["model"] = {
+            "name": str(proposed_model.get("name") or baseline_model["name"]).strip()[:128],
+            "biz_name": proposed_biz_name,
+            "description": str(
+                proposed_model.get("description") or baseline_model["description"]
+            ).strip()[:512],
+        }
         result["fields"] = fields
         result["dataset"] = draft["dataset"]
         result["generation"] = {

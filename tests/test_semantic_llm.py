@@ -74,7 +74,7 @@ def test_enrich_with_uses_selected_provider_without_changing_default() -> None:
         assert request.headers["Authorization"] == "Bearer selected-secret"
         assert payload["model"] == "selected-model"
         result = {
-            "model": {"name": "订单", "biz_name": "orders_model", "description": ""},
+            "model": {},
             "identifiers": [
                 {"name": "订单", "field": "order_id", "type": "primary", "synonyms": []}
             ],
@@ -97,6 +97,9 @@ def test_enrich_with_uses_selected_provider_without_changing_default() -> None:
     )
     asyncio.run(client.close())
     assert result["generation"]["label"] == "真实 LLM 增强（selected-model）"
+    assert result["model"]["name"] == "订单"
+    assert result["model"]["biz_name"] == "orders"
+    assert result["model"]["description"] == ""
 
 
 def test_rejects_hallucinated_field() -> None:
