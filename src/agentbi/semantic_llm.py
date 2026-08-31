@@ -82,6 +82,24 @@ class SemanticDraftLlm:
     async def enrich(self, draft: dict[str, Any]) -> dict[str, Any]:
         if not self.configured:
             return draft
+        return await self.enrich_with(
+            draft,
+            base_url=str(self._base_url),
+            api_key=str(self._api_key),
+            model=str(self._model),
+        )
+
+    async def enrich_with(
+        self,
+        draft: dict[str, Any],
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+    ) -> dict[str, Any]:
+        """Enrich one draft with a selected provider without changing global state."""
+        if not base_url or not api_key or not model:
+            return draft
         fields = draft["fields"]
         field_names = {item["name"] for item in fields}
         # Only schema metadata crosses this boundary; no rows, credentials, SQL or user prompts.
@@ -109,10 +127,10 @@ class SemanticDraftLlm:
         ]
         try:
             response = await self._client.post(
-                f"{self._base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
                 json={
-                    "model": self._model,
+                    "model": model,
                     "messages": messages,
                     # Some OpenAI-compatible providers (including Zhipu) reject zero.
                     "temperature": 0.1,
@@ -134,7 +152,7 @@ class SemanticDraftLlm:
         result["generation"] = {
             "source": "llm",
             "ai_generated": True,
-            "label": f"真实 LLM 增强（{self._model}）",
+            "label": f"真实 LLM 增强（{model}）",
         }
         result["warnings"] = []
         return result

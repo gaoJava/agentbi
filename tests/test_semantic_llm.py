@@ -67,6 +67,38 @@ def test_enriches_only_with_schema_constrained_real_provider_response() -> None:
     assert result["measures"][0]["name"] == "销售额"
 
 
+def test_enrich_with_uses_selected_provider_without_changing_default() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert str(request.url).startswith("http://selected.test/v1/chat/completions")
+        assert request.headers["Authorization"] == "Bearer selected-secret"
+        assert payload["model"] == "selected-model"
+        result = {
+            "model": {"name": "订单", "biz_name": "orders_model", "description": ""},
+            "identifiers": [
+                {"name": "订单", "field": "order_id", "type": "primary", "synonyms": []}
+            ],
+            "dimensions": [],
+            "measures": [
+                {"name": "金额", "field": "amount", "aggregation": "SUM", "synonyms": []}
+            ],
+            "drilldown_path": [],
+        }
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
+
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    result = asyncio.run(
+        client.enrich_with(
+            baseline(),
+            base_url="http://selected.test/v1/",
+            api_key="selected-secret",
+            model="selected-model",
+        )
+    )
+    asyncio.run(client.close())
+    assert result["generation"]["label"] == "真实 LLM 增强（selected-model）"
+
+
 def test_rejects_hallucinated_field() -> None:
     result = {
         "model": {},

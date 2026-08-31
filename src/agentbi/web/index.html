@@ -349,7 +349,7 @@
     <section class="chart-wizard semantic-draft-dialog" role="dialog" aria-modal="true" aria-labelledby="semantic-draft-title">
       <header><div><span>Superset Dataset → SuperSonic</span><h2 id="semantic-draft-title">智能语义建模草稿</h2></div><button id="close-semantic-draft" type="button" aria-label="关闭">×</button></header>
       <form id="semantic-draft-form">
-        <div class="draft-source-row"><label>选择真实 Dataset<select id="semantic-draft-dataset" required></select></label><button id="generate-semantic-draft" type="button">生成草稿</button></div>
+        <div class="draft-source-row"><label>选择真实 Dataset<select id="semantic-draft-dataset" required></select></label><label>本次使用模型<select id="semantic-draft-provider"></select></label><button id="generate-semantic-draft" type="button">生成草稿</button></div>
         <aside id="semantic-generation-source" class="draft-source-note">尚未生成。系统会明确区分元数据推断和真实 LLM 生成。</aside>
         <div id="semantic-draft-review" hidden>
           <div class="wizard-grid">
@@ -416,6 +416,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260831.5" defer></script>
+  <script src="/app/assets/app.js?v=20260831.6" defer></script>
 </body>
 </html>

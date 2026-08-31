@@ -457,6 +457,16 @@ async function openSemanticDraftEditor() {
     fillSelect(document.querySelector('#semantic-draft-dataset'),
       loadedDataSources.map(item => ({...item, id: item.superset_id})),
       item => `${item.name}（${item.database_name} · ID ${item.superset_id}）`);
+    const providerSelect = document.querySelector('#semantic-draft-provider');
+    providerSelect.innerHTML = '<option value="">仅用字段元数据推断</option>';
+    (provider.items || []).forEach(item => {
+      const option = document.createElement('option');
+      option.value = String(item.id);
+      option.textContent = `${item.model}${item.id === provider.active_id ? '（当前生效）' : ''}`;
+      option.dataset.model = item.model;
+      providerSelect.append(option);
+    });
+    providerSelect.value = provider.active_id ? String(provider.active_id) : '';
     fillSelect(document.querySelector('#semantic-draft-domain'), catalog.domains || [],
       item => `${item.name}（ID ${item.id}）`);
     fillSelect(document.querySelector('#semantic-draft-database'), catalog.databases || [],
@@ -464,11 +474,14 @@ async function openSemanticDraftEditor() {
     if (!loadedDataSources.length || !(catalog.domains || []).length || !(catalog.databases || []).length) {
       throw new Error('建模前至少需要一个 Superset Dataset、SuperSonic 主题域和数据库连接');
     }
-    document.querySelector('#semantic-generation-source').textContent = provider.enabled
-      ? `请选择 Dataset 生成草稿。当前将使用 ${provider.model} 推荐维度、指标、同义词和下钻路径。`
-      : provider.configured
-        ? '请选择 Dataset 生成草稿。模型服务已保存但尚未启用，将使用可解释的字段元数据推断。'
-        : '请选择 Dataset 生成草稿。当前未配置 LLM，将使用可解释的字段元数据推断。';
+    const updateProviderNote = () => {
+      const option = providerSelect.selectedOptions[0];
+      document.querySelector('#semantic-generation-source').textContent = option?.value
+        ? `本次将使用 ${option.dataset.model} 推荐维度、指标、同义词和下钻路径；不会改变系统默认模型。仅发送 Dataset 名称和字段元数据。`
+        : '本次不调用 LLM，仅使用可解释的 Dataset 字段元数据推断。';
+    };
+    providerSelect.onchange = updateProviderNote;
+    updateProviderNote();
   } catch (cause) {
     error.textContent = cause.message; error.hidden = false;
   }
@@ -485,9 +498,14 @@ async function generateSemanticDraft() {
   error.hidden = true; button.disabled = true; button.textContent = '正在分析字段…';
   try {
     const datasetId = Number(document.querySelector('#semantic-draft-dataset').value);
+    const providerValue = document.querySelector('#semantic-draft-provider').value;
     const body = await request('/api/v1/admin/semantic-drafts/generate', {
       method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
-      body: JSON.stringify({dataset_id: datasetId}),
+      body: JSON.stringify({
+        dataset_id: datasetId,
+        provider_id: providerValue ? Number(providerValue) : null,
+        use_llm: Boolean(providerValue),
+      }),
     });
     activeSemanticDraft = body.draft;
     const draft = activeSemanticDraft;

@@ -247,6 +247,8 @@ class SemanticModelUpdatePayload(BaseModel):
 class SemanticDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dataset_id: int = Field(gt=0)
+    provider_id: int | None = Field(default=None, gt=0)
+    use_llm: bool = True
 
 
 class LlmProviderPayload(BaseModel):
@@ -1138,9 +1140,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SupersetApiError as exc:
             raise HTTPException(status_code=502, detail="无法读取 Superset Dataset 字段") from exc
         draft = build_semantic_draft(dataset)
-        if app.state.semantic_llm.configured:
+        selected_provider = None
+        if payload.use_llm and payload.provider_id is not None:
+            selected_provider = sessions.repository.get_llm_provider_config(payload.provider_id)
+            if selected_provider is None:
+                raise HTTPException(status_code=404, detail="所选 LLM 模型配置不存在")
+        if payload.use_llm and (selected_provider is not None or app.state.semantic_llm.configured):
             try:
-                draft = await app.state.semantic_llm.enrich(draft)
+                if selected_provider is not None:
+                    draft = await app.state.semantic_llm.enrich_with(
+                        draft,
+                        base_url=str(selected_provider["base_url"]),
+                        api_key=app.state.semantic_llm.decrypt_key(
+                            str(selected_provider["encrypted_api_key"])
+                        ),
+                        model=str(selected_provider["model"]),
+                    )
+                else:
+                    draft = await app.state.semantic_llm.enrich(draft)
             except SemanticLlmError:
                 draft["warnings"].append("LLM 增强失败，已安全降级为字段元数据推断。")
         sessions.audit(
@@ -1148,7 +1165,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "success",
             actor_user_id=identity.subject,
             source_ip=request.client.host if request.client else "",
-            detail=f"dataset:{payload.dataset_id}:{draft['generation']['source']}",
+            detail=(
+                f"dataset:{payload.dataset_id}:{draft['generation']['source']}:"
+                f"provider:{payload.provider_id or 'active'}"
+            ),
         )
         return {"draft": draft}
 
