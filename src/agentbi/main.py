@@ -1624,6 +1624,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {
                 "workspace": {
                     "available": False,
+                    "can_edit": False,
                     "status": "misconfigured",
                     "message": "Superset 仪表盘路径配置无效",
                 }
@@ -1633,6 +1634,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {
                 "workspace": {
                     "available": False,
+                    "can_edit": False,
                     "status": "unavailable",
                     "message": "Superset 未启动，可继续使用本地降级画布",
                 }

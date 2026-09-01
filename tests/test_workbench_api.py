@@ -576,6 +576,7 @@ def test_superset_workspace_rejects_uncontrolled_dashboard_url() -> None:
         workspace = response.json()["workspace"]
         assert workspace == {
             "available": False,
+            "can_edit": False,
             "status": "misconfigured",
             "message": "Superset 仪表盘路径配置无效",
         }
