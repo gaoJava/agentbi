@@ -38,6 +38,12 @@ def analyze_request() -> AnalyzeRequest:
 
 
 class SuperSonicClientTest(unittest.TestCase):
+    def test_compiles_explicit_top_n_question(self):
+        self.assertEqual(
+            SuperSonicClient._ranking_query("按发行商统计全球销量前 10 名"),
+            ("publisher", "global_sales", 10),
+        )
+
     def test_rejects_successful_result_with_unrelated_requested_fields(self):
         with self.assertRaisesRegex(UpstreamError, "发行商.*全球销量"):
             SuperSonicClient._validate_question_result(
@@ -51,6 +57,14 @@ class SuperSonicClientTest(unittest.TestCase):
         ]}
         SuperSonicClient._validate_question_result("按发行商统计全球销量前 10 名", result)
         self.assertEqual(len(result["queryResults"]), 10)
+
+    def test_selects_only_candidate_for_requested_semantic_model(self):
+        candidates = [
+            {"id": 1, "viewId": 2, "sqlInfo": {"querySQL": "SELECT wrong_model"}},
+            {"id": 2, "viewId": 9, "sqlInfo": {"querySQL": "SELECT requested_model"}},
+        ]
+        selected = SuperSonicClient._select_governed_query(candidates, 9)
+        self.assertEqual(selected["id"], 2)
 
     def test_resolves_generated_database_id_and_reuses_same_source(self):
         requests: list[tuple[str, dict | None]] = []
@@ -98,6 +112,15 @@ class SuperSonicClientTest(unittest.TestCase):
                 return httpx.Response(200, json={
                     "code": 200, "data": [{"id": 2, "name": "业务库", "password": "secret"}],
                 })
+            if request.url.path.endswith("/view/getViewList"):
+                return httpx.Response(200, json={
+                    "code": 200,
+                    "data": [{
+                        "id": 9, "name": "停留时长统计", "bizName": "stay_time_view",
+                        "description": "受治理查询视图", "status": 1,
+                        "viewDetail": {"viewModelConfigs": [{"id": 3, "includesAll": True}]},
+                    }],
+                })
             return httpx.Response(200, json={
                 "code": 200,
                 "data": [{
@@ -113,8 +136,8 @@ class SuperSonicClientTest(unittest.TestCase):
         asyncio.run(client.close())
 
         self.assertEqual(models, [{
-            "id": 3, "key": "supersonic:3", "name": "停留时长统计",
-            "biz_name": "stay_time", "description": "受治理模型",
+            "id": 9, "key": "supersonic:9", "model_id": 3, "name": "停留时长统计",
+            "biz_name": "stay_time_view", "description": "受治理查询视图",
             "domain_id": 1, "domain_name": "超音数", "status": "active",
             "database_id": 2, "database_name": "业务库",
         }])

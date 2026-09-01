@@ -1,6 +1,8 @@
 param(
     [switch]$UseBundledDemoCredentials,
     [switch]$ReinitializeSuperset,
+    [switch]$RestartAgentBI,
+    [switch]$RestartSuperSonic,
     [string]$SuperSonicUser = $env:SUPERSONIC_USER,
     [string]$SuperSonicPassword = $env:SUPERSONIC_PASSWORD,
     [string]$SupersetRoot = '',
@@ -21,6 +23,37 @@ if (-not (Test-Path -LiteralPath $SuperSonicRoot)) {
 $runtimeDir = Join-Path $projectRoot '.runtime'
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 $supersetInitMarker = Join-Path $runtimeDir 'superset.initialized'
+
+if ($RestartAgentBI) {
+    $agentbiPidPath = Join-Path $runtimeDir 'agentbi.pid'
+    if (Test-Path -LiteralPath $agentbiPidPath) {
+        $agentbiPid = [int](Get-Content -LiteralPath $agentbiPidPath -Raw).Trim()
+        $agentbiProcess = Get-Process -Id $agentbiPid -ErrorAction SilentlyContinue
+        if ($agentbiProcess) {
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $agentbiPid" -ErrorAction SilentlyContinue).CommandLine
+            if ($commandLine -and $commandLine -notmatch 'uvicorn\s+agentbi\.main:app') {
+                throw "Refusing to stop PID $agentbiPid because it is not the recorded AgentBI uvicorn process."
+            }
+            Stop-Process -Id $agentbiPid -Force
+            $agentbiProcess.WaitForExit()
+        }
+    }
+}
+if ($RestartSuperSonic) {
+    $sonicPidPath = Join-Path $runtimeDir 'supersonic.pid'
+    if (Test-Path -LiteralPath $sonicPidPath) {
+        $sonicPid = [int](Get-Content -LiteralPath $sonicPidPath -Raw).Trim()
+        $sonicProcess = Get-Process -Id $sonicPid -ErrorAction SilentlyContinue
+        if ($sonicProcess) {
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $sonicPid" -ErrorAction SilentlyContinue).CommandLine
+            if ($commandLine -and $commandLine -notmatch 'com\.tencent\.supersonic\.StandaloneLauncher') {
+                throw "Refusing to stop PID $sonicPid because it is not the recorded SuperSonic process."
+            }
+            Stop-Process -Id $sonicPid -Force
+            $sonicProcess.WaitForExit()
+        }
+    }
+}
 
 function Test-HttpOk {
     param([Parameter(Mandatory)] [string]$Url)

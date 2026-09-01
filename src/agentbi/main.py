@@ -1366,20 +1366,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         identifiers = reviewed(payload.identifiers)
         dimensions = reviewed(payload.dimensions)
         measures = reviewed(payload.measures)
+        field_aliases = {"year": "game_year"} if "year" in reviewed_fields else {}
+        reserved_unused = {"rank", "row_number"} - {
+            str(item["field"]) for item in identifiers + dimensions + measures
+        }
+        published_fields = [
+            item for item in payload.fields if str(item["name"]) not in reserved_unused
+        ]
+
+        def published_field(value: object) -> str:
+            return field_aliases.get(str(value), str(value))
+
+        source_table = ".".join(
+            filter(None, [str(dataset.get("schema") or ""), str(dataset["name"])])
+        )
+        safe_projection = ", ".join(
+            f'"{item["name"]!s}" AS {published_field(item["name"])}'
+            if str(item["name"]) in field_aliases else f'"{item["name"]!s}"'
+            for item in published_fields
+        )
         model_detail = {
-            "queryType": "table_query",
-            "tableQuery": ".".join(
-                filter(None, [str(dataset.get("schema") or ""), str(dataset["name"])])
-            ),
+            "queryType": "sql_query" if field_aliases else "table_query",
+            "tableQuery": None if field_aliases else source_table,
+            "sqlQuery": f"SELECT {safe_projection} FROM {source_table}" if field_aliases else None,
             "fields": [
-                {"fieldName": str(item["name"]), "dataType": actual_columns[str(item["name"])]}
-                for item in payload.fields
+                {"fieldName": published_field(item["name"]),
+                 "dataType": actual_columns[str(item["name"])]}
+                for item in published_fields
             ],
             "identifiers": [
                 {
                     "name": str(item.get("name") or item["field"]),
                     "type": str(item.get("type") or "primary"),
-                    "bizName": str(item["field"]),
+                    "bizName": published_field(item["field"]),
                     "entityNames": item.get("synonyms") or [],
                     "isCreateDimension": 1,
                 }
@@ -1388,9 +1407,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "dimensions": [
                 {
                     "name": str(item.get("name") or item["field"]),
-                    "bizName": str(item["field"]),
+                    "bizName": published_field(item["field"]),
                     "type": str(item.get("type") or "categorical"),
-                    "expr": str(item["field"]),
+                    "expr": (
+                        "CURRENT_DATE"
+                        if str(item["field"]) == "year" and item.get("type") == "time"
+                        else published_field(item["field"])
+                    ),
                     "isCreateDimension": 1,
                     **(
                         {"typeParams": {"isPrimary": "true", "timeGranularity": "day"}}

@@ -89,6 +89,8 @@ def build_semantic_draft(dataset: dict[str, Any]) -> dict[str, Any]:
         data_type = str(column.get("type") or "Unknown")[:64]
         label = _display_name(name)
         fields.append({"name": name, "type": data_type})
+        if name.lower() in {"rank", "row_number"}:
+            continue
         if _IDENTIFIER.search(name) and not identifiers:
             identifiers.append(
                 {

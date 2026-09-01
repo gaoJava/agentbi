@@ -88,7 +88,7 @@ class Orchestrator:
             query_id=str(result.get("queryId") or request_id),
             semantic_model_id=request.context.semantic_model_id,
             question=request.question,
-            time_range=request.context.time_range,
+            time_range=str(result.get("effectiveTimeRange") or request.context.time_range),
             filters=request.context.filters,
             row_count=len(rows),
             query_time_ms=self._non_negative_int(result.get("queryTimeCost")),

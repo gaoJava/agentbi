@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -60,6 +61,47 @@ class SuperSonicClient:
         """Parse the question, select the best semantic parse, then execute it."""
 
         conversation_id, summary, history = self._conversation(request)
+        structured = self._ranking_query(request.question)
+        if structured:
+            dimension, metric, limit = structured
+            model_biz_name = await self._view_model_biz_name(
+                request.context.semantic_model_id
+            )
+            started = time.perf_counter()
+            data = await self._request_data(
+                "POST",
+                "/api/semantic/query/sql",
+                payload={
+                    "viewId": request.context.semantic_model_id,
+                    "sql": (
+                        f"SELECT {dimension}, SUM({metric}) AS {metric} "
+                        f"FROM {model_biz_name} "
+                        f"GROUP BY {dimension} ORDER BY {metric} DESC LIMIT {limit}"
+                    ),
+                },
+            )
+            if not isinstance(data, dict) or not isinstance(data.get("resultList"), list):
+                raise UpstreamError("SuperSonic returned an invalid structured query result")
+            dimension_label = self._field_label(dimension)
+            metric_label = self._field_label(metric)
+            rows = [
+                {dimension_label: row.get(dimension), metric_label: row.get(metric)}
+                for row in data["resultList"]
+                if isinstance(row, dict)
+            ]
+            result = {
+                "queryResults": rows,
+                "querySql": data.get("sql"),
+                "queryTimeCost": round((time.perf_counter() - started) * 1000),
+                "response": f"已按{dimension_label}汇总{metric_label}，返回前 {limit} 名。",
+                "effectiveTimeRange": "全部数据（本问题未应用时间筛选）",
+                "chatId": conversation_id,
+            }
+            self._validate_question_result(request.question, result)
+            self._conversations.record(
+                request.actor.subject, conversation_id, request.question, result
+            )
+            return result
         parse_payload = {
             "queryText": self._contextual_question(request, history, summary),
             "chatId": 0,
@@ -74,7 +116,7 @@ class SuperSonicClient:
             )
             if parsed.get("state") == "FAILED" or not candidates:
                 raise UpstreamError("SuperSonic could not resolve the semantic question")
-            parse_info = self._select_governed_query(candidates)
+            parse_info = self._select_governed_query(candidates, request.context.semantic_model_id)
 
             execute_payload = {
                 "queryText": parse_payload["queryText"],
@@ -93,6 +135,45 @@ class SuperSonicClient:
         result["chatId"] = conversation_id
         self._conversations.record(request.actor.subject, conversation_id, request.question, result)
         return result
+
+    async def _view_model_biz_name(self, view_id: int) -> str:
+        view = await self._request_data("GET", f"/api/semantic/view/{view_id}")
+        detail = view.get("viewDetail") if isinstance(view, dict) else None
+        configs = detail.get("viewModelConfigs") if isinstance(detail, dict) else None
+        model_id = next((item.get("id") for item in (configs or [])
+                         if isinstance(item, dict) and isinstance(item.get("id"), int)), None)
+        if model_id is None:
+            raise UpstreamError("SuperSonic query view has no semantic model")
+        model = await self._request_data("GET", f"/api/semantic/model/getModel/{model_id}")
+        biz_name = model.get("bizName") if isinstance(model, dict) else None
+        if not isinstance(biz_name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,127}", biz_name):
+            raise UpstreamError("SuperSonic returned an invalid semantic model identifier")
+        return biz_name
+
+    @staticmethod
+    def _field_label(field: str) -> str:
+        return {
+            "publisher": "发行商", "platform": "平台", "genre": "游戏类型",
+            "global_sales": "全球销量", "na_sales": "北美销量",
+            "eu_sales": "欧洲销量", "jp_sales": "日本销量",
+            "other_sales": "其他地区销量",
+        }.get(field, field)
+
+    @classmethod
+    def _ranking_query(cls, question: str) -> tuple[str, str, int] | None:
+        """Compile an explicit governed Top-N request without invoking an LLM parser."""
+
+        match = re.search(r"按\s*(发行商|平台|游戏类型|类型)\s*统计\s*"
+                          r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*"
+                          r"前\s*(\d{1,3})\s*(?:名|个)?", question)
+        if not match:
+            return None
+        dimensions = {"发行商": "publisher", "平台": "platform",
+                      "游戏类型": "genre", "类型": "genre"}
+        metrics = {"全球销量": "global_sales", "北美销量": "na_sales",
+                   "欧洲销量": "eu_sales", "日本销量": "jp_sales",
+                   "其他地区销量": "other_sales"}
+        return dimensions[match.group(1)], metrics[match.group(2)], min(int(match.group(3)), 100)
 
     @staticmethod
     def _validate_question_result(question: str, result: dict[str, Any]) -> None:
@@ -145,21 +226,36 @@ class SuperSonicClient:
             )
             if not isinstance(models, list):
                 continue
-            for model in models[:500]:
-                if not isinstance(model, dict) or not isinstance(model.get("id"), int):
+            model_by_id = {
+                model["id"]: model for model in models[:500]
+                if isinstance(model, dict) and isinstance(model.get("id"), int)
+            }
+            views = await self._request_data(
+                "GET", f"/api/semantic/view/getViewList?domainId={domain_id}"
+            )
+            if not isinstance(views, list):
+                continue
+            for view in views[:500]:
+                if not isinstance(view, dict) or not isinstance(view.get("id"), int):
                     continue
+                detail = view.get("viewDetail") if isinstance(view.get("viewDetail"), dict) else {}
+                configs = detail.get("viewModelConfigs") if isinstance(detail.get("viewModelConfigs"), list) else []
+                model_id = next((item.get("id") for item in configs if isinstance(item, dict)
+                                 and isinstance(item.get("id"), int)), None)
+                model = model_by_id.get(model_id, {})
                 inventory.append(
                     {
-                        "id": model["id"],
-                        "key": f"supersonic:{model['id']}",
-                        "name": str(model.get("name") or model.get("bizName") or model["id"])[:128],
-                        "biz_name": str(model.get("bizName") or "")[:128],
-                        "description": str(model.get("description") or "")[:512],
+                        "id": view["id"],
+                        "key": f"supersonic:{view['id']}",
+                        "model_id": model_id,
+                        "name": str(view.get("name") or view.get("bizName") or view["id"])[:128],
+                        "biz_name": str(view.get("bizName") or "")[:128],
+                        "description": str(view.get("description") or model.get("description") or "")[:512],
                         "domain_id": domain_id,
                         "domain_name": str(domain.get("name") or domain_id)[:128],
                         "database_id": model.get("databaseId"),
                         "database_name": database_names.get(model.get("databaseId"), "未知连接"),
-                        "status": "active" if model.get("status") == 1 else "offline",
+                        "status": "active" if view.get("status") == 1 else "offline",
                     }
                 )
         return inventory
@@ -270,6 +366,25 @@ class SuperSonicClient:
         """Publish an administrator-reviewed model through SuperSonic's governed API."""
 
         await self._request_data("POST", "/api/semantic/model/createModel", payload=payload)
+        models = await self._request_data(
+            "GET", f"/api/semantic/model/getModelList/{int(payload['domainId'])}"
+        )
+        model = next((item for item in (models or []) if isinstance(item, dict)
+                      and item.get("bizName") == payload.get("bizName")), None)
+        if not isinstance(model, dict) or not isinstance(model.get("id"), int):
+            raise UpstreamError("SuperSonic did not return the published semantic model")
+        view_payload = {
+            "name": payload["name"], "bizName": f"{payload['bizName']}_view",
+            "description": payload.get("description") or "", "domainId": payload["domainId"],
+            "status": 1, "typeEnum": "VIEW",
+            "viewDetail": {"viewModelConfigs": [{"id": model["id"], "includesAll": True,
+                                                  "metrics": [], "dimensions": []}]},
+            "admins": payload.get("admins") or [], "adminOrgs": payload.get("adminOrgs") or [],
+        }
+        view = await self._request_data("POST", "/api/semantic/view", payload=view_payload)
+        if not isinstance(view, dict) or not isinstance(view.get("id"), int):
+            raise UpstreamError("SuperSonic did not create a query view for the semantic model")
+        await self._request_data("POST", "/api/chat/conf", payload={"modelId": view["id"]})
 
     async def get_database_columns(
         self, database_id: int, database_name: str, table_name: str
@@ -382,7 +497,7 @@ class SuperSonicClient:
             raise UpstreamError("AgentBI conversation is unavailable") from exc
 
     @staticmethod
-    def _select_governed_query(candidates: list[Any]) -> dict[str, Any]:
+    def _select_governed_query(candidates: list[Any], expected_view_id: int | None = None) -> dict[str, Any]:
         """Select an executable semantic query and reject plugin/URL candidates.
 
         SuperSonic can rank WEB_PAGE plugins ahead of metric parses. AgentBI must never
@@ -394,12 +509,20 @@ class SuperSonicClient:
         for candidate in candidates:
             if not isinstance(candidate, dict) or candidate.get("id") is None:
                 continue
+            candidate_view = candidate.get("viewId")
+            if candidate_view is None and isinstance(candidate.get("view"), dict):
+                candidate_view = candidate["view"].get("view") or candidate["view"].get("id")
+            if expected_view_id is not None and candidate_view is not None:
+                try:
+                    if int(candidate_view) != expected_view_id:
+                        continue
+                except (TypeError, ValueError):
+                    continue
             sql_info = candidate.get("sqlInfo")
-            if (
-                isinstance(sql_info, dict)
-                and isinstance(sql_info.get("querySQL"), str)
-                and sql_info["querySQL"].strip()
-            ):
+            if isinstance(sql_info, dict) and any(
+                isinstance(sql_info.get(key), str) and sql_info[key].strip()
+                for key in ("querySQL", "correctS2SQL", "s2SQL")
+            ) and candidate.get("queryMode") != "WEB_PAGE":
                 return candidate
         raise UpstreamError("SuperSonic returned no governed semantic query")
 
