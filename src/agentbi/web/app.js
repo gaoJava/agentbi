@@ -1870,6 +1870,12 @@ async function analyzeFromWorkbench() {
   if (question.length < 2) { status.textContent = '请输入至少 2 个字符的问题'; return; }
   if (offerChartRoute(question)) return;
   button.disabled = true; status.textContent = '正在执行 SuperSonic 真实语义查询…';
+  workbenchAnalysis = undefined;
+  document.querySelector('#agent-query-result').hidden = true;
+  document.querySelector('#agent-result-question').textContent = '';
+  document.querySelector('#agent-answer').textContent = '';
+  document.querySelector('#agent-result-table').replaceChildren();
+  document.querySelector('#agent-result-visual').hidden = true;
   const processStarted = performance.now();
   renderAnalysisProcess([], true, 0);
   const processTimer = window.setInterval(() => renderAnalysisProcess([], true, Math.round(performance.now() - processStarted)), 250);

@@ -88,6 +88,7 @@ class SuperSonicClient:
                 structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(resolved_question)
         if structured:
             dimension, metric, limit = structured
+            sort_direction = "ASC" if calculation and calculation.get("sort") == "asc" else "DESC"
             model_biz_name = await self._view_model_biz_name(
                 request.context.semantic_model_id
             )
@@ -100,7 +101,7 @@ class SuperSonicClient:
                     "sql": (
                         f"SELECT {dimension}, SUM({metric}) AS {metric} "
                         f"FROM {model_biz_name} "
-                        f"GROUP BY {dimension} ORDER BY {metric} DESC LIMIT {limit}"
+                        f"GROUP BY {dimension} ORDER BY {metric} {sort_direction} LIMIT {limit}"
                     ),
                 },
             )
@@ -225,6 +226,31 @@ class SuperSonicClient:
                 return {"operation": "average" if top.group(4) == "平均" else "sum",
                         "dimension": dimensions[top.group(3)], "metric": metrics[top.group(1)],
                         "limit": min(limit, 100)}
+        bottom = re.search(r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)(?:后|最低)\s*"
+                           r"([一二三四五六七八九十\d]{1,3})\s*名(发行商|平台|游戏类型|类型).*?(合计|总和|平均)", question)
+        if bottom:
+            limit = cls._chinese_number(bottom.group(2))
+            if limit:
+                return {"operation": "average" if bottom.group(4) == "平均" else "sum",
+                        "dimension": dimensions[bottom.group(3)], "metric": metrics[bottom.group(1)],
+                        "limit": min(limit, 100), "sort": "asc", "scope": "Bottom"}
+        rank_difference = re.search(
+            r"(发行商|平台|游戏类型|类型)(?:的?全球)?销量?第\s*"
+            r"([一二三四五六七八九十\d]{1,3})\s*名\s*(?:和|与)\s*第\s*"
+            r"([一二三四五六七八九十\d]{1,3})\s*名(?:相)?差多少", question)
+        if rank_difference:
+            ranks = [cls._chinese_number(rank_difference.group(index)) for index in (2, 3)]
+            if all(ranks):
+                return {"operation": "rank_difference", "dimension": dimensions[rank_difference.group(1)],
+                        "metric": "global_sales", "limit": min(max(ranks), 100), "ranks": ranks}
+        rank_value = re.search(
+            r"(?:全球销量)?第\s*([一二三四五六七八九十\d]{1,3})\s*名"
+            r"(发行商|平台|游戏类型|类型)(?:的)?(?:全球)?销量(?:是)?多少", question)
+        if rank_value:
+            rank = cls._chinese_number(rank_value.group(1))
+            if rank:
+                return {"operation": "rank_value", "dimension": dimensions[rank_value.group(2)],
+                        "metric": "global_sales", "limit": min(rank, 100), "ranks": [rank]}
         difference = re.search(r"(.+?)\s*(?:类型|发行商|平台)?\s*的?\s*"
                                r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*比\s*"
                                r"(.+?)\s*(?:类型|发行商|平台)?\s*(高|低|多|少)多少", question)
@@ -232,6 +258,19 @@ class SuperSonicClient:
             dimension = "genre" if "类型" in question else "publisher" if "发行商" in question else "platform"
             return {"operation": "difference", "dimension": dimension, "metric": metrics[difference.group(2)],
                     "limit": 100, "members": [difference.group(1).strip(), difference.group(3).strip()]}
+        ratio = re.search(r"(.+?)\s*(?:类型|发行商|平台)?\s*的?\s*"
+                          r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*是\s*"
+                          r"(.+?)\s*(?:类型|发行商|平台)?\s*的?\s*几倍", question)
+        if ratio:
+            dimension = "genre" if "类型" in question else "publisher" if "发行商" in question else "platform"
+            return {"operation": "ratio", "dimension": dimension, "metric": metrics[ratio.group(2)],
+                    "limit": 100, "members": [ratio.group(1).strip(), ratio.group(3).strip()]}
+        share = re.search(r"(.+?)\s*(?:类型|发行商|平台)?\s*(?:的)?\s*"
+                          r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*占(?:全部|总体|总)\s*(?:销量)?(?:的)?(?:比例|占比)?(?:是)?多少", question)
+        if share:
+            dimension = "genre" if "类型" in question else "publisher" if "发行商" in question else "platform"
+            return {"operation": "share", "dimension": dimension, "metric": metrics[share.group(2)],
+                    "limit": 100, "members": [share.group(1).strip()]}
         return None
 
     @staticmethod
@@ -260,21 +299,60 @@ class SuperSonicClient:
             label = "合计" if calculation["operation"] == "sum" else "平均值"
             expression = " + ".join(cls._format_decimal(value) for _, value in selected)
             formula = expression if calculation["operation"] == "sum" else f"({expression}) / {len(selected)}"
+            scope = calculation.get("scope", "Top")
+            scope_label = "后" if scope == "Bottom" else "前"
             return {"rows": [row for row, _ in selected],
-                    "response": f"{cls._field_label(metric)}前 {len(selected)} 名{cls._field_label(dimension)}的{label}为 {cls._format_decimal(result)}。",
-                    "detail": f"运算：Top {len(selected)} {label}\n参与值：{expression}\n公式：{formula} = {cls._format_decimal(result)}",
+                    "response": f"{cls._field_label(metric)}{scope_label} {len(selected)} 名{cls._field_label(dimension)}的{label}为 {cls._format_decimal(result)}。",
+                    "detail": f"运算：{scope} {len(selected)} {label}\n参与值：{expression}\n公式：{formula} = {cls._format_decimal(result)}",
                     "duration_ms": round((time.perf_counter() - started) * 1000)}
-        found: list[tuple[dict[str, Any], Decimal]] = []
-        for member in calculation["members"]:
+        if calculation["operation"] == "rank_value":
+            rank = calculation["ranks"][0]
+            if len(values) < rank:
+                raise SemanticResolutionError("真实查询结果不足以取得指定名次")
+            row, value = values[rank - 1]
+            member = str(row.get(dimension))
+            return {"rows": [row],
+                    "response": f"第 {rank} 名{cls._field_label(dimension)}是 {member}，{cls._field_label(metric)}为 {cls._format_decimal(value)}。",
+                    "detail": f"运算：排名取值\n排序：{cls._field_label(metric)}从高到低\n结果：第 {rank} 名 {member} = {cls._format_decimal(value)}",
+                    "duration_ms": round((time.perf_counter() - started) * 1000)}
+        if calculation["operation"] == "rank_difference":
+            ranks = calculation["ranks"]
+            if len(values) < max(ranks):
+                raise SemanticResolutionError("真实查询结果不足以完成排名差值计算")
+            found = [values[rank - 1] for rank in ranks]
+            members = [f"第{rank}名 {row.get(dimension)}" for rank, (row, _) in zip(ranks, found)]
+        elif calculation["operation"] == "share":
+            member = calculation["members"][0]
             match = next(((row, value) for row, value in values
                           if str(row.get(dimension, "")).casefold() == member.casefold()), None)
             if not match:
-                raise SemanticResolutionError(f"真实查询结果中未找到“{member}”，无法完成差值计算")
-            found.append(match)
+                raise SemanticResolutionError(f"真实查询结果中未找到“{member}”，无法计算占比")
+            total = sum((value for _, value in values), Decimal("0"))
+            share_value = match[1] / total * Decimal("100") if total else Decimal("0")
+            return {"rows": [match[0]],
+                    "response": f"{member} 的{cls._field_label(metric)}占总体 {cls._format_decimal(share_value)}%。",
+                    "detail": f"运算：总体占比\n参与值：{member}={cls._format_decimal(match[1])}；总体={cls._format_decimal(total)}\n公式：{cls._format_decimal(match[1])} / {cls._format_decimal(total)} = {cls._format_decimal(share_value)}%",
+                    "duration_ms": round((time.perf_counter() - started) * 1000)}
+        else:
+            found = []
+            for member in calculation["members"]:
+                match = next(((row, value) for row, value in values
+                              if str(row.get(dimension, "")).casefold() == member.casefold()), None)
+                if not match:
+                    raise SemanticResolutionError(f"真实查询结果中未找到“{member}”，无法完成差值计算")
+                found.append(match)
+            members = calculation["members"]
         left, right = found[0][1], found[1][1]
+        if calculation["operation"] == "ratio":
+            ratio_value = left / right if right else None
+            if ratio_value is None:
+                raise SemanticResolutionError("作为除数的指标值为 0，无法计算倍数")
+            return {"rows": [row for row, _ in found],
+                    "response": f"{members[0]} 的{cls._field_label(metric)}是 {members[1]} 的 {cls._format_decimal(ratio_value)} 倍。",
+                    "detail": f"运算：倍数\n参与值：{members[0]}={cls._format_decimal(left)}；{members[1]}={cls._format_decimal(right)}\n公式：{cls._format_decimal(left)} / {cls._format_decimal(right)} = {cls._format_decimal(ratio_value)}",
+                    "duration_ms": round((time.perf_counter() - started) * 1000)}
         difference, absolute = left - right, abs(left - right)
         percentage = absolute / abs(right) * Decimal("100") if right else None
-        members = calculation["members"]
         detail = (f"运算：差值与差异率\n参与值：{members[0]}={cls._format_decimal(left)}；{members[1]}={cls._format_decimal(right)}\n"
                   f"公式：{cls._format_decimal(left)} - {cls._format_decimal(right)} = {cls._format_decimal(difference)}")
         response = (f"{members[0]} 的{cls._field_label(metric)}为 {cls._format_decimal(left)}，{members[1]} 为 "

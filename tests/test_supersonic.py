@@ -92,6 +92,48 @@ class SuperSonicClientTest(unittest.TestCase):
         self.assertIn("941.25", result["response"])
         self.assertEqual(len(result["rows"]), 5)
 
+    def test_compiles_rank_value_difference_bottom_ratio_and_share(self):
+        cases = {
+            "发行商销量第2名和第3名差多少": "rank_difference",
+            "全球销量第3名发行商的销量是多少": "rank_value",
+            "全球销量最低 3 名平台的平均销量是多少": "average",
+            "Action 类型的全球销量是 Sports 的几倍": "ratio",
+            "Action 类型的全球销量占全部销量比例是多少": "share",
+        }
+        for question, operation in cases.items():
+            with self.subTest(question=question):
+                plan = SuperSonicClient._calculation_query(question)
+                self.assertIsNotNone(plan)
+                self.assertEqual(plan["operation"], operation)
+
+    def test_calculates_rank_difference_ratio_and_share(self):
+        publisher_rows = [
+            {"publisher": "Nintendo", "global_sales": 1786.56},
+            {"publisher": "Electronic Arts", "global_sales": 1110.32},
+            {"publisher": "Activision", "global_sales": 727.46},
+        ]
+        rank_result = SuperSonicClient._calculate(
+            SuperSonicClient._calculation_query("发行商销量第2名和第3名差多少"),
+            publisher_rows, "publisher", "global_sales",
+        )
+        self.assertIn("382.86", rank_result["response"])
+        self.assertIn("第2名 Electronic Arts", rank_result["response"])
+
+        genre_rows = [
+            {"genre": "Action", "global_sales": 1751.17},
+            {"genre": "Sports", "global_sales": 1330.93},
+        ]
+        ratio_result = SuperSonicClient._calculate(
+            SuperSonicClient._calculation_query("Action 类型的全球销量是 Sports 的几倍"),
+            genre_rows, "genre", "global_sales",
+        )
+        self.assertIn("1.32 倍", ratio_result["response"])
+        share_result = SuperSonicClient._calculate(
+            SuperSonicClient._calculation_query("Action 类型的全球销量占全部销量比例是多少"),
+            genre_rows, "genre", "global_sales",
+        )
+        self.assertIn("56.82%", share_result["response"])
+
     def test_rejects_successful_result_with_unrelated_requested_fields(self):
         with self.assertRaisesRegex(UpstreamError, "发行商.*全球销量"):
             SuperSonicClient._validate_question_result(
