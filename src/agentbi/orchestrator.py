@@ -76,7 +76,8 @@ class Orchestrator:
 
         started = time.perf_counter()
         result = await self._supersonic.query(request)
-        steps.append(self._step("semantic_query", started, "SuperSonic query completed"))
+        semantic_detail = self._semantic_detail(request.question, result)
+        steps.append(self._step("semantic_query", started, semantic_detail))
 
         started = time.perf_counter()
         rows = self._extract_rows(result)
@@ -93,8 +94,13 @@ class Orchestrator:
             row_count=len(rows),
             query_time_ms=self._non_negative_int(result.get("queryTimeCost")),
             sql_fingerprint=sql_fingerprint(result.get("querySql")),
+            generated_sql=self._safe_generated_sql(result.get("querySql")),
         )
-        steps.append(self._step("validate_evidence", started, f"validated {len(rows)} rows"))
+        steps.append(self._step(
+            "validate_evidence",
+            started,
+            f"查询编号：{evidence.query_id}\n返回并校验：{len(rows)} 行\nSQL 指纹：{evidence.sql_fingerprint or '—'}",
+        ))
         answer = self._extract_answer(result, len(rows))
 
         return AnalyzeResponse(
@@ -147,6 +153,22 @@ class Orchestrator:
         if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             return value
         return None
+
+    @staticmethod
+    def _safe_generated_sql(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        compact = " ".join(value.split())
+        if not compact.lower().startswith(("select ", "with ")):
+            return None
+        return compact[:2000]
+
+    @classmethod
+    def _semantic_detail(cls, original_question: str, result: dict[str, Any]) -> str:
+        resolved = str(result.get("resolvedQuestion") or original_question).strip()
+        mode = str(result.get("resolutionMode") or "SuperSonic 语义解析").strip()
+        sql = cls._safe_generated_sql(result.get("querySql")) or "上游未返回可展示 SQL"
+        return f"解析方式：{mode}\n原始问题：{original_question}\n规范化问题：{resolved}\n生成 SQL：{sql}"
 
     def _build_report(
         self,

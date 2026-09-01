@@ -98,6 +98,7 @@ class Evidence(BaseModel):
     row_count: int = Field(ge=0)
     query_time_ms: int | None = Field(default=None, ge=0)
     sql_fingerprint: str | None = None
+    generated_sql: str | None = None
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

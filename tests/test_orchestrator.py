@@ -56,11 +56,16 @@ class OrchestratorTest(unittest.TestCase):
         self.assertEqual(result.evidence.query_id, "42")
         self.assertEqual(result.evidence.row_count, 1)
         self.assertEqual(len(result.evidence.sql_fingerprint or ""), 16)
+        self.assertEqual(
+            result.evidence.generated_sql,
+            "SELECT region, SUM(amount) FROM sales GROUP BY region",
+        )
         self.assertEqual([step.name for step in result.steps], [
             "authorize", "semantic_query", "validate_evidence"
         ])
         self.assertIn("## 数据证据", result.report.markdown)
         self.assertIn("SQL 指纹", result.report.markdown)
+        self.assertIn("生成 SQL：SELECT region", result.steps[1].detail or "")
         self.assertEqual(result.report.source_url, "http://localhost:8088/superset/dashboard/7")
 
     def test_allows_full_range_query_without_time_filter(self):

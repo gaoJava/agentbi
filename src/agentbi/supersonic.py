@@ -69,12 +69,14 @@ class SuperSonicClient:
 
         conversation_id, summary, history = self._conversation(request)
         resolved_question = request.question
+        resolution_mode = "SuperSonic 规则解析"
         ranked_query = self._ranking_query(resolved_question)
         structured = ranked_query or self._grouped_metric_query(request.question)
         if not structured and self._llm_resolver is not None:
             normalized = await self._llm_resolver(request.question)
             if normalized:
                 resolved_question = normalized
+                resolution_mode = "LLM 语义增强后交由 SuperSonic 执行"
                 ranked_query = self._ranking_query(resolved_question)
                 structured = ranked_query or self._grouped_metric_query(resolved_question)
         if structured:
@@ -115,6 +117,8 @@ class SuperSonicClient:
                 ),
                 "effectiveTimeRange": "全部数据（本问题未应用时间筛选）",
                 "chatId": conversation_id,
+                "resolvedQuestion": resolved_question,
+                "resolutionMode": resolution_mode,
             }
             self._validate_question_result(request.question, result)
             self._conversations.record(
@@ -152,6 +156,8 @@ class SuperSonicClient:
         if result.get("queryId") is None and parsed.get("queryId") is not None:
             result["queryId"] = parsed["queryId"]
         result["chatId"] = conversation_id
+        result["resolvedQuestion"] = parse_payload["queryText"]
+        result["resolutionMode"] = "SuperSonic 原生语义解析"
         self._conversations.record(request.actor.subject, conversation_id, request.question, result)
         return result
 

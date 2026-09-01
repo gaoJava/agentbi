@@ -464,6 +464,10 @@ function showWorkbench(user) {
   document.querySelector('#admin-permissions').hidden = !admin;
   loginView.hidden = true;
   workbenchView.hidden = false;
+  const history = document.querySelector('#agent-history');
+  const dashboardAgent = document.querySelector('#dashboard-agent');
+  const process = document.querySelector('#agent-analysis-process');
+  if (history.parentElement !== dashboardAgent) dashboardAgent.insertBefore(history, process);
   switchView('dashboard');
   loadManagedCharts();
   loadLiveSemanticModels().catch(error => showManagementFeedback(error.message, true));
@@ -1800,7 +1804,7 @@ const analysisStepLabels = {
 function analysisStepDetail(step) {
   if (step.status === 'running') return '正在等待 SuperSonic 解析问题并执行查询';
   if (step.name === 'authorize') return '当前账号权限与请求上下文已通过校验';
-  if (step.name === 'semantic_query') return 'SuperSonic 已完成语义解析和数据查询';
+  if (step.name === 'semantic_query') return step.detail || 'SuperSonic 已完成语义解析和数据查询';
   if (step.name === 'validate_evidence') return String(step.detail || '查询结果已完成证据校验').replace(/^validated (\d+) rows$/i, '已校验 $1 行真实结果');
   return step.detail || '—';
 }
