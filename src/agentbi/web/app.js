@@ -143,6 +143,21 @@ function nativeChartIcon(visualizationType) {
   }[resolveNativeChartAdapter(visualizationType)];
 }
 
+function friendlyMetricLabel(metric) {
+  const raw = String(metric || '指标');
+  const field = raw.replace(/^\s*[A-Z_]+\s*\((.*)\)\s*$/i, '$1').replace(/["`]/g, '').trim();
+  const labels = {
+    global_sales: '全球销量', na_sales: '北美销量', eu_sales: '欧洲销量',
+    jp_sales: '日本销量', other_sales: '其他地区销量', pv: '访问量', count: '数量',
+  };
+  return labels[field.toLowerCase()] || field.replace(/_/g, ' ') || raw;
+}
+
+function compactChartLabel(value, limit = 14) {
+  const label = String(value ?? '—');
+  return label.length > limit ? `${label.slice(0, limit - 1)}…` : label;
+}
+
 function renderNativeChartVisual(chart) {
   const visual = document.createElement('div'); visual.className = 'native-chart-visual';
   if (chart.status !== 'ready') {
@@ -183,12 +198,12 @@ function renderNativeChartVisual(chart) {
     }).join(',')})`;
     const center = document.createElement('div'); center.className = 'native-pie-center';
     const totalValue = document.createElement('strong'); totalValue.textContent = formatNativeValue(total);
-    const metric = document.createElement('small'); metric.textContent = numeric;
+    const metric = document.createElement('small'); metric.textContent = friendlyMetricLabel(numeric); metric.title = numeric;
     center.append(totalValue, metric); chart.append(center);
     const legend = document.createElement('div'); legend.className = 'native-pie-legend';
     data.forEach((item, index) => {
       const row = document.createElement('div'); const dot = document.createElement('i'); dot.style.background = palette[index];
-      const label = document.createElement('span'); label.textContent = item.label;
+      const label = document.createElement('span'); label.textContent = item.label; label.title = item.label;
       const value = document.createElement('strong'); value.textContent = `${(item.value / total * 100).toFixed(1)}%`;
       const amount = document.createElement('small'); amount.textContent = formatNativeValue(item.value);
       row.append(dot, label, value, amount); legend.append(row);
@@ -221,7 +236,10 @@ function renderNativeChartVisual(chart) {
       const point = document.createElementNS(svg.namespaceURI, 'circle'); point.setAttribute('cx', x(index)); point.setAttribute('cy', y(item.value)); point.setAttribute('r', 4); point.setAttribute('class', 'native-line-point');
       const tooltip = document.createElementNS(svg.namespaceURI, 'title'); tooltip.textContent = `${item.label}：${formatNativeValue(item.value)}`; point.append(tooltip); svg.append(point);
       if (index === 0 || index === data.length - 1 || index % Math.max(1, Math.ceil(data.length / 6)) === 0) {
-        const label = document.createElementNS(svg.namespaceURI, 'text'); label.setAttribute('x', x(index)); label.setAttribute('y', height - 15); label.setAttribute('class', 'native-line-x-label'); label.textContent = item.label; svg.append(label);
+        const label = document.createElementNS(svg.namespaceURI, 'text'); label.setAttribute('x', x(index)); label.setAttribute('y', height - 15); label.setAttribute('class', 'native-line-x-label');
+        label.setAttribute('text-anchor', index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle');
+        label.textContent = compactChartLabel(item.label, index === 0 || index === data.length - 1 ? 12 : 10);
+        const title = document.createElementNS(svg.namespaceURI, 'title'); title.textContent = item.label; label.append(title); svg.append(label);
       }
     });
     visual.append(svg); return visual;
@@ -1615,7 +1633,7 @@ function resultTable(rows) {
   const head = document.createElement('thead');
   const headRow = document.createElement('tr');
   columns.forEach(column => {
-    const cell = document.createElement('th'); cell.textContent = column; headRow.append(cell);
+    const cell = document.createElement('th'); cell.textContent = column.replace(/_/g, ' '); cell.title = column; headRow.append(cell);
   });
   head.append(headRow);
   const body = document.createElement('tbody');
@@ -1625,6 +1643,8 @@ function resultTable(rows) {
       const cell = document.createElement('td');
       const value = row[column];
       cell.textContent = value === null || value === undefined ? '—' : String(value);
+      cell.title = cell.textContent;
+      if (typeof value === 'number') cell.classList.add('is-number');
       tableRow.append(cell);
     });
     body.append(tableRow);
