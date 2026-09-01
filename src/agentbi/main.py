@@ -2214,6 +2214,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @app.get("/api/v1/workbench/conversations")
+    async def workbench_conversations(
+        identity: SessionIdentity = agent_session,
+    ) -> dict[str, object]:
+        """Return the signed-in user's persisted Q&A history."""
+
+        items = sessions.repository.conversation_history(identity.subject)
+        return {"items": items, "latest_chat_id": items[0]["chat_id"] if items else None}
+
     @app.post("/api/v1/workbench/analyze", response_model=AnalyzeResponse)
     async def workbench_analyze(
         payload: WorkbenchAnalyzePayload,

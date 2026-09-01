@@ -369,7 +369,9 @@ function renderNativeDashboard(dashboard) {
   const charts = Array.isArray(dashboard.charts) ? dashboard.charts : [];
   if (!charts.length) grid.innerHTML = '<div class="native-dashboard-empty"><strong>当前仪表盘还没有图表</strong><p>请通过“仪表盘管理 → 添加图表”创建真实分析图表。</p></div>';
   else grid.replaceChildren(...charts.map(chart => { const card = document.createElement('article'); card.className = 'native-chart-card'; const header = document.createElement('header');
-    const title = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = chart.title; const small = document.createElement('small'); small.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询' : '待配置'}`; title.append(strong, small);
+    const title = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = chart.title; const small = document.createElement('small');
+    const lineHint = ['line', 'area'].includes(resolveNativeChartAdapter(chart.visualization_type)) ? ' · 最多16个数据点，横轴约6个标签' : '';
+    small.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询' : '待配置'}${lineHint}`; title.append(strong, small);
     const ai = document.createElement('button'); ai.type = 'button'; ai.textContent = '✦ AI 分析'; ai.addEventListener('click', () => selectNativeChart(chart)); header.append(title, ai); card.append(header, renderNativeChartVisual(chart)); return card; }));
   grid.hidden = false;
 }
@@ -465,6 +467,37 @@ function showWorkbench(user) {
   switchView('dashboard');
   loadManagedCharts();
   loadLiveSemanticModels().catch(error => showManagementFeedback(error.message, true));
+  loadConversationHistory().catch(() => {});
+}
+
+async function loadConversationHistory() {
+  if (!currentUser) return;
+  const body = await request('/api/v1/workbench/conversations');
+  const items = Array.isArray(body.items) ? body.items : [];
+  document.querySelector('#agent-history-count').textContent = String(items.length);
+  const list = document.querySelector('#agent-history-list');
+  if (!items.length) {
+    list.innerHTML = '<small>暂无历史问答</small>';
+    return;
+  }
+  if (!workbenchChatId && Number.isInteger(Number(body.latest_chat_id))) workbenchChatId = Number(body.latest_chat_id);
+  list.replaceChildren(...items.map(item => {
+    const button = document.createElement('button'); button.type = 'button';
+    const question = document.createElement('strong'); question.textContent = item.question;
+    const answer = document.createElement('span'); answer.textContent = item.answer || '已完成真实查询';
+    button.append(question, answer);
+    button.addEventListener('click', () => {
+      workbenchChatId = Number(item.chat_id) || workbenchChatId;
+      document.querySelector('#agent-question').value = item.question;
+      document.querySelector('#agent-result-question').textContent = item.question;
+      document.querySelector('#agent-answer').textContent = item.answer || '已完成真实查询';
+      document.querySelector('#agent-result-visual').hidden = true;
+      document.querySelector('#agent-result-table').replaceChildren();
+      document.querySelector('#agent-evidence-summary').textContent = '历史问答摘要；重新提问可获取最新真实数据与证据';
+      document.querySelector('#agent-query-result').hidden = false;
+    });
+    return button;
+  }));
 }
 
 function populateLiveModelSelectors() {
@@ -1863,6 +1896,7 @@ async function analyzeFromWorkbench() {
     document.querySelector('#agent-query-result').hidden = false;
     document.querySelector('#start-result-drilldown').hidden = !body.data.length;
     status.textContent = body.warnings?.length ? body.warnings.join('；') : '真实查询完成';
+    loadConversationHistory().catch(() => {});
     if (activeView === 'drilldown') {
       document.querySelector('#drill-agent-context').textContent = workbenchSelected
         ? `${workbenchSelected.dimension}=${workbenchSelected.value}` : '原始查询结果';

@@ -38,6 +38,9 @@ def test_message_threshold_compresses_complete_tool_pairs_and_persists_boundary(
     chat_id, _, _ = manager.resolve("actor-1", None)
     manager.record("actor-1", chat_id, "华东销售额是多少", {"queryId": 11, "queryResults": [{"v": 1}]})
     manager.record("actor-1", chat_id, "再按产品下钻", {"queryId": 12, "queryResults": [{"v": 2}]})
+    history = repo.conversation_history("actor-1")
+    assert [item["question"] for item in history] == ["再按产品下钻", "华东销售额是多少"]
+    assert repo.conversation_history("actor-2") == []
 
     # A fresh manager simulates process restart and must recover the persisted boundary.
     restarted = ConversationContextManager(manager.settings, repo)

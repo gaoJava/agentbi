@@ -38,12 +38,13 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260831.9" in shell.text
-        assert "app.js?v=20260901.16" in shell.text
+        assert "app.js?v=20260901.17" in shell.text
         assert 'id="agent-chart-route"' in shell.text
         assert 'id="agent-result-visual"' in shell.text
         assert 'id="agent-result-question"' in shell.text
         assert 'id="agent-analysis-process"' in shell.text
-        assert "prototype.css?v=20260901.16" in shell.text
+        assert 'id="agent-history"' in shell.text
+        assert "prototype.css?v=20260901.17" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
@@ -72,6 +73,9 @@ def test_product_shell_and_user_session_flow() -> None:
         assert user["role"] == "user"
         assert "user:manage" not in user["permissions"]
         assert client.get("/api/v1/auth/me").status_code == 200
+        history = client.get("/api/v1/workbench/conversations")
+        assert history.status_code == 200
+        assert history.json() == {"items": [], "latest_chat_id": None}
 
         assert client.post("/api/v1/auth/logout").status_code == 403
         logout = client.post(

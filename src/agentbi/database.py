@@ -567,6 +567,28 @@ class IdentityRepository:
             db.add(ConversationTurn(conversation_id=conversation_id, sequence=sequence, **values))
             return sequence
 
+    def conversation_history(self, actor_user_id: str, limit: int = 30) -> list[dict[str, object]]:
+        """Return the actor's newest persisted Q&A turns without exposing tool payloads."""
+
+        with Session(self.engine) as db:
+            turns = db.scalars(
+                select(ConversationTurn)
+                .join(ConversationState, ConversationState.id == ConversationTurn.conversation_id)
+                .where(ConversationState.actor_user_id == actor_user_id)
+                .order_by(ConversationTurn.created_at.desc(), ConversationTurn.sequence.desc())
+                .limit(max(1, min(limit, 100)))
+            ).all()
+            return [
+                {
+                    "chat_id": turn.conversation_id,
+                    "sequence": turn.sequence,
+                    "question": turn.user_question,
+                    "answer": turn.assistant_answer,
+                    "created_at": turn.created_at.isoformat(),
+                }
+                for turn in turns
+            ]
+
     def compress_conversation(
         self, conversation_id: int, actor_user_id: str, through: int, summary: str
     ) -> None:
