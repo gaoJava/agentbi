@@ -1775,6 +1775,7 @@ function analysisStepDetail(step) {
 function renderAnalysisProcess(steps, running = false, elapsedMs = 0, failedMessage = '') {
   const panel = document.querySelector('#agent-analysis-process');
   const list = document.querySelector('#agent-analysis-steps');
+  const expandedSteps = new Set([...list.querySelectorAll('details[open]')].map(node => node.dataset.step));
   const source = Array.isArray(steps) && steps.length ? steps : [
     {name: 'authorize', status: 'completed', duration_ms: 0, detail: '已提交当前用户与图表上下文'},
     {name: 'semantic_query', status: running ? 'running' : 'failed', duration_ms: elapsedMs, detail: failedMessage || '正在等待 SuperSonic 返回'},
@@ -1783,10 +1784,16 @@ function renderAnalysisProcess(steps, running = false, elapsedMs = 0, failedMess
   list.replaceChildren(...source.map(step => {
     const item = document.createElement('li'); item.className = `analysis-step is-${step.status}`;
     const marker = document.createElement('i'); marker.textContent = step.status === 'completed' ? '✓' : step.status === 'failed' ? '!' : step.status === 'running' ? '…' : '';
-    const content = document.createElement('div'); const title = document.createElement('strong'); title.textContent = analysisStepLabels[step.name] || step.name;
-    const detail = document.createElement('small'); detail.textContent = failedMessage && step.status === 'failed' ? failedMessage : analysisStepDetail(step);
+    const task = document.createElement('details'); task.dataset.step = step.name;
+    task.open = expandedSteps.has(step.name) || step.status === 'running' || step.status === 'failed';
+    const summary = document.createElement('summary');
+    const title = document.createElement('strong'); title.textContent = analysisStepLabels[step.name] || step.name;
     const duration = document.createElement('time'); duration.textContent = step.status === 'pending' ? '待执行' : `${Math.max(0, Number(step.duration_ms) || 0)} ms`;
-    content.append(title, detail); item.append(marker, content, duration); return item;
+    const detail = document.createElement('div'); detail.className = 'analysis-step-detail';
+    const detailLabel = document.createElement('small'); detailLabel.textContent = '执行详情';
+    const detailText = document.createElement('p'); detailText.textContent = failedMessage && step.status === 'failed' ? failedMessage : analysisStepDetail(step);
+    summary.append(title, duration); detail.append(detailLabel, detailText); task.append(summary, detail);
+    item.append(marker, task); return item;
   }));
   panel.hidden = false;
 }
