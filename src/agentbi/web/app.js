@@ -112,7 +112,22 @@ function showSupersetUnavailable(message) {
   document.querySelector('#native-dashboard-grid').hidden = true;
   document.querySelector('#superset-unavailable-message').textContent = message;
   document.querySelector('#superset-unavailable').hidden = false;
+  const status = document.querySelector('#superset-connection-status');
+  status.className = 'registry-status invalid'; status.textContent = '● 连接异常';
   document.querySelector('#edit-dashboard').disabled = true;
+}
+
+function showDashboardLoading() {
+  const grid = document.querySelector('#native-dashboard-grid');
+  const status = document.querySelector('#superset-connection-status');
+  status.className = 'registry-status pending'; status.textContent = '◷ 正在更新';
+  document.querySelector('#superset-mode-label').textContent = '正在读取真实查询';
+  if (grid.children.length && !grid.querySelector('.native-chart-skeleton')) {
+    grid.classList.add('is-refreshing'); grid.hidden = false; return;
+  }
+  grid.classList.remove('is-refreshing');
+  grid.innerHTML = Array.from({length: 4}, () => '<article class="native-chart-card native-chart-skeleton"><header><i></i><b></b></header><div><i></i><i></i><i></i><i></i><i></i></div></article>').join('');
+  grid.hidden = false;
 }
 
 function formatNativeValue(value) {
@@ -373,6 +388,7 @@ async function loadSupersetWorkspace({ force = false } = {}) {
   document.querySelector('#edit-dashboard').disabled = true;
   document.querySelector('#superset-unavailable').hidden = true;
   loading.hidden = true;
+  showDashboardLoading();
   try {
     supersetWorkspace = await window.AgentBI.supersetWorkspace.load(force);
     if (!supersetWorkspace.available) {
@@ -383,6 +399,9 @@ async function loadSupersetWorkspace({ force = false } = {}) {
     const native = await request('/api/v1/superset/workspace/native');
     document.querySelector('#superset-loading').hidden = true; document.querySelector('#superset-unavailable').hidden = true;
     document.querySelector('#superset-frame').hidden = true; document.querySelector('#superset-mode-label').textContent = '原生模式 · 真实查询';
+    const status = document.querySelector('#superset-connection-status');
+    status.className = 'registry-status ready'; status.textContent = '● 数据引擎已连接';
+    document.querySelector('#native-dashboard-grid').classList.remove('is-refreshing');
     renderNativeDashboard(native.dashboard); document.querySelector('#agent-dashboard-name').textContent = native.dashboard.title || '经营总览';
     supersetHomeSnapshot = native.dashboard;
     renderSupersetAssetSummary();
