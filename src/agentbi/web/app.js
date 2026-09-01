@@ -29,6 +29,7 @@ let loadedSupersetDashboards = [];
 let supersetHomeSnapshot;
 let loadedSupersetDatabases = [];
 let loadedLlmProviders = [];
+let supersonicLlmBinding;
 let editingLlmProviderId;
 let editingSupersetDatabaseId;
 let editingSupersetDataset;
@@ -903,14 +904,17 @@ async function loadModuleView(view) {
         (await request('/api/v1/reports')).reports,
       ));
     } else if (view === 'semantic-models') {
-      const [models, providerBody, catalog] = await Promise.all([
+      const [models, providerBody, catalog, sonicLlm] = await Promise.all([
         loadLiveSemanticModels(), request('/api/v1/admin/llm-provider'),
         request('/api/v1/admin/semantic-drafts/catalog'),
+        request('/api/v1/admin/supersonic-llm'),
       ]);
       loadedSemanticModels = models;
       loadedLlmProviders = providerBody.items || [];
+      supersonicLlmBinding = sonicLlm;
       semanticCatalogDomains = catalog.domains || [];
       renderLlmProviderRows();
+      renderSuperSonicLlmBinding();
       renderSemanticDomainRows();
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
         model.id, model.name, model.domain_name,
@@ -2918,6 +2922,40 @@ function renderLlmProviderRows() {
     group.append(remove); return group;
   });
 }
+
+function renderSuperSonicLlmBinding() {
+  const binding = supersonicLlmBinding || {};
+  const select = document.querySelector('#supersonic-llm-provider');
+  select.replaceChildren(...loadedLlmProviders.map(provider => {
+    const option = document.createElement('option'); option.value = String(provider.id);
+    option.textContent = `${provider.model}${provider.enabled ? '（当前模型）' : ''}`; return option;
+  }));
+  if (binding.provider_id) select.value = String(binding.provider_id);
+  document.querySelector('#supersonic-llm-mode').value = binding.mode || 'rule_first';
+  document.querySelector('#supersonic-llm-timeout').value = String(binding.timeout_seconds || 60);
+  document.querySelector('#supersonic-llm-fallback').checked = binding.fallback_to_rules !== false;
+  document.querySelector('#supersonic-llm-enabled').checked = Boolean(binding.enabled);
+  document.querySelector('#supersonic-llm-status').textContent = binding.enabled
+    ? (binding.runtime_applied ? '● 已生效' : '◷ 待运行时同步') : '● 仅规则模式';
+  document.querySelector('#supersonic-llm-message').textContent = binding.runtime_message || '';
+}
+
+document.querySelector('#supersonic-llm-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const enabled = document.querySelector('#supersonic-llm-enabled').checked;
+  const providerValue = document.querySelector('#supersonic-llm-provider').value;
+  try {
+    supersonicLlmBinding = await request('/api/v1/admin/supersonic-llm', {
+      method: 'PUT', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({provider_id: providerValue ? Number(providerValue) : null, enabled,
+        mode: document.querySelector('#supersonic-llm-mode').value,
+        timeout_seconds: Number(document.querySelector('#supersonic-llm-timeout').value),
+        fallback_to_rules: document.querySelector('#supersonic-llm-fallback').checked}),
+    });
+    renderSuperSonicLlmBinding();
+    showManagementFeedback(enabled ? 'SuperSonic LLM 绑定已保存，等待运行时同步' : 'SuperSonic 已切换为仅规则模式');
+  } catch (cause) { showManagementFeedback(cause.message, true); }
+});
 
 async function activateLlmProvider(provider) {
   try {

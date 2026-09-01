@@ -260,6 +260,15 @@ class LlmProviderPayload(BaseModel):
     enabled: bool = True
 
 
+class SuperSonicLlmBindingPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider_id: int | None = Field(default=None, gt=0)
+    enabled: bool = False
+    mode: Literal["rule_first", "llm_enhanced"] = "rule_first"
+    timeout_seconds: int = Field(default=60, ge=10, le=180)
+    fallback_to_rules: bool = True
+
+
 class SuperSonicDatabasePayload(BaseModel):
     """One-shot secret forwarded to SuperSonic and never persisted by AgentBI."""
 
@@ -1060,6 +1069,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "items": public_items,
             "count": len(public_items),
         }
+
+    @app.get("/api/v1/admin/supersonic-llm")
+    async def get_supersonic_llm_binding(
+        _: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        binding = sessions.repository.get_supersonic_llm_binding()
+        provider = sessions.repository.get_llm_provider_config(binding["provider_id"]) \
+            if binding["provider_id"] else None
+        return {**binding, "provider_model": provider["model"] if provider else None,
+                "runtime_applied": False,
+                "runtime_message": "绑定已由 AgentBI 保存；需重启并加载 SuperSonic LLM_S2SQL 工具后生效"
+                if binding["enabled"] else "当前仅使用规则、Embedding 与语义模型解析"}
+
+    @app.put("/api/v1/admin/supersonic-llm")
+    async def save_supersonic_llm_binding(
+        payload: SuperSonicLlmBindingPayload, request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        if payload.enabled and payload.provider_id is None:
+            raise HTTPException(status_code=422, detail="启用 LLM 增强必须选择模型服务")
+        try:
+            saved = sessions.repository.save_supersonic_llm_binding(
+                provider_id=payload.provider_id, enabled=payload.enabled, mode=payload.mode,
+                timeout_seconds=payload.timeout_seconds,
+                fallback_to_rules=payload.fallback_to_rules, actor_user_id=identity.subject,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="模型服务不存在") from exc
+        sessions.audit("supersonic_llm_binding_updated", "success",
+                       actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "",
+                       detail=f"enabled={payload.enabled},provider={payload.provider_id},mode={payload.mode}")
+        return {**saved, "runtime_applied": False,
+                "runtime_message": "配置已保存，等待 SuperSonic 运行时同步"}
 
     async def persist_llm_provider(
         payload: LlmProviderPayload,

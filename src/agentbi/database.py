@@ -255,6 +255,20 @@ class LlmProviderConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class SuperSonicLlmBinding(Base):
+    """AgentBI-owned binding; runtime activation remains explicit and auditable."""
+
+    __tablename__ = "supersonic_llm_bindings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    provider_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("llm_provider_configs.id"))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mode: Mapped[str] = mapped_column(String(32), default="rule_first")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    fallback_to_rules: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class SemanticDomainMetadata(Base):
     """AgentBI metadata missing from the current SuperSonic domain table."""
 
@@ -441,6 +455,37 @@ class IdentityRepository:
             if item.enabled:
                 raise PermissionError("active LLM provider cannot be deleted")
             db.delete(item)
+
+    def get_supersonic_llm_binding(self) -> dict[str, object]:
+        with Session(self.engine) as db:
+            item = db.get(SuperSonicLlmBinding, 1)
+            if item is None:
+                return {"provider_id": None, "enabled": False, "mode": "rule_first",
+                        "timeout_seconds": 60, "fallback_to_rules": True, "updated_at": None}
+            return {"provider_id": item.provider_id, "enabled": item.enabled, "mode": item.mode,
+                    "timeout_seconds": item.timeout_seconds,
+                    "fallback_to_rules": item.fallback_to_rules,
+                    "updated_at": item.updated_at.isoformat()}
+
+    def save_supersonic_llm_binding(
+        self, *, provider_id: int | None, enabled: bool, mode: str,
+        timeout_seconds: int, fallback_to_rules: bool, actor_user_id: str,
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            if provider_id is not None and db.get(LlmProviderConfig, provider_id) is None:
+                raise KeyError("LLM provider not found")
+            item = db.get(SuperSonicLlmBinding, 1)
+            if item is None:
+                item = SuperSonicLlmBinding(id=1)
+                db.add(item)
+            item.provider_id = provider_id
+            item.enabled = enabled
+            item.mode = mode
+            item.timeout_seconds = timeout_seconds
+            item.fallback_to_rules = fallback_to_rules
+            item.updated_by = actor_user_id
+            item.updated_at = utc_now()
+        return self.get_supersonic_llm_binding()
 
     def list_semantic_domain_descriptions(self) -> dict[int, str]:
         with Session(self.engine) as db:

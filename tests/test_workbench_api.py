@@ -38,12 +38,12 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260831.9" in shell.text
-        assert "app.js?v=20260901.4" in shell.text
+        assert "app.js?v=20260901.5" in shell.text
         assert 'id="agent-chart-route"' in shell.text
         assert 'id="agent-result-visual"' in shell.text
         assert 'id="agent-result-question"' in shell.text
         assert 'id="agent-analysis-process"' in shell.text
-        assert "prototype.css?v=20260901.4" in shell.text
+        assert "prototype.css?v=20260901.5" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
@@ -1199,3 +1199,29 @@ def test_admin_lists_switches_and_deletes_llm_provider_configs() -> None:
         assert client.delete(
             f"/api/v1/admin/llm-provider/{second.json()['id']}", headers=headers
         ).status_code == 409
+
+
+def test_admin_binds_existing_provider_for_supersonic_llm() -> None:
+    app = create_app(settings())
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin-password"}
+        )
+        headers = {"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]}
+        provider = client.post(
+            "/api/v1/admin/llm-provider", headers=headers,
+            json={"base_url": "https://llm.example/v1", "model": "model-one",
+                  "api_key": "secret-one", "enabled": False},
+        ).json()
+        saved = client.put(
+            "/api/v1/admin/supersonic-llm", headers=headers,
+            json={"provider_id": provider["id"], "enabled": True,
+                  "mode": "llm_enhanced", "timeout_seconds": 75,
+                  "fallback_to_rules": True},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["runtime_applied"] is False
+        binding = client.get("/api/v1/admin/supersonic-llm").json()
+        assert binding["provider_model"] == "model-one"
+        assert binding["mode"] == "llm_enhanced"
+        assert binding["fallback_to_rules"] is True
