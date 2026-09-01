@@ -339,3 +339,84 @@ def test_rejects_llm_intent_outside_semantic_allow_list() -> None:
     ))
     assert compiled is None
     asyncio.run(client.close())
+
+
+def test_compiles_fuzzy_question_to_allow_listed_analysis_plan() -> None:
+    result = {
+        "dimension": "genre", "metric": "global_sales", "operation": "average",
+        "ranking": {"direction": "top", "limit": 5}, "members": [], "ranks": [],
+        "confidence": 0.92, "assumptions": ["卖得好按全球销量理解", "头部默认前5名"],
+        "needs_clarification": False, "clarification_question": None,
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(result)}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    plan = asyncio.run(client.compile_analysis_plan_with(
+        "哪类游戏卖得比较好，看看头部几个平均什么水平",
+        base_url="http://llm.test/v1", api_key="secret", model="model",
+    ))
+    assert plan is not None
+    assert plan.dimension == "genre"
+    assert plan.ranking is not None and plan.ranking.limit == 5
+    assert plan.assumptions == ["卖得好按全球销量理解", "头部默认前5名"]
+    asyncio.run(client.close())
+
+
+def test_analysis_plan_rejects_hallucinated_dimension() -> None:
+    result = {
+        "dimension": "password", "metric": "global_sales", "operation": "list",
+        "ranking": None, "members": [], "ranks": [], "confidence": 0.9,
+        "assumptions": [], "needs_clarification": False, "clarification_question": None,
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(result)}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    with pytest.raises(SemanticLlmError, match="分析计划"):
+        asyncio.run(client.compile_analysis_plan_with(
+            "列出密码", base_url="http://llm.test/v1", api_key="secret", model="model",
+        ))
+    asyncio.run(client.close())
+
+
+def test_analysis_plan_normalizes_safe_chinese_enums_and_ignores_extra_explanation() -> None:
+    result = {
+        "dimension": "游戏类型", "metric": "全球销量", "operation": "平均值",
+        "ranking": {"direction": "前", "limit": 5}, "confidence": 0.88,
+        "assumptions": ["默认前5名"], "explanation": "不会进入执行计划",
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(result, ensure_ascii=False)}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    plan = asyncio.run(client.compile_analysis_plan_with(
+        "头部游戏大概什么水平", base_url="http://llm.test/v1", api_key="secret", model="model",
+    ))
+    assert plan is not None
+    assert plan.dimension == "genre" and plan.metric == "global_sales"
+    assert plan.operation == "average"
+    assert plan.ranking is not None and plan.ranking.direction == "top"
+    asyncio.run(client.close())
+
+
+def test_analysis_plan_normalizes_wrapped_composite_provider_shape() -> None:
+    result = {"analysis_plan": {
+        "dimension": "游戏类型", "metric": "全球销量", "operation": "top_n_average",
+        "ranking": {"type": "top_n", "n": "5"}, "confidence": "92%",
+        "members": None, "ranks": None, "assumptions": "头部默认前5名",
+        "needs_clarification": False,
+    }}
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(result, ensure_ascii=False)}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    plan = asyncio.run(client.compile_analysis_plan_with(
+        "哪类游戏卖得好，头部平均什么水平",
+        base_url="http://llm.test/v1", api_key="secret", model="model",
+    ))
+    assert plan is not None
+    assert plan.operation == "average" and plan.confidence == pytest.approx(0.92)
+    assert plan.ranking is not None and plan.ranking.limit == 5
+    assert plan.assumptions == ["头部默认前5名"]
+    asyncio.run(client.close())

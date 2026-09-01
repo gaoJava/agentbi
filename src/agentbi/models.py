@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -75,6 +75,31 @@ class AnalyzeRequest(BaseModel):
     @classmethod
     def normalize_question(cls, value: str) -> str:
         return " ".join(value.split())
+
+
+class AnalysisRanking(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    direction: Literal["top", "bottom"] = "top"
+    limit: int = Field(default=10, ge=1, le=100)
+
+
+class AnalysisPlan(BaseModel):
+    """Allow-listed plan produced by rules or an LLM before governed execution."""
+
+    model_config = ConfigDict(extra="forbid")
+    dimension: Literal["publisher", "platform", "genre"] | None = None
+    metric: Literal["global_sales", "na_sales", "eu_sales", "jp_sales", "other_sales"] | None = None
+    operation: Literal[
+        "list", "rank", "sum", "average", "difference", "ratio", "share",
+        "rank_difference", "rank_value",
+    ] | None = None
+    ranking: AnalysisRanking | None = None
+    members: list[str] = Field(default_factory=list, max_length=2)
+    ranks: list[int] = Field(default_factory=list, max_length=2)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    assumptions: list[str] = Field(default_factory=list, max_length=5)
+    needs_clarification: bool = False
+    clarification_question: str | None = Field(default=None, max_length=256)
 
 
 class StepStatus(StrEnum):

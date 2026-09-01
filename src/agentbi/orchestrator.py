@@ -171,7 +171,14 @@ class Orchestrator:
         resolved = str(result.get("resolvedQuestion") or original_question).strip()
         mode = str(result.get("resolutionMode") or "SuperSonic 语义解析").strip()
         sql = cls._safe_generated_sql(result.get("querySql")) or "上游未返回可展示 SQL"
-        return f"解析方式：{mode}\n原始问题：{original_question}\n规范化问题：{resolved}\n生成 SQL：{sql}"
+        plan = result.get("analysisPlan")
+        plan_detail = ""
+        if isinstance(plan, dict):
+            assumptions = "；".join(str(item) for item in plan.get("assumptions", [])[:5]) or "无"
+            plan_detail = (f"\n分析计划：维度={plan.get('dimension') or '—'}；指标={plan.get('metric') or '—'}；"
+                           f"运算={plan.get('operation') or '—'}；置信度={plan.get('confidence', 0):.0%}"
+                           f"\n默认假设：{assumptions}")
+        return f"解析方式：{mode}\n原始问题：{original_question}\n规范化问题：{resolved}{plan_detail}\n生成 SQL：{sql}"
 
     def _build_report(
         self,

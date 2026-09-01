@@ -9,8 +9,10 @@ from typing import Any
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
+from pydantic import ValidationError
 
 from agentbi.config import Settings
+from agentbi.models import AnalysisPlan
 
 
 class SemanticLlmError(RuntimeError):
@@ -282,6 +284,128 @@ class SemanticDraftLlm:
         if limit is None:
             return f"按{dimension}统计{metric}"
         return f"按{dimension}统计{metric}前 {limit} 名"
+
+    async def compile_analysis_plan_with(
+        self, question: str, *, base_url: str, api_key: str, model: str,
+        timeout_seconds: int = 60,
+    ) -> AnalysisPlan | None:
+        """Convert fuzzy language to an allow-listed plan; never emit or execute SQL."""
+        schema = {
+            "dimension": "publisher|platform|genre|null",
+            "metric": "global_sales|na_sales|eu_sales|jp_sales|other_sales|null",
+            "operation": "list|rank|sum|average|difference|ratio|share|rank_difference|rank_value|null",
+            "ranking": {"direction": "top|bottom", "limit": "1..100"},
+            "members": ["最多两个原始成员值"], "ranks": ["最多两个1..100名次"],
+            "confidence": "0..1", "assumptions": ["明确写出默认假设"],
+            "needs_clarification": "boolean", "clarification_question": "string|null",
+        }
+        messages = [{"role": "system", "content": (
+            "你是企业BI分析规划器。只返回严格JSON，不输出SQL。只能使用给定枚举；不得创造字段。"
+            "从口语、同义表达和省略中提取维度、指标、运算、排名、成员。‘卖得好/销售’默认global_sales并写入assumptions；"
+            "排名未给数量时默认Top5并写入assumptions。若关键口径存在两种以上合理解释，needs_clarification=true并提出一个简短问题。"
+            f"输出结构：{json.dumps(schema, ensure_ascii=False)}"
+        )}, {"role": "user", "content": question[:2000]}]
+        payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.1,
+                                  "max_tokens": 4096, "response_format": {"type": "json_object"}}
+        if self._uses_provider_default_thinking(base_url, model):
+            payload.pop("temperature", None); payload["max_tokens"] = 8192
+        elif self._is_zhipu_glm(base_url, model):
+            payload.pop("temperature", None); payload["thinking"] = {"type": "enabled"}; payload["max_tokens"] = 8192
+        try:
+            response = await self._client.post(f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"}, json=payload, timeout=timeout_seconds)
+            if response.is_error:
+                raise self._provider_error(response)
+            body = self._parse_json_content(response.json()["choices"][0]["message"]["content"])
+            if not isinstance(body, dict):
+                return None
+            body = self._normalize_analysis_plan_body(body)
+            plan = AnalysisPlan.model_validate(body)
+            if not plan.needs_clarification and not all((plan.dimension, plan.metric, plan.operation)):
+                raise ValueError("analysis plan is incomplete")
+            if any(rank < 1 or rank > 100 for rank in plan.ranks):
+                raise ValueError("analysis rank is outside allow-list")
+            required_members = {"difference": 2, "ratio": 2, "share": 1}
+            if plan.operation in required_members and len(plan.members) != required_members[plan.operation]:
+                raise ValueError("analysis members are incomplete")
+            if plan.operation == "rank_difference" and len(plan.ranks) != 2:
+                raise ValueError("analysis ranks are incomplete")
+            if plan.operation == "rank_value" and len(plan.ranks) != 1:
+                raise ValueError("analysis rank is incomplete")
+            return plan
+        except SemanticLlmError:
+            raise
+        except ValidationError as exc:
+            fields = ", ".join(
+                ".".join(str(part) for part in error["loc"])
+                for error in exc.errors()[:5]
+            )
+            raise SemanticLlmError(f"LLM 分析计划字段不符合白名单：{fields}") from exc
+        except json.JSONDecodeError as exc:
+            raise SemanticLlmError("LLM 未返回有效 JSON 分析计划") from exc
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            raise SemanticLlmError(f"LLM 分析计划不完整：{type(exc).__name__}") from exc
+
+    @staticmethod
+    def _normalize_analysis_plan_body(body: dict[str, Any]) -> dict[str, Any]:
+        """Normalize harmless provider aliases before strict Pydantic validation."""
+        for wrapper in ("analysis_plan", "analysisPlan", "plan", "result"):
+            if isinstance(body.get(wrapper), dict):
+                body = body[wrapper]
+                break
+        allowed = {"dimension", "metric", "operation", "ranking", "members", "ranks",
+                   "confidence", "assumptions", "needs_clarification", "clarification_question"}
+        normalized = {key: value for key, value in body.items() if key in allowed}
+        dimension_aliases = {"发行商": "publisher", "平台": "platform", "游戏类型": "genre", "类型": "genre"}
+        metric_aliases = {"全球销量": "global_sales", "北美销量": "na_sales", "欧洲销量": "eu_sales",
+                          "日本销量": "jp_sales", "其他地区销量": "other_sales"}
+        operation_aliases = {"列表": "list", "排名": "rank", "合计": "sum", "总和": "sum",
+                             "平均": "average", "平均值": "average", "差值": "difference",
+                             "倍数": "ratio", "占比": "share", "排名差值": "rank_difference",
+                             "名次取值": "rank_value", "top_n": "rank", "bottom_n": "rank",
+                             "top_n_average": "average", "bottom_n_average": "average",
+                             "top_n_sum": "sum", "bottom_n_sum": "sum"}
+        raw_operation = normalized.get("operation")
+        normalized["dimension"] = dimension_aliases.get(normalized.get("dimension"), normalized.get("dimension"))
+        normalized["metric"] = metric_aliases.get(normalized.get("metric"), normalized.get("metric"))
+        normalized["operation"] = operation_aliases.get(raw_operation, raw_operation)
+        ranking = normalized.get("ranking")
+        if isinstance(ranking, str):
+            ranking = {"direction": ranking, "limit": 5}
+        if isinstance(ranking, dict):
+            raw_direction = ranking.get("direction", ranking.get("type"))
+            direction = {"前": "top", "最高": "top", "前几名": "top", "top_n": "top",
+                         "后": "bottom", "最低": "bottom", "后几名": "bottom",
+                         "bottom_n": "bottom"}.get(raw_direction, raw_direction)
+            limit = ranking.get("limit", ranking.get("n", 5))
+            if isinstance(limit, str) and limit.strip().isdigit():
+                limit = int(limit)
+            normalized["ranking"] = {"direction": direction, "limit": limit}
+        elif isinstance(raw_operation, str) and raw_operation.startswith(("top_n_", "bottom_n_")):
+            normalized["ranking"] = {
+                "direction": "bottom" if raw_operation.startswith("bottom_n_") else "top",
+                "limit": 5,
+            }
+        for key in ("members", "ranks", "assumptions"):
+            if normalized.get(key) is None:
+                normalized[key] = []
+            elif isinstance(normalized.get(key), str):
+                normalized[key] = [normalized[key]]
+        confidence = normalized.get("confidence", 0.5)
+        if isinstance(confidence, str):
+            try:
+                confidence = float(confidence.rstrip("%"))
+                if confidence > 1:
+                    confidence /= 100
+            except ValueError:
+                confidence = 0.5
+        normalized["confidence"] = confidence
+        normalized.setdefault("members", [])
+        normalized.setdefault("ranks", [])
+        normalized.setdefault("assumptions", [])
+        normalized.setdefault("needs_clarification", False)
+        normalized.setdefault("clarification_question", None)
+        return normalized
 
     @staticmethod
     def _is_zhipu_glm(base_url: str, model: str) -> bool:

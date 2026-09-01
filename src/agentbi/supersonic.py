@@ -6,7 +6,7 @@ import asyncio
 import re
 import time
 from collections.abc import Awaitable, Callable
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote
 
@@ -15,7 +15,7 @@ import httpx
 from agentbi.config import Settings
 from agentbi.conversation import ConversationContextManager
 from agentbi.database import IdentityRepository
-from agentbi.models import AnalyzeRequest
+from agentbi.models import AnalysisPlan, AnalyzeRequest
 
 
 class UpstreamError(RuntimeError):
@@ -55,7 +55,7 @@ class SuperSonicClient:
         # by WEB_PAGE plugins. AgentBI therefore owns tenant-bound conversation history
         # and serializes access to that upstream stateless context.
         self._query_lock = asyncio.Lock()
-        self._llm_resolver: Callable[[str], Awaitable[str | None]] | None = None
+        self._llm_resolver: Callable[[str], Awaitable[AnalysisPlan | str | None]] | None = None
         if repository is None:
             repository = IdentityRepository("sqlite:///:memory:")
             repository.initialize(seed_demo_accounts=False, user_password="", admin_password="")
@@ -65,7 +65,7 @@ class SuperSonicClient:
         await self._client.aclose()
 
     def configure_llm_resolver(
-        self, resolver: Callable[[str], Awaitable[str | None]] | None
+        self, resolver: Callable[[str], Awaitable[AnalysisPlan | str | None]] | None
     ) -> None:
         self._llm_resolver = resolver
 
@@ -75,20 +75,32 @@ class SuperSonicClient:
         conversation_id, summary, history = self._conversation(request)
         resolved_question = request.question
         resolution_mode = "SuperSonic 规则解析"
+        normalized: AnalysisPlan | str | None = None
         calculation = self._calculation_query(resolved_question)
         ranked_query = self._ranking_query(resolved_question)
         structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(request.question)
         if not structured and self._llm_resolver is not None:
             normalized = await self._llm_resolver(request.question)
-            if normalized:
+            if isinstance(normalized, AnalysisPlan):
+                if normalized.needs_clarification:
+                    raise SemanticResolutionError(
+                        normalized.clarification_question or "这个问题存在多种业务口径，请补充指标、范围或比较对象"
+                    )
+                calculation = self._calculation_from_plan(normalized)
+                structured = self._calculation_structure(calculation) or self._query_from_plan(normalized)
+                resolved_question = self._describe_plan(normalized)
+            elif isinstance(normalized, str) and normalized:
                 resolved_question = normalized
-                resolution_mode = "LLM 语义增强后交由 SuperSonic 执行"
                 calculation = self._calculation_query(resolved_question)
                 ranked_query = self._ranking_query(resolved_question)
                 structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(resolved_question)
+            if normalized:
+                resolution_mode = "LLM 语义增强后交由 SuperSonic 执行"
         if structured:
             dimension, metric, limit = structured
-            sort_direction = "ASC" if calculation and calculation.get("sort") == "asc" else "DESC"
+            plan_bottom = (isinstance(normalized, AnalysisPlan) and normalized.ranking is not None
+                           and normalized.ranking.direction == "bottom")
+            sort_direction = "ASC" if (calculation and calculation.get("sort") == "asc") or plan_bottom else "DESC"
             model_biz_name = await self._view_model_biz_name(
                 request.context.semantic_model_id
             )
@@ -124,7 +136,7 @@ class SuperSonicClient:
                 "queryTimeCost": round((time.perf_counter() - started) * 1000),
                 "response": calculation_result["response"] if calculation_result else (
                     f"已按{dimension_label}汇总{metric_label}，返回前 {limit} 名。"
-                    if ranked_query
+                    if ranked_query or (isinstance(normalized, AnalysisPlan) and normalized.operation == "rank")
                     else f"已按{dimension_label}汇总{metric_label}。"
                 ),
                 "effectiveTimeRange": "全部数据（本问题未应用时间筛选）",
@@ -132,6 +144,8 @@ class SuperSonicClient:
                 "resolvedQuestion": resolved_question,
                 "resolutionMode": resolution_mode,
             }
+            if isinstance(normalized, AnalysisPlan):
+                result["analysisPlan"] = normalized.model_dump(mode="json")
             if calculation_result:
                 result["calculationDetail"] = calculation_result["detail"]
                 result["calculationTimeCost"] = calculation_result["duration_ms"]
@@ -200,6 +214,34 @@ class SuperSonicClient:
             "eu_sales": "欧洲销量", "jp_sales": "日本销量",
             "other_sales": "其他地区销量",
         }.get(field, field)
+
+    @staticmethod
+    def _query_from_plan(plan: AnalysisPlan) -> tuple[str, str, int] | None:
+        if not plan.dimension or not plan.metric or plan.operation not in {"list", "rank"}:
+            return None
+        return plan.dimension, plan.metric, plan.ranking.limit if plan.ranking else 100
+
+    @staticmethod
+    def _calculation_from_plan(plan: AnalysisPlan) -> dict[str, Any] | None:
+        if not plan.dimension or not plan.metric or plan.operation in {None, "list", "rank"}:
+            return None
+        calculation: dict[str, Any] = {"operation": plan.operation, "dimension": plan.dimension,
+                                      "metric": plan.metric, "limit": plan.ranking.limit if plan.ranking else 100,
+                                      "require_limit": plan.ranking is not None}
+        if plan.ranking and plan.ranking.direction == "bottom":
+            calculation.update({"sort": "asc", "scope": "Bottom"})
+        if plan.members: calculation["members"] = plan.members
+        if plan.ranks: calculation["ranks"] = plan.ranks
+        return calculation
+
+    @classmethod
+    def _describe_plan(cls, plan: AnalysisPlan) -> str:
+        parts = [f"维度={cls._field_label(plan.dimension)}" if plan.dimension else "维度=未确定",
+                 f"指标={cls._field_label(plan.metric)}" if plan.metric else "指标=未确定",
+                 f"运算={plan.operation or '未确定'}"]
+        if plan.ranking: parts.append(f"排名={plan.ranking.direction} {plan.ranking.limit}")
+        if plan.members: parts.append(f"对象={','.join(plan.members)}")
+        return "；".join(parts)
 
     @staticmethod
     def _chinese_number(value: str) -> int | None:
@@ -321,9 +363,9 @@ class SuperSonicClient:
                 continue
         if calculation["operation"] in {"sum", "average"}:
             selected = values[:calculation["limit"]]
-            if len(selected) < calculation["limit"]:
+            if calculation.get("require_limit", True) and len(selected) < calculation["limit"]:
                 raise SemanticResolutionError("真实查询结果不足以完成本次 Top N 计算")
-            total = sum((value for _, value in selected), Decimal("0"))
+            total = sum((value for _, value in selected), Decimal(0))
             result = total if calculation["operation"] == "sum" else total / Decimal(len(selected))
             label = "合计" if calculation["operation"] == "sum" else "平均值"
             expression = " + ".join(cls._format_decimal(value) for _, value in selected)
@@ -356,8 +398,8 @@ class SuperSonicClient:
                           if str(row.get(dimension, "")).casefold() == member.casefold()), None)
             if not match:
                 raise SemanticResolutionError(f"真实查询结果中未找到“{member}”，无法计算占比")
-            total = sum((value for _, value in values), Decimal("0"))
-            share_value = match[1] / total * Decimal("100") if total else Decimal("0")
+            total = sum((value for _, value in values), Decimal(0))
+            share_value = match[1] / total * Decimal(100) if total else Decimal(0)
             return {"rows": [match[0]],
                     "response": f"{member} 的{cls._field_label(metric)}占总体 {cls._format_decimal(share_value)}%。",
                     "detail": f"运算：总体占比\n参与值：{member}={cls._format_decimal(match[1])}；总体={cls._format_decimal(total)}\n公式：{cls._format_decimal(match[1])} / {cls._format_decimal(total)} = {cls._format_decimal(share_value)}%",
@@ -381,7 +423,7 @@ class SuperSonicClient:
                     "detail": f"运算：倍数\n参与值：{members[0]}={cls._format_decimal(left)}；{members[1]}={cls._format_decimal(right)}\n公式：{cls._format_decimal(left)} / {cls._format_decimal(right)} = {cls._format_decimal(ratio_value)}",
                     "duration_ms": round((time.perf_counter() - started) * 1000)}
         difference, absolute = left - right, abs(left - right)
-        percentage = absolute / abs(right) * Decimal("100") if right else None
+        percentage = absolute / abs(right) * Decimal(100) if right else None
         detail = (f"运算：差值与差异率\n参与值：{members[0]}={cls._format_decimal(left)}；{members[1]}={cls._format_decimal(right)}\n"
                   f"公式：{cls._format_decimal(left)} - {cls._format_decimal(right)} = {cls._format_decimal(difference)}")
         response = (f"{members[0]} 的{cls._field_label(metric)}为 {cls._format_decimal(left)}，{members[1]} 为 "

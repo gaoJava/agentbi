@@ -9,8 +9,15 @@ import unittest
 import httpx
 
 from agentbi.config import Settings
-from agentbi.models import Actor, AnalyzeRequest, ScreenContext, ScreenFilter
-from agentbi.supersonic import SuperSonicClient, UpstreamError
+from agentbi.models import (
+    Actor,
+    AnalysisPlan,
+    AnalysisRanking,
+    AnalyzeRequest,
+    ScreenContext,
+    ScreenFilter,
+)
+from agentbi.supersonic import SemanticResolutionError, SuperSonicClient, UpstreamError
 
 
 def settings() -> Settings:
@@ -158,6 +165,56 @@ class SuperSonicClientTest(unittest.TestCase):
             genre_rows, "genre", "global_sales",
         )
         self.assertIn("56.82%", share_result["response"])
+
+    def test_executes_allow_listed_llm_analysis_plan(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/api/semantic/view/1"):
+                return httpx.Response(200, json={"code": 200, "data": {
+                    "viewDetail": {"viewModelConfigs": [{"id": 44}]}}})
+            if request.url.path.endswith("/api/semantic/model/getModel/44"):
+                return httpx.Response(200, json={"code": 200, "data": {"bizName": "video_game_sales_model"}})
+            return httpx.Response(200, json={"code": 200, "data": {
+                "resultList": [
+                    {"genre": "Action", "global_sales": 1751.17},
+                    {"genre": "Sports", "global_sales": 1330.93},
+                    {"genre": "Shooter", "global_sales": 1037.37},
+                    {"genre": "Role-Playing", "global_sales": 927.36},
+                    {"genre": "Platform", "global_sales": 831.37},
+                ], "sql": "SELECT genre, SUM(global_sales) FROM governed_model",
+            }})
+
+        async def resolver(_: str):
+            return AnalysisPlan(
+                dimension="genre", metric="global_sales", operation="average",
+                ranking=AnalysisRanking(direction="top", limit=5), confidence=0.91,
+                assumptions=["头部几个默认前5名"],
+            )
+
+        client = SuperSonicClient(settings(), httpx.MockTransport(handler))
+        client.configure_llm_resolver(resolver)
+        request = analyze_request()
+        request.question = "哪类游戏卖得好，看看头部几个平均什么水平"
+        result = asyncio.run(client.query(request))
+        asyncio.run(client.close())
+        self.assertIn("1,175.64", result["response"])
+        self.assertEqual(result["analysisPlan"]["dimension"], "genre")
+        self.assertIn("LLM", result["resolutionMode"])
+
+    def test_returns_llm_clarification_before_query_execution(self):
+        async def resolver(_: str):
+            return AnalysisPlan(
+                confidence=0.35, needs_clarification=True,
+                clarification_question="您说的销量是全球销量还是北美销量？",
+            )
+
+        def unexpected(_: httpx.Request) -> httpx.Response:
+            raise AssertionError("澄清计划不应查询上游")
+
+        client = SuperSonicClient(settings(), httpx.MockTransport(unexpected))
+        client.configure_llm_resolver(resolver)
+        with self.assertRaisesRegex(SemanticResolutionError, "全球销量还是北美销量"):
+            asyncio.run(client.query(analyze_request()))
+        asyncio.run(client.close())
 
     def test_rejects_successful_result_with_unrelated_requested_fields(self):
         with self.assertRaisesRegex(UpstreamError, "发行商.*全球销量"):

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agentbi.auth import SESSION_COOKIE, AuthenticationError, SessionIdentity, SessionManager
 from agentbi.config import Settings
-from agentbi.models import Actor, AnalyzeRequest, AnalyzeResponse, ScreenContext
+from agentbi.models import Actor, AnalysisPlan, AnalyzeRequest, AnalyzeResponse, ScreenContext
 from agentbi.orchestrator import Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
 from agentbi.semantic_draft import build_semantic_draft
@@ -360,7 +360,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SemanticLlmError:
             logger.warning("Stored LLM provider key cannot be decrypted; provider disabled")
 
-    async def resolve_semantic_question_with_llm(question: str) -> str | None:
+    async def resolve_semantic_question_with_llm(question: str):
         binding = sessions.repository.get_supersonic_llm_binding()
         if not binding["enabled"] or binding["provider_id"] is None:
             return None
@@ -368,17 +368,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if provider is None:
             return None
         try:
-            return await semantic_llm.compile_grouped_metric_with(
+            return await semantic_llm.compile_analysis_plan_with(
                 question,
                 base_url=str(provider["base_url"]),
                 api_key=semantic_llm.decrypt_key(str(provider["encrypted_api_key"])),
                 model=str(provider["model"]),
                 timeout_seconds=int(binding["timeout_seconds"]),
             )
-        except SemanticLlmError:
+        except SemanticLlmError as exc:
             if bool(binding["fallback_to_rules"]):
-                logger.warning("LLM semantic intent failed; continuing with SuperSonic rules")
-                return None
+                logger.warning("LLM analysis planning failed; requesting explicit clarification: %s", exc)
+                return AnalysisPlan(
+                    confidence=0,
+                    needs_clarification=True,
+                    clarification_question=(
+                        "我暂时无法稳定理解这个问题。请补充统计维度、指标和范围，"
+                        "例如“按游戏类型统计全球销量前5名并计算平均值”。"
+                    ),
+                )
             raise UpstreamError("LLM semantic intent service is unavailable")
 
     supersonic.configure_llm_resolver(resolve_semantic_question_with_llm)
