@@ -126,6 +126,7 @@
 .context-box .agent-time-control>span{flex:0 0 auto;padding:0;border:0;background:transparent;color:#607089;font-size:11px}
 .context-box .agent-time-control>input{width:118px;height:32px;text-align:center;background:#fff}
 .agent-query-result{margin:14px 0 4px;border:1px solid #dfe7f3;border-radius:13px;background:#fff;box-shadow:0 8px 24px rgba(36,66,111,.07);overflow:hidden}
+.agent-result-question{display:grid;gap:4px;padding:11px 14px;background:#f7f9fd;border-bottom:1px solid #e8edf5}.agent-result-question small{color:#7d8ba0;font-size:9px;font-weight:650}.agent-result-question p{margin:0;color:#203653;font-size:12px;font-weight:650;line-height:1.55}
 .agent-result-heading{display:flex;align-items:flex-start;gap:9px;padding:13px 14px 11px;background:linear-gradient(135deg,#f7fbff,#fbfaff);border-bottom:1px solid #edf1f6}
 .agent-result-heading>span{display:grid;place-items:center;flex:0 0 22px;width:22px;height:22px;border-radius:50%;background:#e7f8ef;color:#14935d;font-size:12px;font-weight:800}
 .agent-result-heading h3{margin:1px 0 0;color:#192b45;font-size:13px;line-height:1.55;text-align:left}

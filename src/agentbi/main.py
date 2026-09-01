@@ -27,7 +27,7 @@ from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
 from agentbi.semantic_draft import build_semantic_draft
 from agentbi.semantic_llm import SemanticDraftLlm, SemanticLlmError
 from agentbi.superset import SupersetApiError, SupersetClient
-from agentbi.supersonic import SuperSonicClient, UpstreamError
+from agentbi.supersonic import ResultMismatchError, SuperSonicClient, UpstreamError
 
 # Reuse Uvicorn's configured handler so audit events are emitted in every launch mode.
 logger = logging.getLogger("uvicorn.error")
@@ -2105,6 +2105,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ) from exc
         except PolicyViolation as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except ResultMismatchError as exc:
+            logger.warning("workbench semantic result mismatch: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
         except UpstreamError as exc:
             logger.warning("workbench semantic query failed: %s", exc)
             raise HTTPException(

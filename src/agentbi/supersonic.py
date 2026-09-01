@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -16,6 +17,10 @@ from agentbi.models import AnalyzeRequest
 
 class UpstreamError(RuntimeError):
     """A sanitized SuperSonic integration failure."""
+
+
+class ResultMismatchError(UpstreamError):
+    """The upstream query completed but returned fields unrelated to the question."""
 
 
 class SuperSonicClient:
@@ -80,6 +85,7 @@ class SuperSonicClient:
                 "saveAnswer": True,
             }
             result = await self._post("/api/chat/query/execute", execute_payload)
+        self._validate_question_result(request.question, result)
         # SuperSonic's UI also restores queryId from the parse response because some
         # execution modes omit it. Preserve that identifier for evidence and audit.
         if result.get("queryId") is None and parsed.get("queryId") is not None:
@@ -87,6 +93,33 @@ class SuperSonicClient:
         result["chatId"] = conversation_id
         self._conversations.record(request.actor.subject, conversation_id, request.question, result)
         return result
+
+    @staticmethod
+    def _validate_question_result(question: str, result: dict[str, Any]) -> None:
+        """Reject successful-but-unrelated parses before they reach the workbench."""
+
+        rows = result.get("queryResults")
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return
+        columns = {str(column).strip().lower() for column in rows[0]}
+        required_terms = {
+            "发行商": {"publisher", "发行商"},
+            "平台": {"platform", "平台"},
+            "游戏类型": {"genre", "游戏类型", "类型"},
+            "全球销量": {"global_sales", "全球销量", "global sales"},
+            "北美销量": {"na_sales", "北美销量"},
+            "欧洲销量": {"eu_sales", "欧洲销量"},
+            "日本销量": {"jp_sales", "日本销量"},
+        }
+        missing = [label for label, aliases in required_terms.items()
+                   if label in question and columns.isdisjoint(aliases)]
+        if missing:
+            raise ResultMismatchError(
+                f"查询结果与本次问题不匹配，缺少字段：{'、'.join(missing)}。请检查所选语义模型后重试"
+            )
+        ranking = re.search(r"前\s*(\d{1,3})\s*(?:名|个)?", question)
+        if ranking and len(rows) > int(ranking.group(1)):
+            result["queryResults"] = rows[: int(ranking.group(1))]
 
     async def list_semantic_models(self) -> list[dict[str, Any]]:
         """Return a sanitized inventory of live SuperSonic semantic models."""

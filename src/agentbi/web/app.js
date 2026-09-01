@@ -129,6 +129,8 @@ function applyChartTimeRange(timeRange) {
 }
 
 function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id) {
+  workbenchChatId = undefined;
+  workbenchSelected = undefined;
   selectedSupersetContext = {dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id)};
   const chip = document.querySelector('#agent-chart-context');
   chip.textContent = `${chart.title} · Chart ${chart.superset_id}`; chip.hidden = false;
@@ -674,6 +676,8 @@ function receiveSupersetChartSelection(event) {
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(context.chart_id)) return;
   const datasetId = typeof context.dataset_id === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(context.dataset_id)
     ? context.dataset_id : undefined;
+  workbenchChatId = undefined;
+  workbenchSelected = undefined;
   selectedSupersetContext = {
     dashboard_id: context.dashboard_id.slice(0, 128),
     chart_id: context.chart_id,
@@ -1756,6 +1760,7 @@ async function analyzeFromWorkbench() {
       workbenchDrillDepth += 1;
       workbenchPendingDrill = false;
     }
+    document.querySelector('#agent-result-question').textContent = question;
     document.querySelector('#agent-answer').textContent = body.answer;
     document.querySelector('#agent-result-table').replaceChildren(resultTable(body.data));
     document.querySelector('#agent-evidence-summary').textContent = `查询编号 ${body.evidence.query_id} · ${body.evidence.row_count} 行 · SQL 指纹 ${body.evidence.sql_fingerprint || '—'}`;
@@ -1891,6 +1896,10 @@ document.querySelector('#agent-panel-toggle').addEventListener('click', () => {
   setAgentPanelExpanded(!agentPanelExpanded);
 });
 document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
+document.querySelector('#agent-semantic-model').addEventListener('change', () => {
+  workbenchChatId = undefined;
+  workbenchSelected = undefined;
+});
 document.querySelector('#agent-time-range').addEventListener('input', () => applyChartTimeRange(''));
 document.querySelector('#agent-question').addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') analyzeFromWorkbench();

@@ -38,6 +38,20 @@ def analyze_request() -> AnalyzeRequest:
 
 
 class SuperSonicClientTest(unittest.TestCase):
+    def test_rejects_successful_result_with_unrelated_requested_fields(self):
+        with self.assertRaisesRegex(UpstreamError, "发行商.*全球销量"):
+            SuperSonicClient._validate_question_result(
+                "按发行商统计全球销量前 10 名",
+                {"queryResults": [{"sys_imp_date": "2026-08-02", "department": "sales", "pv": 4}]},
+            )
+
+    def test_limits_ranked_result_to_requested_top_n(self):
+        result = {"queryResults": [
+            {"publisher": f"P{index}", "global_sales": 100 - index} for index in range(20)
+        ]}
+        SuperSonicClient._validate_question_result("按发行商统计全球销量前 10 名", result)
+        self.assertEqual(len(result["queryResults"]), 10)
+
     def test_resolves_generated_database_id_and_reuses_same_source(self):
         requests: list[tuple[str, dict | None]] = []
 
