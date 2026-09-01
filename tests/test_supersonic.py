@@ -44,6 +44,12 @@ class SuperSonicClientTest(unittest.TestCase):
             ("publisher", "global_sales", 10),
         )
 
+    def test_compiles_recommended_chart_title_as_default_top_ten(self):
+        self.assertEqual(
+            SuperSonicClient._ranking_query("发行商销售排名"),
+            ("publisher", "global_sales", 10),
+        )
+
     def test_compiles_explicit_grouped_metric_question(self):
         self.assertEqual(
             SuperSonicClient._grouped_metric_query("各游戏类型的全球销量是多少？"),

@@ -2091,7 +2091,10 @@ document.querySelector('#agent-chart-route-confirm').addEventListener('click', (
   if (!pendingChartRoute) return;
   const {target, proposal, question, signature} = pendingChartRoute;
   pendingChartRoute = undefined;
-  if (target) selectNativeChart(target);
+  if (target) {
+    selectNativeChart(target);
+    document.querySelector('#agent-query-status').textContent = `已切换至“${target.title}”，正在继续原问题`;
+  }
   else {
     temporaryVisualization = proposal;
     chartRouteOverride = signature;

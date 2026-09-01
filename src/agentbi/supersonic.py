@@ -21,6 +21,10 @@ class UpstreamError(RuntimeError):
     """A sanitized SuperSonic integration failure."""
 
 
+class SemanticResolutionError(UpstreamError):
+    """The service is healthy, but the question lacks a resolvable metric."""
+
+
 class ResultMismatchError(UpstreamError):
     """The upstream query completed but returned fields unrelated to the question."""
 
@@ -138,7 +142,9 @@ class SuperSonicClient:
                 parsed.get("candidateParses") or []
             )
             if parsed.get("state") == "FAILED" or not candidates:
-                raise UpstreamError("SuperSonic could not resolve the semantic question")
+                raise SemanticResolutionError(
+                    "无法从问题中确定统计指标。请补充类似“全球销量、北美销量”等指标后重试"
+                )
             parse_info = self._select_governed_query(candidates, request.context.semantic_model_id)
 
             execute_payload = {
@@ -191,14 +197,19 @@ class SuperSonicClient:
         match = re.search(r"按\s*(发行商|平台|游戏类型|类型)\s*统计\s*"
                           r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*"
                           r"前\s*(\d{1,3})\s*(?:名|个)?", question)
-        if not match:
-            return None
         dimensions = {"发行商": "publisher", "平台": "platform",
                       "游戏类型": "genre", "类型": "genre"}
         metrics = {"全球销量": "global_sales", "北美销量": "na_sales",
                    "欧洲销量": "eu_sales", "日本销量": "jp_sales",
                    "其他地区销量": "other_sales"}
-        return dimensions[match.group(1)], metrics[match.group(2)], min(int(match.group(3)), 100)
+        if match:
+            return dimensions[match.group(1)], metrics[match.group(2)], min(int(match.group(3)), 100)
+        shorthand = re.search(
+            r"(发行商|平台|游戏类型|类型)\s*(?:销售|销量)?\s*(?:排名|排行)", question
+        )
+        if shorthand:
+            return dimensions[shorthand.group(1)], "global_sales", 10
+        return None
 
     @classmethod
     def _grouped_metric_query(cls, question: str) -> tuple[str, str, int] | None:
