@@ -54,6 +54,7 @@ let selectedSupersetContext;
 let selectedNativeChart;
 let pendingChartRoute;
 let chartRouteOverride;
+let temporaryVisualization;
 let agentPanelExpanded = false;
 let workbenchDrillDepth = 0;
 let workbenchPendingDrill = false;
@@ -137,6 +138,7 @@ function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id)
   selectedSupersetContext = {dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id)};
   selectedNativeChart = chart;
   pendingChartRoute = undefined;
+  temporaryVisualization = undefined;
   document.querySelector('#agent-chart-route').hidden = true;
   const chip = document.querySelector('#agent-chart-context');
   chip.textContent = `${chart.title} · Chart ${chart.superset_id}`; chip.hidden = false;
@@ -1682,6 +1684,21 @@ function resultTable(rows) {
   return wrapper;
 }
 
+function renderTemporaryVisualization(rows, proposal) {
+  const panel = document.querySelector('#agent-result-visual');
+  panel.hidden = true; panel.replaceChildren();
+  if (!proposal || !Array.isArray(rows) || !rows.length) return;
+  const columns = Object.keys(rows[0] || {});
+  const dimension = columns.find(column => rows.some(row => typeof row[column] === 'string')) || columns[0];
+  const metric = columns.find(column => rows.some(row => typeof row[column] === 'number'));
+  if (!dimension || !metric) return;
+  const title = document.createElement('header');
+  title.innerHTML = `<strong>临时可视化</strong><small>仅用于本次回答，不会保存到 Superset</small>`;
+  const chart = {title: proposal.title, visualization_type: proposal.type,
+    columns: [dimension, metric], rows: rows.slice(0, proposal.type === 'donut' ? 8 : 12), status: 'ready'};
+  panel.append(title, renderNativeChartVisual(chart)); panel.hidden = false;
+}
+
 const analysisStepLabels = {
   authorize: '权限与请求校验', semantic_query: '语义解析与数据查询', validate_evidence: '结果与证据校验',
 };
@@ -1772,6 +1789,8 @@ async function analyzeFromWorkbench() {
     }
     document.querySelector('#agent-result-question').textContent = question;
     document.querySelector('#agent-answer').textContent = body.answer;
+    renderTemporaryVisualization(body.data, temporaryVisualization);
+    temporaryVisualization = undefined;
     document.querySelector('#agent-result-table').replaceChildren(resultTable(body.data));
     document.querySelector('#agent-evidence-summary').textContent = `查询编号 ${body.evidence.query_id} · ${body.evidence.row_count} 行 · SQL 指纹 ${body.evidence.sql_fingerprint || '—'}`;
     document.querySelector('#agent-query-result').hidden = false;
@@ -1796,10 +1815,26 @@ async function analyzeFromWorkbench() {
 }
 
 function questionDimension(question) {
-  if (/发行商/.test(question)) return 'publisher';
-  if (/平台/.test(question)) return 'platform';
-  if (/游戏类型|类型/.test(question)) return 'genre';
+  const aliases = [
+    ['publisher', /发行商|厂商|出版商/i], ['platform', /平台|游戏平台/i],
+    ['genre', /游戏类型|品类|类别/i], ['year', /年份|年度|历年|按年/i],
+    ['name', /游戏名称|游戏名|名称/i], ['region', /地区|区域/i],
+  ];
+  const knownDimensions = new Set((supersetHomeSnapshot?.charts || [])
+    .map(chart => chart.configuration?.dimension).filter(Boolean));
+  for (const dimension of knownDimensions) {
+    if (new RegExp(`(^|[^a-z])${String(dimension).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`, 'i').test(question)) return dimension;
+  }
+  for (const [dimension, pattern] of aliases) if (pattern.test(question)) return dimension;
   return undefined;
+}
+
+function visualizationProposal(question, dimension) {
+  const type = /占比|比例|构成|份额/.test(question) ? 'donut'
+    : /趋势|变化|走势|历年|按年/.test(question) ? 'line'
+      : /排名|排行|前\s*\d+|top\s*\d+/i.test(question) ? 'bar' : 'table';
+  const labels = {donut: '占比图', line: '趋势图', bar: '排名条形图', table: '明细表'};
+  return {type, dimension, title: `${friendlyDimensionLabel(dimension)}${labels[type]}`};
 }
 
 function offerChartRoute(question) {
@@ -1816,18 +1851,24 @@ function offerChartRoute(question) {
     chart.configuration?.dimension === dimension &&
     (!selectedNativeChart.configuration?.metric_column ||
       chart.configuration?.metric_column === selectedNativeChart.configuration.metric_column));
-  if (!target) return false;
-  pendingChartRoute = {target, question, signature};
-  document.querySelector('#agent-chart-route-title').textContent = target.title;
-  document.querySelector('#agent-chart-route-message').textContent =
-    `当前“${selectedNativeChart.title}”按${friendlyDimensionLabel(currentDimension)}分析，问题询问的是${friendlyDimensionLabel(dimension)}。建议切换到更匹配的图表后再执行。`;
+  const proposal = target ? undefined : visualizationProposal(question, dimension);
+  pendingChartRoute = {target, proposal, question, signature};
+  document.querySelector('#agent-chart-route-kind').textContent = target ? '建议切换已有图表' : '需要确认临时可视化';
+  document.querySelector('#agent-chart-route-title').textContent = target?.title || proposal.title;
+  document.querySelector('#agent-chart-route-message').textContent = target
+    ? `当前“${selectedNativeChart.title}”按${friendlyDimensionLabel(currentDimension)}分析，问题询问的是${friendlyDimensionLabel(dimension)}。建议切换到更匹配的图表后再执行。`
+    : `当前仪表盘没有按${friendlyDimensionLabel(dimension)}分析的现成图表。确认后才会执行查询并生成${proposal.title}；该图仅用于本次回答，不会写入 Superset。`;
+  document.querySelector('#agent-chart-route-confirm').textContent = target ? '切换并继续提问' : '同意临时生成并分析';
   document.querySelector('#agent-chart-route').hidden = false;
-  document.querySelector('#agent-query-status').textContent = '检测到问题与当前图表维度不一致，尚未执行查询';
+  document.querySelector('#agent-query-status').textContent = target
+    ? '检测到问题与当前图表维度不一致，尚未执行查询'
+    : '等待确认临时生成可视化，尚未执行查询';
   return true;
 }
 
 function friendlyDimensionLabel(value) {
-  return {publisher: '发行商', platform: '平台', genre: '游戏类型'}[value] || value;
+  return {publisher: '发行商', platform: '平台', genre: '游戏类型', year: '年份',
+    name: '游戏名称', region: '地区'}[value] || value;
 }
 
 function renderDrillSourceTable(config) {
@@ -1943,19 +1984,22 @@ document.querySelector('#agent-panel-toggle').addEventListener('click', () => {
 document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
 document.querySelector('#agent-chart-route-confirm').addEventListener('click', () => {
   if (!pendingChartRoute) return;
-  const {target, question} = pendingChartRoute;
+  const {target, proposal, question, signature} = pendingChartRoute;
   pendingChartRoute = undefined;
-  selectNativeChart(target);
+  if (target) selectNativeChart(target);
+  else {
+    temporaryVisualization = proposal;
+    chartRouteOverride = signature;
+    document.querySelector('#agent-chart-route').hidden = true;
+  }
   document.querySelector('#agent-question').value = question;
   analyzeFromWorkbench();
 });
 document.querySelector('#agent-chart-route-cancel').addEventListener('click', () => {
   if (!pendingChartRoute) return;
-  const {signature} = pendingChartRoute;
   pendingChartRoute = undefined;
-  chartRouteOverride = signature;
   document.querySelector('#agent-chart-route').hidden = true;
-  analyzeFromWorkbench();
+  document.querySelector('#agent-query-status').textContent = '已取消，未执行查询或生成可视化';
 });
 document.querySelector('#agent-semantic-model').addEventListener('change', () => {
   workbenchChatId = undefined;
