@@ -51,6 +51,9 @@ let workbenchAnalysis;
 let workbenchChatId;
 let workbenchSelected;
 let selectedSupersetContext;
+let selectedNativeChart;
+let pendingChartRoute;
+let chartRouteOverride;
 let agentPanelExpanded = false;
 let workbenchDrillDepth = 0;
 let workbenchPendingDrill = false;
@@ -132,6 +135,9 @@ function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id)
   workbenchChatId = undefined;
   workbenchSelected = undefined;
   selectedSupersetContext = {dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id)};
+  selectedNativeChart = chart;
+  pendingChartRoute = undefined;
+  document.querySelector('#agent-chart-route').hidden = true;
   const chip = document.querySelector('#agent-chart-context');
   chip.textContent = `${chart.title} · Chart ${chart.superset_id}`; chip.hidden = false;
   document.querySelector('#agent-context-description').textContent = '已固定当前 AgentBI 图表；问答将携带真实仪表盘与 Chart ID';
@@ -683,6 +689,9 @@ function receiveSupersetChartSelection(event) {
     chart_id: context.chart_id,
     ...(datasetId ? {dataset_id: datasetId} : {}),
   };
+  selectedNativeChart = (supersetHomeSnapshot?.charts || []).find(
+    chart => String(chart.superset_id) === context.chart_id
+  );
   applyChartTimeRange(context.time_range);
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title.trim().slice(0, 200) : `图表 ${context.chart_id}`;
@@ -1737,6 +1746,7 @@ async function analyzeFromWorkbench() {
   const button = document.querySelector('#agent-analyze');
   const status = document.querySelector('#agent-query-status');
   if (question.length < 2) { status.textContent = '请输入至少 2 个字符的问题'; return; }
+  if (offerChartRoute(question)) return;
   button.disabled = true; status.textContent = '正在执行 SuperSonic 真实语义查询…';
   const processStarted = performance.now();
   renderAnalysisProcess([], true, 0);
@@ -1783,6 +1793,41 @@ async function analyzeFromWorkbench() {
     window.clearInterval(processTimer);
     button.disabled = false;
   }
+}
+
+function questionDimension(question) {
+  if (/发行商/.test(question)) return 'publisher';
+  if (/平台/.test(question)) return 'platform';
+  if (/游戏类型|类型/.test(question)) return 'genre';
+  return undefined;
+}
+
+function offerChartRoute(question) {
+  const dimension = questionDimension(question);
+  const currentDimension = selectedNativeChart?.configuration?.dimension;
+  const signature = `${selectedNativeChart?.superset_id || ''}:${question}`;
+  if (!dimension || !currentDimension || dimension === currentDimension || chartRouteOverride === signature) {
+    chartRouteOverride = undefined;
+    document.querySelector('#agent-chart-route').hidden = true;
+    return false;
+  }
+  const charts = supersetHomeSnapshot?.charts || [];
+  const target = charts.find(chart => chart.status === 'ready' &&
+    chart.configuration?.dimension === dimension &&
+    (!selectedNativeChart.configuration?.metric_column ||
+      chart.configuration?.metric_column === selectedNativeChart.configuration.metric_column));
+  if (!target) return false;
+  pendingChartRoute = {target, question, signature};
+  document.querySelector('#agent-chart-route-title').textContent = target.title;
+  document.querySelector('#agent-chart-route-message').textContent =
+    `当前“${selectedNativeChart.title}”按${friendlyDimensionLabel(currentDimension)}分析，问题询问的是${friendlyDimensionLabel(dimension)}。建议切换到更匹配的图表后再执行。`;
+  document.querySelector('#agent-chart-route').hidden = false;
+  document.querySelector('#agent-query-status').textContent = '检测到问题与当前图表维度不一致，尚未执行查询';
+  return true;
+}
+
+function friendlyDimensionLabel(value) {
+  return {publisher: '发行商', platform: '平台', genre: '游戏类型'}[value] || value;
 }
 
 function renderDrillSourceTable(config) {
@@ -1896,6 +1941,22 @@ document.querySelector('#agent-panel-toggle').addEventListener('click', () => {
   setAgentPanelExpanded(!agentPanelExpanded);
 });
 document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
+document.querySelector('#agent-chart-route-confirm').addEventListener('click', () => {
+  if (!pendingChartRoute) return;
+  const {target, question} = pendingChartRoute;
+  pendingChartRoute = undefined;
+  selectNativeChart(target);
+  document.querySelector('#agent-question').value = question;
+  analyzeFromWorkbench();
+});
+document.querySelector('#agent-chart-route-cancel').addEventListener('click', () => {
+  if (!pendingChartRoute) return;
+  const {signature} = pendingChartRoute;
+  pendingChartRoute = undefined;
+  chartRouteOverride = signature;
+  document.querySelector('#agent-chart-route').hidden = true;
+  analyzeFromWorkbench();
+});
 document.querySelector('#agent-semantic-model').addEventListener('change', () => {
   workbenchChatId = undefined;
   workbenchSelected = undefined;
