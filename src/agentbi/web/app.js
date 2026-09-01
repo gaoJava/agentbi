@@ -15,6 +15,7 @@ let managedCharts = [];
 let loadedUsers = [];
 let loadedSemanticModels = [];
 let loadedLiveSemanticModels = [];
+let semanticDashboardBindings = [];
 let activeSemanticDraft;
 let loadedDataSources = [];
 let datasetCatalogPage = 1;
@@ -453,7 +454,14 @@ async function loadLiveSemanticModels() {
     Number.isInteger(model?.id) && model.id > 0 && typeof model.key === 'string' &&
     typeof model.name === 'string' && typeof model.domain_name === 'string'
   );
+  let binding;
+  try { binding = (await request('/api/v1/workbench/semantic-binding')).binding; } catch (_) { binding = undefined; }
   populateLiveModelSelectors();
+  if (binding?.semantic_model_id) {
+    const agentSelect = document.querySelector('#agent-semantic-model');
+    const value = String(binding.semantic_model_id);
+    if ([...agentSelect.options].some(option => option.value === value)) agentSelect.value = value;
+  }
   const total = document.querySelector('#live-model-total');
   if (total) total.textContent = `${loadedLiveSemanticModels.length} 个真实模型`;
   return loadedLiveSemanticModels;
@@ -908,21 +916,23 @@ async function loadModuleView(view) {
         (await request('/api/v1/reports')).reports,
       ));
     } else if (view === 'semantic-models') {
-      const [models, providerBody, catalog, sonicLlm] = await Promise.all([
+      const [models, providerBody, catalog, sonicLlm, dashboardBindings] = await Promise.all([
         loadLiveSemanticModels(), request('/api/v1/admin/llm-provider'),
         request('/api/v1/admin/semantic-drafts/catalog'),
         request('/api/v1/admin/supersonic-llm'),
+        request('/api/v1/admin/semantic-dashboard-bindings'),
       ]);
       loadedSemanticModels = models;
       loadedLlmProviders = providerBody.items || [];
       supersonicLlmBinding = sonicLlm;
       semanticCatalogDomains = catalog.domains || [];
+      semanticDashboardBindings = dashboardBindings.bindings || [];
       renderLlmProviderRows();
       renderSuperSonicLlmBinding();
       renderSemanticDomainRows();
       renderModuleRows('semantic-model-table-body', loadedSemanticModels, model => [
         model.id, model.name, model.domain_name,
-        '未限定仪表盘',
+        semanticDashboardLabel('model', model.id),
         `${model.database_name || '未知连接'}${model.database_id ? `（ID ${model.database_id}）` : ''}`,
         model.biz_name || '—',
         model.status === 'active' ? '● 已启用' : '● 已下线',
@@ -2009,9 +2019,20 @@ document.querySelector('#agent-chart-route-cancel').addEventListener('click', ()
   document.querySelector('#agent-chart-route').hidden = true;
   document.querySelector('#agent-query-status').textContent = '已取消，未执行查询或生成可视化';
 });
-document.querySelector('#agent-semantic-model').addEventListener('change', () => {
+document.querySelector('#agent-semantic-model').addEventListener('change', async event => {
   workbenchChatId = undefined;
   workbenchSelected = undefined;
+  try {
+    const body = await request('/api/v1/workbench/semantic-binding', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token },
+      body: JSON.stringify({ semantic_model_id: Number(event.currentTarget.value) }),
+    });
+    document.querySelector('#agent-context-description').textContent =
+      `${body.binding.dashboard_title} 已绑定该语义模型，后续进入工作台将默认选中`;
+  } catch (error) {
+    showManagementFeedback(`保存仪表盘语义绑定失败：${error.message}`, true);
+  }
 });
 document.querySelector('#agent-time-range').addEventListener('input', () => applyChartTimeRange(''));
 document.querySelector('#agent-question').addEventListener('keydown', event => {
@@ -2942,6 +2963,7 @@ function renderSuperSonicLlmBinding() {
   document.querySelector('#supersonic-llm-status').textContent = binding.enabled
     ? (binding.runtime_applied ? '● 已生效' : '◷ 待运行时同步') : '● 仅规则模式';
   document.querySelector('#supersonic-llm-message').textContent = binding.runtime_message || '';
+  document.querySelector('.supersonic-save').textContent = '应用设置';
 }
 
 document.querySelector('#supersonic-llm-form').addEventListener('submit', async event => {
@@ -3038,13 +3060,22 @@ function openSemanticDomainEditor(selectedId = '') {
   document.querySelector('#semantic-domain-editor').hidden = false;
 }
 
+function semanticDashboardLabel(kind, id) {
+  const key = kind === 'domain' ? 'domain_id' : 'semantic_model_id';
+  const titles = [...new Set(semanticDashboardBindings
+    .filter(binding => Number(binding[key]) === Number(id))
+    .map(binding => binding.dashboard_title)
+    .filter(Boolean))];
+  return titles.length ? titles.join('、') : '尚未设为仪表盘默认';
+}
+
 function renderSemanticDomainRows() {
   renderModuleRows('semantic-domain-table-body', semanticCatalogDomains, domain => [
     domain.id,
     domain.name,
     domain.biz_name || '—',
     domain.description || '—',
-    '未限定仪表盘',
+    semanticDashboardLabel('domain', domain.id),
     loadedSemanticModels.filter(model => Number(model.domain_id) === Number(domain.id)).length,
   ], domain => {
     const group = document.createElement('div');

@@ -279,6 +279,17 @@ class SemanticDomainMetadata(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class DashboardSemanticBinding(Base):
+    """Default SuperSonic model selected for a governed Superset dashboard."""
+
+    __tablename__ = "dashboard_semantic_bindings"
+    dashboard_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    semantic_model_id: Mapped[int] = mapped_column(Integer, index=True)
+    domain_id: Mapped[int] = mapped_column(Integer, index=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 @dataclass(frozen=True, slots=True)
 class AccountRecord:
     id: str
@@ -1211,6 +1222,50 @@ class IdentityRepository:
                 )
             )
             return self._superset_dashboard_payload(asset) if asset else None
+
+    def save_dashboard_semantic_binding(
+        self, dashboard_id: int, semantic_model_id: int, domain_id: int, actor_user_id: str
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            item = db.get(DashboardSemanticBinding, dashboard_id)
+            if item is None:
+                item = DashboardSemanticBinding(dashboard_id=dashboard_id)
+                db.add(item)
+            item.semantic_model_id = semantic_model_id
+            item.domain_id = domain_id
+            item.updated_by = actor_user_id
+            item.updated_at = utc_now()
+            db.flush()
+            return self._dashboard_semantic_binding_payload(db, item)
+
+    def get_dashboard_semantic_binding(self, dashboard_id: int) -> dict[str, object] | None:
+        with Session(self.engine) as db:
+            item = db.get(DashboardSemanticBinding, dashboard_id)
+            return self._dashboard_semantic_binding_payload(db, item) if item else None
+
+    def list_dashboard_semantic_bindings(self) -> list[dict[str, object]]:
+        with Session(self.engine) as db:
+            return [
+                self._dashboard_semantic_binding_payload(db, item)
+                for item in db.scalars(select(DashboardSemanticBinding)).all()
+            ]
+
+    @staticmethod
+    def _dashboard_semantic_binding_payload(
+        db: Session, item: DashboardSemanticBinding
+    ) -> dict[str, object]:
+        dashboard = db.scalar(
+            select(SupersetDashboardAsset).where(
+                SupersetDashboardAsset.superset_id == item.dashboard_id
+            )
+        )
+        return {
+            "dashboard_id": item.dashboard_id,
+            "dashboard_title": dashboard.title if dashboard else f"仪表盘 {item.dashboard_id}",
+            "semantic_model_id": item.semantic_model_id,
+            "domain_id": item.domain_id,
+            "updated_at": item.updated_at.isoformat(),
+        }
 
     @staticmethod
     def _dashboard_assets(db: Session) -> list[SupersetDashboardAsset]:

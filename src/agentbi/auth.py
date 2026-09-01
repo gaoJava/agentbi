@@ -237,6 +237,15 @@ class SessionManager:
     def get_home_superset_dashboard(self) -> dict[str, object] | None:
         return self.repository.get_home_superset_dashboard()
 
+    def save_dashboard_semantic_binding(self, **values: object) -> dict[str, object]:
+        return self.repository.save_dashboard_semantic_binding(**values)
+
+    def get_dashboard_semantic_binding(self, dashboard_id: int) -> dict[str, object] | None:
+        return self.repository.get_dashboard_semantic_binding(dashboard_id)
+
+    def list_dashboard_semantic_bindings(self) -> list[dict[str, object]]:
+        return self.repository.list_dashboard_semantic_bindings()
+
     def list_charts(self, *, published_only: bool = True) -> list[dict[str, object]]:
         return self.repository.list_charts(published_only=published_only)
 

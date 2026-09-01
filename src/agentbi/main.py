@@ -290,6 +290,11 @@ class SemanticDomainPayload(BaseModel):
     description: str = Field(default="", max_length=512)
 
 
+class DashboardSemanticBindingPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    semantic_model_id: int = Field(gt=0)
+
+
 class SemanticDraftPublishPayload(BaseModel):
     """Administrator-reviewed values; no SQL or credentials are accepted."""
 
@@ -1662,6 +1667,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SupersetApiError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         return {"dashboard": dashboard}
+
+    @app.get("/api/v1/workbench/semantic-binding")
+    async def get_workbench_semantic_binding(
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "dashboard:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        dashboard = sessions.get_home_superset_dashboard()
+        binding = sessions.get_dashboard_semantic_binding(int(dashboard["superset_id"])) if dashboard else None
+        return {"binding": binding}
+
+    @app.put("/api/v1/workbench/semantic-binding")
+    async def save_workbench_semantic_binding(
+        payload: DashboardSemanticBindingPayload,
+        request: Request,
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "agent:ask" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        enforce_csrf(request, identity)
+        dashboard = sessions.get_home_superset_dashboard()
+        if dashboard is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="尚未设置经营总览")
+        models = await app.state.supersonic_client.list_semantic_models()
+        selected = next((item for item in models if int(item["id"]) == payload.semantic_model_id), None)
+        if selected is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="语义模型不存在")
+        binding = sessions.save_dashboard_semantic_binding(
+            dashboard_id=int(dashboard["superset_id"]),
+            semantic_model_id=payload.semantic_model_id,
+            domain_id=int(selected["domain_id"]),
+            actor_user_id=identity.subject,
+        )
+        return {"binding": binding, "message": "已设为当前仪表盘默认语义模型"}
+
+    @app.get("/api/v1/admin/semantic-dashboard-bindings")
+    async def list_semantic_dashboard_bindings(
+        _: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        return {"bindings": sessions.list_dashboard_semantic_bindings()}
 
     @app.get("/api/v1/admin/superset/dashboards/{superset_id}/native")
     async def admin_native_superset_dashboard(
