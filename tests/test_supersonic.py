@@ -246,6 +246,25 @@ class SuperSonicClientTest(unittest.TestCase):
             asyncio.run(client.query(analyze_request()))
         asyncio.run(client.close())
 
+    def test_reads_postgresql_columns_with_database_catalog_name(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertTrue(
+                request.url.path.endswith(
+                    "/api/semantic/database/getColumns/2/examples/video_game_sales"
+                )
+            )
+            return httpx.Response(200, json={
+                "code": 200,
+                "data": {"resultList": [{"name": "genre"}, {"name": "global_sales"}]},
+            })
+
+        client = SuperSonicClient(settings(), httpx.MockTransport(handler))
+        columns = asyncio.run(
+            client.get_database_columns(2, "examples", "video_game_sales")
+        )
+        asyncio.run(client.close())
+        self.assertEqual(columns, {"genre", "global_sales"})
+
 
 if __name__ == "__main__":
     unittest.main()

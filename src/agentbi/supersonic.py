@@ -239,14 +239,14 @@ class SuperSonicClient:
         await self._request_data("POST", "/api/semantic/model/createModel", payload=payload)
 
     async def get_database_columns(
-        self, database_id: int, schema_name: str, table_name: str
+        self, database_id: int, database_name: str, table_name: str
     ) -> set[str]:
         """Preflight the selected physical table through the target SuperSonic connection."""
 
         data = await self._request_data(
             "GET",
             "/api/semantic/database/getColumns/"
-            f"{database_id}/{quote(schema_name, safe='')}/{quote(table_name, safe='')}",
+            f"{database_id}/{quote(database_name, safe='')}/{quote(table_name, safe='')}",
         )
         rows = data.get("resultList") if isinstance(data, dict) else None
         if not isinstance(rows, list):

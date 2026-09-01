@@ -1325,7 +1325,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail="发布前无法校验真实元数据") from exc
         if payload.domain_id not in {item["id"] for item in catalog["domains"]}:
             raise HTTPException(status_code=422, detail="SuperSonic 主题域不存在")
-        if payload.database_id not in {item["id"] for item in catalog["databases"]}:
+        target_database = next(
+            (item for item in catalog["databases"] if item["id"] == payload.database_id), None
+        )
+        if target_database is None:
             raise HTTPException(status_code=422, detail="SuperSonic 数据库连接不存在")
         actual_columns = {str(item["name"]): str(item["type"]) for item in dataset["columns"]}
         reviewed_fields = {item.get("name") for item in payload.fields}
@@ -1333,7 +1336,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="草稿包含 Dataset 中不存在的字段")
         try:
             target_columns = await app.state.supersonic_client.get_database_columns(
-                payload.database_id, str(dataset.get("schema") or "public"), str(dataset["name"])
+                payload.database_id,
+                str(target_database.get("database") or dataset.get("database_name") or ""),
+                str(dataset["name"]),
             )
         except UpstreamError as exc:
             raise HTTPException(
@@ -1348,7 +1353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=422,
                 detail=(
                     f"SuperSonic 物理表缺少字段：{preview}{suffix}。"
-                    "请确认两端连接指向同一数据库、Schema 和表；若 Superset Dataset 是虚拟数据集，"
+                    "请确认两端连接指向同一数据库和物理表；若 Superset Dataset 是虚拟数据集，"
                     "请在 SuperSonic 中配置对应物理表后再发布。"
                 ),
             )

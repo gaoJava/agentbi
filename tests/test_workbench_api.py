@@ -968,14 +968,16 @@ def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
         async def list_modeling_catalog(self):
             return {
                 "domains": [{"id": 1, "name": "销售"}],
-                "databases": [{"id": 2, "name": "业务库", "type": "postgresql"}],
+                "databases": [
+                    {"id": 2, "name": "业务库", "type": "postgresql", "database": "examples"}
+                ],
             }
 
         async def publish_semantic_model(self, payload):
             self.published = payload
 
-        async def get_database_columns(self, database_id, schema_name, table_name):
-            assert (database_id, schema_name, table_name) == (2, "public", "sales_orders")
+        async def get_database_columns(self, database_id, database_name, table_name):
+            assert (database_id, database_name, table_name) == (2, "examples", "sales_orders")
             return {"order_id", "region", "revenue"}
 
     app = create_app(settings())
