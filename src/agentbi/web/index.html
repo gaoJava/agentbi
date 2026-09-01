@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260901.6">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260901.7">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -95,7 +95,7 @@
 
       <section id="superset-canvas" class="superset-canvas native-canvas dashboard-section" hidden>
         <header><div><span class="registry-status ready">● 数据引擎已连接</span><strong>AgentBI 分析画布</strong><small id="superset-mode-label">原生模式</small></div></header>
-        <div id="superset-loading" class="superset-state"><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>正在检查上游服务和仪表盘配置。</p></div>
+        <div id="superset-loading" class="superset-state" hidden><span class="canvas-spinner"></span><strong>正在连接 Superset…</strong><p>上游响应较慢，正在读取仪表盘和真实查询配置。</p></div>
         <div id="superset-unavailable" class="superset-state" hidden><strong>暂时无法加载 Superset</strong><p id="superset-unavailable-message">真实分析服务当前不可用，不展示模拟业务数据。</p><div><button id="retry-superset" type="button">重新连接</button><button id="back-local-canvas" type="button" hidden>本地画布已停用</button></div></div>
         <div id="native-dashboard-grid" class="native-dashboard-grid" hidden></div>
         <iframe id="superset-frame" title="上游兼容画布" hidden></iframe>
@@ -427,6 +427,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260901.6" defer></script>
+  <script src="/app/assets/app.js?v=20260901.7" defer></script>
 </body>
 </html>
