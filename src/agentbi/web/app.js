@@ -1798,13 +1798,14 @@ function renderTemporaryVisualization(rows, proposal) {
 }
 
 const analysisStepLabels = {
-  authorize: '权限与请求校验', semantic_query: '语义解析与数据查询', validate_evidence: '结果与证据校验',
+  authorize: '权限与请求校验', semantic_query: '语义解析与数据查询', calculate: '确定性计算', validate_evidence: '结果与证据校验',
 };
 
 function analysisStepDetail(step) {
   if (step.status === 'running') return '正在等待 SuperSonic 解析问题并执行查询';
   if (step.name === 'authorize') return '当前账号权限与请求上下文已通过校验';
   if (step.name === 'semantic_query') return step.detail || 'SuperSonic 已完成语义解析和数据查询';
+  if (step.name === 'calculate') return step.detail || '已基于真实查询结果完成确定性计算';
   if (step.name === 'validate_evidence') return String(step.detail || '查询结果已完成证据校验').replace(/^validated (\d+) rows$/i, '已校验 $1 行真实结果');
   return step.detail || '—';
 }

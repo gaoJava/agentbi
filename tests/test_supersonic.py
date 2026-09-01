@@ -56,6 +56,42 @@ class SuperSonicClientTest(unittest.TestCase):
             ("genre", "global_sales", 100),
         )
 
+    def test_compiles_top_n_sum_and_average_calculations(self):
+        self.assertEqual(
+            SuperSonicClient._calculation_query("全球销量前三名发行商的销量合计是多少？"),
+            {"operation": "sum", "dimension": "publisher", "metric": "global_sales", "limit": 3},
+        )
+        self.assertEqual(
+            SuperSonicClient._calculation_query("全球销量前 5 名发行商的平均销量是多少？"),
+            {"operation": "average", "dimension": "publisher", "metric": "global_sales", "limit": 5},
+        )
+
+    def test_calculates_difference_and_percentage_from_real_rows(self):
+        calculation = SuperSonicClient._calculation_query("Action 类型的全球销量比 Sports 高多少？")
+        self.assertIsNotNone(calculation)
+        result = SuperSonicClient._calculate(
+            calculation,
+            [{"genre": "Action", "global_sales": 1751.17},
+             {"genre": "Sports", "global_sales": 1330.93}],
+            "genre", "global_sales",
+        )
+        self.assertIn("420.24", result["response"])
+        self.assertIn("31.57%", result["response"])
+        self.assertIn("1,751.17 - 1,330.93", result["detail"])
+
+    def test_calculates_top_five_average_from_real_rows(self):
+        calculation = SuperSonicClient._calculation_query("全球销量前 5 名发行商的平均销量是多少？")
+        result = SuperSonicClient._calculate(
+            calculation,
+            [{"publisher": name, "global_sales": value} for name, value in [
+                ("Nintendo", 1786.56), ("Electronic Arts", 1110.32), ("Activision", 727.46),
+                ("Sony Computer Entertainment", 607.5), ("Ubisoft", 474.43),
+            ]],
+            "publisher", "global_sales",
+        )
+        self.assertIn("941.25", result["response"])
+        self.assertEqual(len(result["rows"]), 5)
+
     def test_rejects_successful_result_with_unrelated_requested_fields(self):
         with self.assertRaisesRegex(UpstreamError, "发行商.*全球销量"):
             SuperSonicClient._validate_question_result(

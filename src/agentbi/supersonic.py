@@ -6,6 +6,7 @@ import asyncio
 import re
 import time
 from collections.abc import Awaitable, Callable
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 from urllib.parse import quote
 
@@ -74,15 +75,17 @@ class SuperSonicClient:
         conversation_id, summary, history = self._conversation(request)
         resolved_question = request.question
         resolution_mode = "SuperSonic 规则解析"
+        calculation = self._calculation_query(resolved_question)
         ranked_query = self._ranking_query(resolved_question)
-        structured = ranked_query or self._grouped_metric_query(request.question)
+        structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(request.question)
         if not structured and self._llm_resolver is not None:
             normalized = await self._llm_resolver(request.question)
             if normalized:
                 resolved_question = normalized
                 resolution_mode = "LLM 语义增强后交由 SuperSonic 执行"
+                calculation = self._calculation_query(resolved_question)
                 ranked_query = self._ranking_query(resolved_question)
-                structured = ranked_query or self._grouped_metric_query(resolved_question)
+                structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(resolved_question)
         if structured:
             dimension, metric, limit = structured
             model_biz_name = await self._view_model_biz_name(
@@ -105,16 +108,20 @@ class SuperSonicClient:
                 raise UpstreamError("SuperSonic returned an invalid structured query result")
             dimension_label = self._field_label(dimension)
             metric_label = self._field_label(metric)
+            raw_rows = [row for row in data["resultList"] if isinstance(row, dict)]
             rows = [
                 {dimension_label: row.get(dimension), metric_label: row.get(metric)}
-                for row in data["resultList"]
-                if isinstance(row, dict)
+                for row in raw_rows
             ]
+            calculation_result = self._calculate(calculation, raw_rows, dimension, metric)
+            if calculation_result:
+                rows = [{dimension_label: row.get(dimension), metric_label: row.get(metric)}
+                        for row in calculation_result["rows"]]
             result = {
                 "queryResults": rows,
                 "querySql": data.get("sql"),
                 "queryTimeCost": round((time.perf_counter() - started) * 1000),
-                "response": (
+                "response": calculation_result["response"] if calculation_result else (
                     f"已按{dimension_label}汇总{metric_label}，返回前 {limit} 名。"
                     if ranked_query
                     else f"已按{dimension_label}汇总{metric_label}。"
@@ -124,6 +131,9 @@ class SuperSonicClient:
                 "resolvedQuestion": resolved_question,
                 "resolutionMode": resolution_mode,
             }
+            if calculation_result:
+                result["calculationDetail"] = calculation_result["detail"]
+                result["calculationTimeCost"] = calculation_result["duration_ms"]
             self._validate_question_result(request.question, result)
             self._conversations.record(
                 request.actor.subject, conversation_id, request.question, result
@@ -189,6 +199,95 @@ class SuperSonicClient:
             "eu_sales": "欧洲销量", "jp_sales": "日本销量",
             "other_sales": "其他地区销量",
         }.get(field, field)
+
+    @staticmethod
+    def _chinese_number(value: str) -> int | None:
+        if value.isdigit():
+            return int(value)
+        digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+                  "七": 7, "八": 8, "九": 9, "十": 10}
+        if value in digits:
+            return digits[value]
+        if len(value) == 2 and value[0] == "十" and value[1] in digits:
+            return 10 + digits[value[1]]
+        return None
+
+    @classmethod
+    def _calculation_query(cls, question: str) -> dict[str, Any] | None:
+        dimensions = {"发行商": "publisher", "平台": "platform", "游戏类型": "genre", "类型": "genre"}
+        metrics = {"全球销量": "global_sales", "北美销量": "na_sales", "欧洲销量": "eu_sales",
+                   "日本销量": "jp_sales", "其他地区销量": "other_sales"}
+        top = re.search(r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)前\s*"
+                        r"([一二三四五六七八九十\d]{1,3})\s*名(发行商|平台|游戏类型|类型).*?(合计|总和|平均)", question)
+        if top:
+            limit = cls._chinese_number(top.group(2))
+            if limit:
+                return {"operation": "average" if top.group(4) == "平均" else "sum",
+                        "dimension": dimensions[top.group(3)], "metric": metrics[top.group(1)],
+                        "limit": min(limit, 100)}
+        difference = re.search(r"(.+?)\s*(?:类型|发行商|平台)?\s*的?\s*"
+                               r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*比\s*"
+                               r"(.+?)\s*(?:类型|发行商|平台)?\s*(高|低|多|少)多少", question)
+        if difference:
+            dimension = "genre" if "类型" in question else "publisher" if "发行商" in question else "platform"
+            return {"operation": "difference", "dimension": dimension, "metric": metrics[difference.group(2)],
+                    "limit": 100, "members": [difference.group(1).strip(), difference.group(3).strip()]}
+        return None
+
+    @staticmethod
+    def _calculation_structure(calculation: dict[str, Any] | None) -> tuple[str, str, int] | None:
+        return ((calculation["dimension"], calculation["metric"], calculation["limit"])
+                if calculation else None)
+
+    @classmethod
+    def _calculate(cls, calculation: dict[str, Any] | None, rows: list[dict[str, Any]],
+                   dimension: str, metric: str) -> dict[str, Any] | None:
+        if not calculation:
+            return None
+        started = time.perf_counter()
+        values: list[tuple[dict[str, Any], Decimal]] = []
+        for row in rows:
+            try:
+                values.append((row, Decimal(str(row.get(metric)))))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+        if calculation["operation"] in {"sum", "average"}:
+            selected = values[:calculation["limit"]]
+            if len(selected) < calculation["limit"]:
+                raise SemanticResolutionError("真实查询结果不足以完成本次 Top N 计算")
+            total = sum((value for _, value in selected), Decimal("0"))
+            result = total if calculation["operation"] == "sum" else total / Decimal(len(selected))
+            label = "合计" if calculation["operation"] == "sum" else "平均值"
+            expression = " + ".join(cls._format_decimal(value) for _, value in selected)
+            formula = expression if calculation["operation"] == "sum" else f"({expression}) / {len(selected)}"
+            return {"rows": [row for row, _ in selected],
+                    "response": f"{cls._field_label(metric)}前 {len(selected)} 名{cls._field_label(dimension)}的{label}为 {cls._format_decimal(result)}。",
+                    "detail": f"运算：Top {len(selected)} {label}\n参与值：{expression}\n公式：{formula} = {cls._format_decimal(result)}",
+                    "duration_ms": round((time.perf_counter() - started) * 1000)}
+        found: list[tuple[dict[str, Any], Decimal]] = []
+        for member in calculation["members"]:
+            match = next(((row, value) for row, value in values
+                          if str(row.get(dimension, "")).casefold() == member.casefold()), None)
+            if not match:
+                raise SemanticResolutionError(f"真实查询结果中未找到“{member}”，无法完成差值计算")
+            found.append(match)
+        left, right = found[0][1], found[1][1]
+        difference, absolute = left - right, abs(left - right)
+        percentage = absolute / abs(right) * Decimal("100") if right else None
+        members = calculation["members"]
+        detail = (f"运算：差值与差异率\n参与值：{members[0]}={cls._format_decimal(left)}；{members[1]}={cls._format_decimal(right)}\n"
+                  f"公式：{cls._format_decimal(left)} - {cls._format_decimal(right)} = {cls._format_decimal(difference)}")
+        response = (f"{members[0]} 的{cls._field_label(metric)}为 {cls._format_decimal(left)}，{members[1]} 为 "
+                    f"{cls._format_decimal(right)}，相差 {cls._format_decimal(absolute)}")
+        if percentage is not None:
+            detail += f"\n差异率：{cls._format_decimal(absolute)} / {cls._format_decimal(abs(right))} = {cls._format_decimal(percentage)}%"
+            response += f"，相对 {members[1]} 的差异率为 {cls._format_decimal(percentage)}%"
+        return {"rows": [row for row, _ in found], "response": response + "。", "detail": detail,
+                "duration_ms": round((time.perf_counter() - started) * 1000)}
+
+    @staticmethod
+    def _format_decimal(value: Decimal) -> str:
+        return f"{value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
 
     @classmethod
     def _ranking_query(cls, question: str) -> tuple[str, str, int] | None:

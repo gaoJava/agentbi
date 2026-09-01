@@ -78,6 +78,9 @@ class Orchestrator:
         result = await self._supersonic.query(request)
         semantic_detail = self._semantic_detail(request.question, result)
         steps.append(self._step("semantic_query", started, semantic_detail))
+        calculation_detail = result.get("calculationDetail")
+        if isinstance(calculation_detail, str) and calculation_detail.strip():
+            steps.append(self._step("calculate", time.perf_counter(), calculation_detail.strip()))
 
         started = time.perf_counter()
         rows = self._extract_rows(result)

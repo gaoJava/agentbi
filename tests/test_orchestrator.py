@@ -80,6 +80,21 @@ class OrchestratorTest(unittest.TestCase):
         self.assertIn("全量数据", result.report.markdown)
         self.assertNotIn("时间范围：", result.report.markdown)
 
+    def test_exposes_deterministic_calculation_as_a_separate_step(self):
+        class CalculationSuperSonic(FakeSuperSonic):
+            async def query(self, request: AnalyzeRequest):
+                result = await super().query(request)
+                result["calculationDetail"] = "运算：差值\n公式：1,751.17 - 1,330.93 = 420.24"
+                return result
+
+        result = asyncio.run(
+            Orchestrator(self.settings, CalculationSuperSonic()).analyze(request())  # type: ignore[arg-type]
+        )
+        self.assertEqual([step.name for step in result.steps], [
+            "authorize", "semantic_query", "calculate", "validate_evidence"
+        ])
+        self.assertIn("420.24", result.steps[2].detail or "")
+
     def test_report_escapes_untrusted_markup(self):
         class MarkupSuperSonic(FakeSuperSonic):
             async def query(self, _: AnalyzeRequest):
