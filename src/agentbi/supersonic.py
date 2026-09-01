@@ -570,7 +570,9 @@ class SuperSonicClient:
     ) -> str:
         """Render dashboard state as data context, not as executable model instructions."""
 
-        parts = [request.question, f"时间范围：{request.context.time_range}"]
+        parts = [request.question]
+        if request.context.time_range.strip():
+            parts.append(f"时间范围：{request.context.time_range.strip()}")
         for item in request.context.filters:
             parts.append(f"筛选条件：{item.field} {item.operator.value} {item.value}")
         if request.context.selected:

@@ -41,7 +41,7 @@ class ScreenContext(BaseModel):
     chart_id: str | None = Field(default=None, max_length=128)
     dataset_id: str | None = Field(default=None, max_length=128)
     semantic_model_id: int = Field(gt=0)
-    time_range: str = Field(min_length=1, max_length=256)
+    time_range: str = Field(default="", max_length=256)
     filters: list[ScreenFilter] = Field(default_factory=list, max_length=50)
     selected: SelectedDatum | None = None
 

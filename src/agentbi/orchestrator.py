@@ -158,10 +158,11 @@ class Orchestrator:
         """Build a bounded, portable report without trusting browser-supplied conclusions."""
 
         safe_answer = self._markdown_text(answer, 1000)
+        range_label = self._markdown_text(evidence.time_range, 128) or "全量数据"
         observations = [
             safe_answer,
             (
-                f"在“{self._markdown_text(evidence.time_range, 128)}”范围内返回 "
+                f"在“{range_label}”范围内返回 "
                 f"{evidence.row_count} 行受治理数据。"
             ),
         ]
@@ -199,7 +200,7 @@ class Orchestrator:
             "",
             f"- 查询编号：`{self._markdown_text(evidence.query_id, 128)}`",
             f"- 语义模型：`{evidence.semantic_model_id}`",
-            f"- 时间范围：{self._markdown_text(evidence.time_range, 128)}",
+            f"- 数据范围：{range_label}",
             f"- 返回行数：{evidence.row_count}",
             f"- 查询耗时：{evidence.query_time_ms if evidence.query_time_ms is not None else '—'} ms",
             f"- SQL 指纹：`{evidence.sql_fingerprint or '—'}`",

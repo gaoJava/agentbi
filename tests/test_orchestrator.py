@@ -63,6 +63,18 @@ class OrchestratorTest(unittest.TestCase):
         self.assertIn("SQL 指纹", result.report.markdown)
         self.assertEqual(result.report.source_url, "http://localhost:8088/superset/dashboard/7")
 
+    def test_allows_full_range_query_without_time_filter(self):
+        full_range = request()
+        full_range.context.time_range = ""
+
+        result = asyncio.run(
+            Orchestrator(self.settings, FakeSuperSonic()).analyze(full_range)  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(result.evidence.time_range, "")
+        self.assertIn("全量数据", result.report.markdown)
+        self.assertNotIn("时间范围：", result.report.markdown)
+
     def test_report_escapes_untrusted_markup(self):
         class MarkupSuperSonic(FakeSuperSonic):
             async def query(self, _: AnalyzeRequest):

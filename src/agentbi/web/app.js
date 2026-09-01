@@ -1807,7 +1807,6 @@ function workbenchContext() {
   const semanticModel = Number(document.querySelector('#agent-semantic-model').value);
   if (!Number.isInteger(semanticModel) || semanticModel < 1) throw new Error('请输入有效的 SuperSonic 语义模型 ID');
   const timeRange = document.querySelector('#agent-time-range').value.trim();
-  if (!timeRange) throw new Error('请输入时间范围');
   return {
     dashboard_id: selectedSupersetContext?.dashboard_id || String(supersetWorkspace?.dashboard_id || 'workbench-home'),
     ...(selectedSupersetContext?.chart_id ? {chart_id: selectedSupersetContext.chart_id} : {}),
