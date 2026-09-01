@@ -402,6 +402,7 @@ class SupersetClient:
             "superset_id": chart_id,
             "title": str(chart.get("slice_name") or f"图表 {chart_id}"),
             "visualization_type": str(form_data.get("viz_type") or "table"),
+            "time_range": str(form_data.get("time_range") or "").strip() or None,
             "status": "configuration_required",
             "columns": [], "rows": [],
         }

@@ -114,12 +114,27 @@ function formatNativeValue(value) {
   return value === null || value === undefined ? '—' : String(value);
 }
 
+function applyChartTimeRange(timeRange) {
+  const value = typeof timeRange === 'string' ? timeRange.trim() : '';
+  const input = document.querySelector('#agent-time-range');
+  const source = document.querySelector('#agent-time-source');
+  if (value && !['no filter', 'none'].includes(value.toLowerCase())) {
+    input.value = value;
+    source.textContent = '来自当前图表';
+    source.classList.add('from-chart');
+  } else {
+    source.textContent = '手动条件';
+    source.classList.remove('from-chart');
+  }
+}
+
 function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id) {
   selectedSupersetContext = {dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id)};
   const chip = document.querySelector('#agent-chart-context');
   chip.textContent = `${chart.title} · Chart ${chart.superset_id}`; chip.hidden = false;
   document.querySelector('#agent-context-description').textContent = '已固定当前 AgentBI 图表；问答将携带真实仪表盘与 Chart ID';
   document.querySelector('#agent-question').placeholder = `针对“${chart.title}”提问…`;
+  applyChartTimeRange(chart.time_range);
   setAgentPanelExpanded(true);
 }
 
@@ -664,6 +679,7 @@ function receiveSupersetChartSelection(event) {
     chart_id: context.chart_id,
     ...(datasetId ? {dataset_id: datasetId} : {}),
   };
+  applyChartTimeRange(context.time_range);
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title.trim().slice(0, 200) : `图表 ${context.chart_id}`;
   const chartChip = document.querySelector('#agent-chart-context');
@@ -1653,6 +1669,37 @@ function resultTable(rows) {
   return wrapper;
 }
 
+const analysisStepLabels = {
+  authorize: '权限与请求校验', semantic_query: '语义解析与数据查询', validate_evidence: '结果与证据校验',
+};
+
+function analysisStepDetail(step) {
+  if (step.status === 'running') return '正在等待 SuperSonic 解析问题并执行查询';
+  if (step.name === 'authorize') return '当前账号权限与请求上下文已通过校验';
+  if (step.name === 'semantic_query') return 'SuperSonic 已完成语义解析和数据查询';
+  if (step.name === 'validate_evidence') return String(step.detail || '查询结果已完成证据校验').replace(/^validated (\d+) rows$/i, '已校验 $1 行真实结果');
+  return step.detail || '—';
+}
+
+function renderAnalysisProcess(steps, running = false, elapsedMs = 0, failedMessage = '') {
+  const panel = document.querySelector('#agent-analysis-process');
+  const list = document.querySelector('#agent-analysis-steps');
+  const source = Array.isArray(steps) && steps.length ? steps : [
+    {name: 'authorize', status: 'completed', duration_ms: 0, detail: '已提交当前用户与图表上下文'},
+    {name: 'semantic_query', status: running ? 'running' : 'failed', duration_ms: elapsedMs, detail: failedMessage || '正在等待 SuperSonic 返回'},
+    {name: 'validate_evidence', status: 'pending', duration_ms: 0, detail: '等待查询结果'},
+  ];
+  list.replaceChildren(...source.map(step => {
+    const item = document.createElement('li'); item.className = `analysis-step is-${step.status}`;
+    const marker = document.createElement('i'); marker.textContent = step.status === 'completed' ? '✓' : step.status === 'failed' ? '!' : step.status === 'running' ? '…' : '';
+    const content = document.createElement('div'); const title = document.createElement('strong'); title.textContent = analysisStepLabels[step.name] || step.name;
+    const detail = document.createElement('small'); detail.textContent = failedMessage && step.status === 'failed' ? failedMessage : analysisStepDetail(step);
+    const duration = document.createElement('time'); duration.textContent = step.status === 'pending' ? '待执行' : `${Math.max(0, Number(step.duration_ms) || 0)} ms`;
+    content.append(title, detail); item.append(marker, content, duration); return item;
+  }));
+  panel.hidden = false;
+}
+
 function renderRealDrilldownResult(empty, detail, header) {
   header.hidden = true;
   detail.hidden = true;
@@ -1687,6 +1734,9 @@ async function analyzeFromWorkbench() {
   const status = document.querySelector('#agent-query-status');
   if (question.length < 2) { status.textContent = '请输入至少 2 个字符的问题'; return; }
   button.disabled = true; status.textContent = '正在执行 SuperSonic 真实语义查询…';
+  const processStarted = performance.now();
+  renderAnalysisProcess([], true, 0);
+  const processTimer = window.setInterval(() => renderAnalysisProcess([], true, Math.round(performance.now() - processStarted)), 250);
   try {
     const body = await request('/api/v1/workbench/analyze', {
       method: 'POST',
@@ -1699,6 +1749,8 @@ async function analyzeFromWorkbench() {
       }),
     });
     workbenchAnalysis = body;
+    window.clearInterval(processTimer);
+    renderAnalysisProcess(body.steps || []);
     workbenchChatId = body.chat_id || workbenchChatId;
     if (workbenchPendingDrill) {
       workbenchDrillDepth += 1;
@@ -1719,8 +1771,11 @@ async function analyzeFromWorkbench() {
       renderDrilldown();
     }
   } catch (error) {
+    window.clearInterval(processTimer);
+    renderAnalysisProcess([], false, Math.round(performance.now() - processStarted), error.message);
     status.textContent = error.message;
   } finally {
+    window.clearInterval(processTimer);
     button.disabled = false;
   }
 }
@@ -1836,6 +1891,7 @@ document.querySelector('#agent-panel-toggle').addEventListener('click', () => {
   setAgentPanelExpanded(!agentPanelExpanded);
 });
 document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
+document.querySelector('#agent-time-range').addEventListener('input', () => applyChartTimeRange(''));
 document.querySelector('#agent-question').addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') analyzeFromWorkbench();
 });
