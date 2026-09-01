@@ -218,6 +218,35 @@ class SuperSonicClient:
         dimensions = {"发行商": "publisher", "平台": "platform", "游戏类型": "genre", "类型": "genre"}
         metrics = {"全球销量": "global_sales", "北美销量": "na_sales", "欧洲销量": "eu_sales",
                    "日本销量": "jp_sales", "其他地区销量": "other_sales"}
+        normalized = re.sub(r"[，。！？?\s]", "", question)
+        dimension = next((field for label, field in dimensions.items() if label in normalized), None)
+        metric = next((field for label, field in metrics.items() if label in normalized), None)
+        if metric is None and ("销量" in normalized or "销售" in normalized):
+            metric = "global_sales"
+        operation = ("average" if any(word in normalized for word in ("平均", "均值"))
+                     else "sum" if any(word in normalized for word in ("合计", "总和", "加总"))
+                     else None)
+        range_match = re.search(r"(?:排名)?(前|后|最低)([一二三四五六七八九十\d]{1,3})(?:名)?", normalized)
+        if dimension and metric and operation and range_match:
+            limit = cls._chinese_number(range_match.group(2))
+            if limit:
+                bottom_scope = range_match.group(1) in {"后", "最低"}
+                return {"operation": operation, "dimension": dimension, "metric": metric,
+                        "limit": min(limit, 100),
+                        **({"sort": "asc", "scope": "Bottom"} if bottom_scope else {})}
+        rank_pair = re.search(r"第([一二三四五六七八九十\d]{1,3})名?(?:和|与|、)第?"
+                              r"([一二三四五六七八九十\d]{1,3})名?.*?(?:差|相差)", normalized)
+        if dimension and metric and rank_pair:
+            ranks = [cls._chinese_number(rank_pair.group(index)) for index in (1, 2)]
+            if all(ranks):
+                return {"operation": "rank_difference", "dimension": dimension, "metric": metric,
+                        "limit": min(max(ranks), 100), "ranks": ranks}
+        rank_single = re.search(r"第([一二三四五六七八九十\d]{1,3})名", normalized)
+        if dimension and metric and rank_single and any(word in normalized for word in ("多少", "什么", "是谁")):
+            rank = cls._chinese_number(rank_single.group(1))
+            if rank:
+                return {"operation": "rank_value", "dimension": dimension, "metric": metric,
+                        "limit": min(rank, 100), "ranks": [rank]}
         top = re.search(r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)前\s*"
                         r"([一二三四五六七八九十\d]{1,3})\s*名(发行商|平台|游戏类型|类型).*?(合计|总和|平均)", question)
         if top:

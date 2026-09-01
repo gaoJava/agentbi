@@ -66,6 +66,31 @@ class SuperSonicClientTest(unittest.TestCase):
             {"operation": "average", "dimension": "publisher", "metric": "global_sales", "limit": 5},
         )
 
+    def test_compiles_order_independent_calculation_paraphrases_to_same_plan(self):
+        expected = {"operation": "average", "dimension": "genre", "metric": "global_sales", "limit": 3}
+        paraphrases = [
+            "游戏类型销售前三名的平均值",
+            "前三名游戏类型的平均销量是多少",
+            "按游戏类型取销量 Top 3 后求平均".replace("Top 3", "前3名"),
+            "全球销量排名前三的游戏类型，平均值是多少？",
+            "求游戏类型销量前3名均值",
+        ]
+        for question in paraphrases:
+            with self.subTest(question=question):
+                self.assertEqual(SuperSonicClient._calculation_query(question), expected)
+
+    def test_compiles_rank_comparison_paraphrases_to_same_plan(self):
+        expected = {"operation": "rank_difference", "dimension": "publisher",
+                    "metric": "global_sales", "limit": 3, "ranks": [2, 3]}
+        paraphrases = [
+            "发行商销量第2名和第3名差多少",
+            "发行商全球销量第二名与第三名相差多少",
+            "比较发行商销售第2、第3名的差值",
+        ]
+        for question in paraphrases:
+            with self.subTest(question=question):
+                self.assertEqual(SuperSonicClient._calculation_query(question), expected)
+
     def test_calculates_difference_and_percentage_from_real_rows(self):
         calculation = SuperSonicClient._calculation_query("Action 类型的全球销量比 Sports 高多少？")
         self.assertIsNotNone(calculation)
