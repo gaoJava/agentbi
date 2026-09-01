@@ -44,6 +44,12 @@ class SuperSonicClientTest(unittest.TestCase):
             ("publisher", "global_sales", 10),
         )
 
+    def test_compiles_explicit_grouped_metric_question(self):
+        self.assertEqual(
+            SuperSonicClient._grouped_metric_query("各游戏类型的全球销量是多少？"),
+            ("genre", "global_sales", 100),
+        )
+
     def test_rejects_successful_result_with_unrelated_requested_fields(self):
         with self.assertRaisesRegex(UpstreamError, "发行商.*全球销量"):
             SuperSonicClient._validate_question_result(

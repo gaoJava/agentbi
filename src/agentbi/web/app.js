@@ -1734,7 +1734,7 @@ function resultTable(rows) {
     columns.forEach(column => {
       const cell = document.createElement('td');
       const value = row[column];
-      cell.textContent = value === null || value === undefined ? '—' : String(value);
+      cell.textContent = formatNativeValue(value);
       cell.title = cell.textContent;
       if (typeof value === 'number') cell.classList.add('is-number');
       tableRow.append(cell);

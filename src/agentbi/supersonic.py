@@ -61,7 +61,8 @@ class SuperSonicClient:
         """Parse the question, select the best semantic parse, then execute it."""
 
         conversation_id, summary, history = self._conversation(request)
-        structured = self._ranking_query(request.question)
+        ranked_query = self._ranking_query(request.question)
+        structured = ranked_query or self._grouped_metric_query(request.question)
         if structured:
             dimension, metric, limit = structured
             model_biz_name = await self._view_model_biz_name(
@@ -93,7 +94,11 @@ class SuperSonicClient:
                 "queryResults": rows,
                 "querySql": data.get("sql"),
                 "queryTimeCost": round((time.perf_counter() - started) * 1000),
-                "response": f"已按{dimension_label}汇总{metric_label}，返回前 {limit} 名。",
+                "response": (
+                    f"已按{dimension_label}汇总{metric_label}，返回前 {limit} 名。"
+                    if ranked_query
+                    else f"已按{dimension_label}汇总{metric_label}。"
+                ),
                 "effectiveTimeRange": "全部数据（本问题未应用时间筛选）",
                 "chatId": conversation_id,
             }
@@ -174,6 +179,24 @@ class SuperSonicClient:
                    "欧洲销量": "eu_sales", "日本销量": "jp_sales",
                    "其他地区销量": "other_sales"}
         return dimensions[match.group(1)], metrics[match.group(2)], min(int(match.group(3)), 100)
+
+    @classmethod
+    def _grouped_metric_query(cls, question: str) -> tuple[str, str, int] | None:
+        """Compile an explicit grouped metric question when no Top-N phrase is present."""
+
+        match = re.search(
+            r"(?:各|按)?\s*(发行商|平台|游戏类型|类型)\s*(?:统计)?\s*的?\s*"
+            r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)",
+            question,
+        )
+        if not match:
+            return None
+        dimensions = {"发行商": "publisher", "平台": "platform",
+                      "游戏类型": "genre", "类型": "genre"}
+        metrics = {"全球销量": "global_sales", "北美销量": "na_sales",
+                   "欧洲销量": "eu_sales", "日本销量": "jp_sales",
+                   "其他地区销量": "other_sales"}
+        return dimensions[match.group(1)], metrics[match.group(2)], 100
 
     @staticmethod
     def _validate_question_result(question: str, result: dict[str, Any]) -> None:
