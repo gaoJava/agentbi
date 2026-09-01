@@ -117,7 +117,22 @@ function showSupersetUnavailable(message) {
   document.querySelector('#edit-dashboard').disabled = true;
 }
 
-function showDashboardLoading() {
+function dashboardSkeletonCache() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem('agentbi.dashboardSkeletons') || '{}');
+    return value && typeof value === 'object' ? value : {};
+  } catch (_) { return {}; }
+}
+
+function rememberDashboardSkeleton(dashboardId, chartCount) {
+  if (!dashboardId || !Number.isInteger(chartCount) || chartCount < 0) return;
+  const cache = dashboardSkeletonCache();
+  cache.lastDashboardId = String(dashboardId);
+  cache.counts = {...(cache.counts || {}), [String(dashboardId)]: chartCount};
+  try { sessionStorage.setItem('agentbi.dashboardSkeletons', JSON.stringify(cache)); } catch (_) { /* optional UI cache */ }
+}
+
+function showDashboardLoading(dashboardId = supersetWorkspace?.dashboard_id) {
   const grid = document.querySelector('#native-dashboard-grid');
   const status = document.querySelector('#superset-connection-status');
   status.className = 'registry-status pending'; status.textContent = '◷ 正在更新';
@@ -125,8 +140,12 @@ function showDashboardLoading() {
   if (grid.children.length && !grid.querySelector('.native-chart-skeleton')) {
     grid.classList.add('is-refreshing'); grid.hidden = false; return;
   }
+  const cache = dashboardSkeletonCache();
+  const resolvedId = String(dashboardId || cache.lastDashboardId || '');
+  const cachedCount = Number(cache.counts?.[resolvedId]);
+  const skeletonCount = Number.isInteger(cachedCount) ? Math.min(12, Math.max(1, cachedCount)) : 4;
   grid.classList.remove('is-refreshing');
-  grid.innerHTML = Array.from({length: 4}, () => '<article class="native-chart-card native-chart-skeleton"><header><i></i><b></b></header><div><i></i><i></i><i></i><i></i><i></i></div></article>').join('');
+  grid.innerHTML = Array.from({length: skeletonCount}, () => '<article class="native-chart-card native-chart-skeleton"><header><i></i><b></b></header><div><i></i><i></i><i></i><i></i><i></i></div></article>').join('');
   grid.hidden = false;
 }
 
@@ -395,6 +414,7 @@ async function loadSupersetWorkspace({ force = false } = {}) {
       showSupersetUnavailable(supersetWorkspace.message || 'Superset 服务当前不可用，可继续使用本地降级画布。');
       return;
     }
+    showDashboardLoading(supersetWorkspace.dashboard_id);
     document.querySelector('#edit-dashboard').disabled = !supersetWorkspace.can_edit;
     const native = await request('/api/v1/superset/workspace/native');
     document.querySelector('#superset-loading').hidden = true; document.querySelector('#superset-unavailable').hidden = true;
@@ -403,6 +423,7 @@ async function loadSupersetWorkspace({ force = false } = {}) {
     status.className = 'registry-status ready'; status.textContent = '● 数据引擎已连接';
     document.querySelector('#native-dashboard-grid').classList.remove('is-refreshing');
     renderNativeDashboard(native.dashboard); document.querySelector('#agent-dashboard-name').textContent = native.dashboard.title || '经营总览';
+    rememberDashboardSkeleton(supersetWorkspace.dashboard_id, Array.isArray(native.dashboard.charts) ? native.dashboard.charts.length : 0);
     supersetHomeSnapshot = native.dashboard;
     renderSupersetAssetSummary();
     supersetWorkspaceDirty = false;
