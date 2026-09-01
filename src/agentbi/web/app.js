@@ -367,7 +367,6 @@ async function loadSupersetWorkspace({ force = false } = {}) {
   document.querySelector('#edit-dashboard').disabled = true;
   document.querySelector('#superset-unavailable').hidden = true;
   loading.hidden = true;
-  const loadingTimer = window.setTimeout(() => { loading.hidden = false; }, 350);
   try {
     supersetWorkspace = await window.AgentBI.supersetWorkspace.load(force);
     if (!supersetWorkspace.available) {
@@ -384,8 +383,6 @@ async function loadSupersetWorkspace({ force = false } = {}) {
     supersetWorkspaceDirty = false;
   } catch (error) {
     showSupersetUnavailable(error.message);
-  } finally {
-    window.clearTimeout(loadingTimer);
   }
 }
 
