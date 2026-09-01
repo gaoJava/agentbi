@@ -354,6 +354,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except SemanticLlmError:
             logger.warning("Stored LLM provider key cannot be decrypted; provider disabled")
+
+    async def resolve_semantic_question_with_llm(question: str) -> str | None:
+        binding = sessions.repository.get_supersonic_llm_binding()
+        if not binding["enabled"] or binding["provider_id"] is None:
+            return None
+        provider = sessions.repository.get_llm_provider_config(int(binding["provider_id"]))
+        if provider is None:
+            return None
+        try:
+            return await semantic_llm.compile_grouped_metric_with(
+                question,
+                base_url=str(provider["base_url"]),
+                api_key=semantic_llm.decrypt_key(str(provider["encrypted_api_key"])),
+                model=str(provider["model"]),
+                timeout_seconds=int(binding["timeout_seconds"]),
+            )
+        except SemanticLlmError:
+            if bool(binding["fallback_to_rules"]):
+                logger.warning("LLM semantic intent failed; continuing with SuperSonic rules")
+                return None
+            raise UpstreamError("LLM semantic intent service is unavailable")
+
+    supersonic.configure_llm_resolver(resolve_semantic_question_with_llm)
     orchestrator = Orchestrator(settings, supersonic)
     superset_client = SupersetClient(
         settings.superset_base_url,
@@ -1082,10 +1105,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         binding = sessions.repository.get_supersonic_llm_binding()
         provider = sessions.repository.get_llm_provider_config(binding["provider_id"]) \
             if binding["provider_id"] else None
+        runtime_applied = bool(binding["enabled"] and provider)
         return {**binding, "provider_model": provider["model"] if provider else None,
-                "runtime_applied": False,
-                "runtime_message": "绑定已由 AgentBI 保存；需重启并加载 SuperSonic LLM_S2SQL 工具后生效"
-                if binding["enabled"] else "当前仅使用规则、Embedding 与语义模型解析"}
+                "runtime_applied": runtime_applied,
+                "runtime_message": "LLM 语义增强已接入查询运行时；输出须通过白名单语义校验"
+                if runtime_applied else "当前仅使用规则、Embedding 与语义模型解析"}
 
     @app.put("/api/v1/admin/supersonic-llm")
     async def save_supersonic_llm_binding(
@@ -1107,8 +1131,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                        actor_user_id=identity.subject,
                        source_ip=request.client.host if request.client else "",
                        detail=f"enabled={payload.enabled},provider={payload.provider_id},mode={payload.mode}")
-        return {**saved, "runtime_applied": False,
-                "runtime_message": "配置已保存，等待 SuperSonic 运行时同步"}
+        runtime_applied = bool(saved["enabled"] and saved["provider_id"])
+        return {**saved, "runtime_applied": runtime_applied,
+                "runtime_message": "配置已保存并立即应用到查询运行时"
+                if runtime_applied else "LLM 语义增强已关闭"}
 
     async def persist_llm_provider(
         payload: LlmProviderPayload,

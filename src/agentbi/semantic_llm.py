@@ -219,6 +219,70 @@ class SemanticDraftLlm:
         result["warnings"] = []
         return result
 
+    async def compile_grouped_metric_with(
+        self,
+        question: str,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout_seconds: int = 60,
+    ) -> str | None:
+        """Translate a BI question into one strictly allow-listed semantic intent."""
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是 BI 语义意图分类器，只返回 JSON。dimension 只能是发行商、平台、游戏类型；"
+                    "metric 只能是全球销量、北美销量、欧洲销量、日本销量、其他地区销量；"
+                    "limit 只能是 1 到 100 的整数或 null。若问题无法完全映射，返回 "
+                    '{"dimension":null,"metric":null,"limit":null}。不得输出 SQL 或额外字段。'
+                ),
+            },
+            {"role": "user", "content": question[:2000]},
+        ]
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "response_format": {"type": "json_object"},
+        }
+        if self._uses_provider_default_thinking(base_url, model):
+            payload.pop("temperature", None)
+            payload["max_tokens"] = 8192
+        elif self._is_zhipu_glm(base_url, model):
+            payload.pop("temperature", None)
+            payload["thinking"] = {"type": "enabled"}
+            payload["max_tokens"] = 8192
+        try:
+            response = await self._client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=timeout_seconds,
+            )
+            if response.is_error:
+                raise self._provider_error(response)
+            body = self._parse_json_content(response.json()["choices"][0]["message"]["content"])
+        except SemanticLlmError:
+            raise
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            raise SemanticLlmError("LLM 语义意图解析失败") from exc
+        if not isinstance(body, dict):
+            return None
+        dimensions = {"发行商", "平台", "游戏类型"}
+        metrics = {"全球销量", "北美销量", "欧洲销量", "日本销量", "其他地区销量"}
+        dimension, metric, limit = body.get("dimension"), body.get("metric"), body.get("limit")
+        if dimension not in dimensions or metric not in metrics:
+            return None
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100):
+            return None
+        if limit is None:
+            return f"按{dimension}统计{metric}"
+        return f"按{dimension}统计{metric}前 {limit} 名"
+
     @staticmethod
     def _is_zhipu_glm(base_url: str, model: str) -> bool:
         return "bigmodel.cn" in base_url.lower() and model.lower().startswith("glm-")

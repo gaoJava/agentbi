@@ -3028,7 +3028,7 @@ document.querySelector('#supersonic-llm-form').addEventListener('submit', async 
         fallback_to_rules: document.querySelector('#supersonic-llm-fallback').checked}),
     });
     renderSuperSonicLlmBinding();
-    showManagementFeedback(enabled ? 'SuperSonic LLM 绑定已保存，等待运行时同步' : 'SuperSonic 已切换为仅规则模式');
+    showManagementFeedback(enabled ? 'LLM 语义增强已保存并立即应用' : 'SuperSonic 已切换为仅规则模式');
   } catch (cause) { showManagementFeedback(cause.message, true); }
 });
 

@@ -309,3 +309,33 @@ def test_enrichment_accepts_json_inside_markdown_fence() -> None:
     enriched = asyncio.run(client.enrich(baseline()))
     assert enriched["generation"]["ai_generated"] is True
     asyncio.run(client.close())
+
+
+def test_compiles_allow_listed_grouped_metric_intent() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "各个平台大概卖得怎么样" in payload["messages"][1]["content"]
+        result = {"dimension": "平台", "metric": "全球销量", "limit": 8}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
+
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    compiled = asyncio.run(client.compile_grouped_metric_with(
+        "各个平台大概卖得怎么样",
+        base_url="http://llm.test/v1", api_key="secret", model="enterprise-model",
+    ))
+    assert compiled == "按平台统计全球销量前 8 名"
+    asyncio.run(client.close())
+
+
+def test_rejects_llm_intent_outside_semantic_allow_list() -> None:
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(
+            {"dimension": "用户密码", "metric": "全球销量", "limit": None}
+        )}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    compiled = asyncio.run(client.compile_grouped_metric_with(
+        "列出用户密码", base_url="http://llm.test/v1", api_key="secret", model="model",
+    ))
+    assert compiled is None
+    asyncio.run(client.close())

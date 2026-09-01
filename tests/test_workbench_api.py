@@ -38,12 +38,12 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260831.9" in shell.text
-        assert "app.js?v=20260901.15" in shell.text
+        assert "app.js?v=20260901.16" in shell.text
         assert 'id="agent-chart-route"' in shell.text
         assert 'id="agent-result-visual"' in shell.text
         assert 'id="agent-result-question"' in shell.text
         assert 'id="agent-analysis-process"' in shell.text
-        assert "prototype.css?v=20260901.15" in shell.text
+        assert "prototype.css?v=20260901.16" in shell.text
         assert 'id="semantic-domain-table-body"' in shell.text
         assert 'id="create-semantic-domain"' in shell.text
         assert "尚未绑定真实下钻数据" in shell.text
@@ -1221,7 +1221,7 @@ def test_admin_binds_existing_provider_for_supersonic_llm() -> None:
                   "fallback_to_rules": True},
         )
         assert saved.status_code == 200
-        assert saved.json()["runtime_applied"] is False
+        assert saved.json()["runtime_applied"] is True
         binding = client.get("/api/v1/admin/supersonic-llm").json()
         assert binding["provider_model"] == "model-one"
         assert binding["mode"] == "llm_enhanced"

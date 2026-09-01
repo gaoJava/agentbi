@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -49,6 +50,7 @@ class SuperSonicClient:
         # by WEB_PAGE plugins. AgentBI therefore owns tenant-bound conversation history
         # and serializes access to that upstream stateless context.
         self._query_lock = asyncio.Lock()
+        self._llm_resolver: Callable[[str], Awaitable[str | None]] | None = None
         if repository is None:
             repository = IdentityRepository("sqlite:///:memory:")
             repository.initialize(seed_demo_accounts=False, user_password="", admin_password="")
@@ -57,12 +59,24 @@ class SuperSonicClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    def configure_llm_resolver(
+        self, resolver: Callable[[str], Awaitable[str | None]] | None
+    ) -> None:
+        self._llm_resolver = resolver
+
     async def query(self, request: AnalyzeRequest) -> dict[str, Any]:
         """Parse the question, select the best semantic parse, then execute it."""
 
         conversation_id, summary, history = self._conversation(request)
-        ranked_query = self._ranking_query(request.question)
+        resolved_question = request.question
+        ranked_query = self._ranking_query(resolved_question)
         structured = ranked_query or self._grouped_metric_query(request.question)
+        if not structured and self._llm_resolver is not None:
+            normalized = await self._llm_resolver(request.question)
+            if normalized:
+                resolved_question = normalized
+                ranked_query = self._ranking_query(resolved_question)
+                structured = ranked_query or self._grouped_metric_query(resolved_question)
         if structured:
             dimension, metric, limit = structured
             model_biz_name = await self._view_model_biz_name(
