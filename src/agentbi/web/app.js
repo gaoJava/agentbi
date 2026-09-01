@@ -124,15 +124,21 @@ function applyChartTimeRange(timeRange) {
   const value = typeof timeRange === 'string' ? timeRange.trim() : '';
   const input = document.querySelector('#agent-time-range');
   const source = document.querySelector('#agent-time-source');
+  const control = input.closest('.agent-time-control');
   if (value && !['no filter', 'none'].includes(value.toLowerCase())) {
+    control.hidden = false;
     input.value = value;
     source.textContent = '来自当前图表';
     source.classList.add('from-chart');
   } else {
-    source.textContent = '手动条件';
+    control.hidden = true;
+    input.value = '';
+    source.textContent = '';
     source.classList.remove('from-chart');
   }
 }
+
+applyChartTimeRange('');
 
 function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id) {
   workbenchChatId = undefined;
