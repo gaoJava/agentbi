@@ -28,6 +28,7 @@ from agentbi.semantic_draft import build_semantic_draft
 from agentbi.semantic_llm import SemanticDraftLlm, SemanticLlmError
 from agentbi.superset import SupersetApiError, SupersetClient
 from agentbi.supersonic import (
+    ConversationUnavailableError,
     ResultMismatchError,
     SemanticResolutionError,
     SuperSonicClient,
@@ -2286,6 +2287,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "message": str(exc),
                     "options": exc.options,
                 } if exc.options else str(exc),
+            ) from exc
+        except ConversationUnavailableError as exc:
+            logger.info("workbench conversation reset required: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "conversation_reset_required",
+                    "message": "当前账号的问答会话已更新，正在建立新会话",
+                },
             ) from exc
         except UpstreamError as exc:
             logger.warning("workbench semantic query failed: %s", exc)

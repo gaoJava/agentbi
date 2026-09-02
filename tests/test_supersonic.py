@@ -17,7 +17,12 @@ from agentbi.models import (
     ScreenContext,
     ScreenFilter,
 )
-from agentbi.supersonic import SemanticResolutionError, SuperSonicClient, UpstreamError
+from agentbi.supersonic import (
+    ConversationUnavailableError,
+    SemanticResolutionError,
+    SuperSonicClient,
+    UpstreamError,
+)
 
 
 def settings() -> Settings:
@@ -218,6 +223,17 @@ class SuperSonicClientTest(unittest.TestCase):
         self.assertEqual(caught.exception.options, [
             "按游戏类型统计全球销量前5名", "按游戏类型统计北美销量前5名",
         ])
+        asyncio.run(client.close())
+
+    def test_stale_chat_id_is_rejected_without_exposing_another_actor(self):
+        client = SuperSonicClient(settings(), httpx.MockTransport(lambda _: httpx.Response(500)))
+        first = analyze_request()
+        stale_chat_id, _, _ = client._conversation(first)
+        switched = analyze_request()
+        switched.actor.subject = "another-user"
+        switched.chat_id = stale_chat_id
+        with self.assertRaises(ConversationUnavailableError):
+            client._conversation(switched)
         asyncio.run(client.close())
 
     def test_rejects_successful_result_with_unrelated_requested_fields(self):

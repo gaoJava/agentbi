@@ -22,6 +22,10 @@ class UpstreamError(RuntimeError):
     """A sanitized SuperSonic integration failure."""
 
 
+class ConversationUnavailableError(UpstreamError):
+    """The supplied conversation is missing or belongs to another actor."""
+
+
 class SemanticResolutionError(UpstreamError):
     """The service is healthy, but the question lacks a resolvable metric."""
 
@@ -810,7 +814,7 @@ class SuperSonicClient:
         try:
             return self._conversations.resolve(request.actor.subject, request.chat_id)
         except ValueError as exc:
-            raise UpstreamError("AgentBI conversation is unavailable") from exc
+            raise ConversationUnavailableError("AgentBI conversation is unavailable") from exc
 
     @staticmethod
     def _select_governed_query(candidates: list[Any], expected_view_id: int | None = None) -> dict[str, Any]:

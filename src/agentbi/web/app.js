@@ -81,6 +81,8 @@ async function request(url, options = {}) {
 
 function showLogin() {
   currentUser = undefined;
+  workbenchChatId = undefined;
+  workbenchAnalysis = undefined;
   window.AgentBI.session.clear();
   window.AgentBI.supersetWorkspace.clear();
   supersetWorkspace = undefined;
@@ -441,6 +443,8 @@ function selectDashboardCanvas(mode) {
 }
 
 function showWorkbench(user) {
+  workbenchChatId = undefined;
+  workbenchAnalysis = undefined;
   currentUser = window.AgentBI.session.accept(user);
   const permissions = new Set(user.permissions);
   document.querySelectorAll('[data-permission]').forEach(item => { item.hidden = !permissions.has(item.dataset.permission); });
@@ -1955,6 +1959,13 @@ async function analyzeFromWorkbench() {
     }
   } catch (error) {
     window.clearInterval(processTimer);
+    if (error?.code === 'conversation_reset_required' && workbenchChatId) {
+      workbenchChatId = undefined;
+      renderAnalysisProcess([], true, Math.round(performance.now() - processStarted));
+      status.textContent = '账号已切换，正在建立新的安全问答会话…';
+      window.setTimeout(() => analyzeFromWorkbench(), 0);
+      return;
+    }
     renderAnalysisProcess([], false, Math.round(performance.now() - processStarted), error.message);
     status.textContent = renderClarification(error) ? '请选择一个推荐问法，或在输入框中补充口径' : error.message;
   } finally {
