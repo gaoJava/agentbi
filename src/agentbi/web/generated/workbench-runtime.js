@@ -1,6 +1,16 @@
 "use strict";
 var AgentBI;
 (function (AgentBI) {
+    class RequestError extends Error {
+        constructor(message, status, code, options = []) {
+            super(message);
+            this.status = status;
+            this.code = code;
+            this.options = options;
+            this.name = 'RequestError';
+        }
+    }
+    AgentBI.RequestError = RequestError;
     async function request(url, options = {}) {
         const response = await fetch(url, { credentials: 'same-origin', ...options });
         const body = response.status === 204
@@ -10,18 +20,26 @@ var AgentBI;
             const rawDetail = typeof body === 'object' && body !== null && 'detail' in body
                 ? body.detail
                 : undefined;
+            const structured = typeof rawDetail === 'object' && rawDetail !== null
+                ? rawDetail
+                : undefined;
             const detail = typeof rawDetail === 'string'
                 ? rawDetail
-                : Array.isArray(rawDetail)
-                    ? rawDetail.map(item => {
-                        if (typeof item !== 'object' || item === null)
-                            return String(item);
-                        const issue = item;
-                        const field = Array.isArray(issue.loc) ? issue.loc.slice(1).join('.') : '';
-                        return `${field ? `${field}：` : ''}${String(issue.msg || '请求参数无效')}`;
-                    }).join('；')
-                    : '';
-            throw new Error(detail || '请求失败，请稍后重试');
+                : structured && typeof structured.message === 'string'
+                    ? structured.message
+                    : Array.isArray(rawDetail)
+                        ? rawDetail.map(item => {
+                            if (typeof item !== 'object' || item === null)
+                                return String(item);
+                            const issue = item;
+                            const field = Array.isArray(issue.loc) ? issue.loc.slice(1).join('.') : '';
+                            return `${field ? `${field}：` : ''}${String(issue.msg || '请求参数无效')}`;
+                        }).join('；')
+                        : '';
+            const options = structured && Array.isArray(structured.options)
+                ? structured.options.filter((item) => typeof item === 'string').slice(0, 6)
+                : [];
+            throw new RequestError(detail || '请求失败，请稍后重试', response.status, structured && typeof structured.code === 'string' ? structured.code : undefined, options);
         }
         return body;
     }

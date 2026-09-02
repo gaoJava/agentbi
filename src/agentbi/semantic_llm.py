@@ -298,11 +298,13 @@ class SemanticDraftLlm:
             "members": ["最多两个原始成员值"], "ranks": ["最多两个1..100名次"],
             "confidence": "0..1", "assumptions": ["明确写出默认假设"],
             "needs_clarification": "boolean", "clarification_question": "string|null",
+            "clarification_options": ["2至5个可直接执行的完整问题"],
         }
         messages = [{"role": "system", "content": (
             "你是企业BI分析规划器。只返回严格JSON，不输出SQL。只能使用给定枚举；不得创造字段。"
             "从口语、同义表达和省略中提取维度、指标、运算、排名、成员。‘卖得好/销售’默认global_sales并写入assumptions；"
-            "排名未给数量时默认Top5并写入assumptions。若关键口径存在两种以上合理解释，needs_clarification=true并提出一个简短问题。"
+            "排名未给数量时默认Top5并写入assumptions。若关键口径存在两种以上合理解释，needs_clarification=true，"
+            "提出一个简短问题，并在clarification_options中给出2至5个可直接执行的完整问题。"
             f"输出结构：{json.dumps(schema, ensure_ascii=False)}"
         )}, {"role": "user", "content": question[:2000]}]
         payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.1,
@@ -354,7 +356,8 @@ class SemanticDraftLlm:
                 body = body[wrapper]
                 break
         allowed = {"dimension", "metric", "operation", "ranking", "members", "ranks",
-                   "confidence", "assumptions", "needs_clarification", "clarification_question"}
+                   "confidence", "assumptions", "needs_clarification", "clarification_question",
+                   "clarification_options"}
         normalized = {key: value for key, value in body.items() if key in allowed}
         dimension_aliases = {"发行商": "publisher", "平台": "platform", "游戏类型": "genre", "类型": "genre"}
         metric_aliases = {"全球销量": "global_sales", "北美销量": "na_sales", "欧洲销量": "eu_sales",
@@ -386,7 +389,7 @@ class SemanticDraftLlm:
                 "direction": "bottom" if raw_operation.startswith("bottom_n_") else "top",
                 "limit": 5,
             }
-        for key in ("members", "ranks", "assumptions"):
+        for key in ("members", "ranks", "assumptions", "clarification_options"):
             if normalized.get(key) is None:
                 normalized[key] = []
             elif isinstance(normalized.get(key), str):

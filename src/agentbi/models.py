@@ -100,6 +100,7 @@ class AnalysisPlan(BaseModel):
     assumptions: list[str] = Field(default_factory=list, max_length=5)
     needs_clarification: bool = False
     clarification_question: str | None = Field(default=None, max_length=256)
+    clarification_options: list[str] = Field(default_factory=list, max_length=6)
 
 
 class StepStatus(StrEnum):

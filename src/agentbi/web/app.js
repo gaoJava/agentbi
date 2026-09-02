@@ -1863,12 +1863,49 @@ function workbenchContext() {
   };
 }
 
+function hideClarification() {
+  const panel = document.querySelector('#agent-clarification');
+  if (panel) panel.hidden = true;
+}
+
+function renderClarification(error) {
+  if (error?.code !== 'clarification_required' || !Array.isArray(error.options) || !error.options.length) return false;
+  let panel = document.querySelector('#agent-clarification');
+  if (!panel) {
+    panel = document.createElement('section');
+    panel.id = 'agent-clarification'; panel.className = 'agent-clarification';
+    const eyebrow = document.createElement('span'); eyebrow.textContent = '还需要确认一个口径';
+    const question = document.createElement('strong'); question.id = 'agent-clarification-question';
+    const options = document.createElement('div'); options.id = 'agent-clarification-options';
+    const hint = document.createElement('small'); hint.textContent = '点击推荐问法后将自动继续，也可以在下方修改问题。';
+    panel.append(eyebrow, question, options, hint);
+    document.querySelector('#agent-analysis-process').before(panel);
+  }
+  document.querySelector('#agent-clarification-question').textContent = error.message;
+  const options = document.querySelector('#agent-clarification-options');
+  options.replaceChildren(...error.options.map((suggestion, index) => {
+    const option = document.createElement('button'); option.type = 'button';
+    option.innerHTML = `<span>${index + 1}</span><strong></strong><i>继续 →</i>`;
+    option.querySelector('strong').textContent = suggestion;
+    option.addEventListener('click', () => {
+      document.querySelector('#agent-question').value = suggestion;
+      hideClarification();
+      document.querySelector('#agent-query-status').textContent = '已采用推荐问法，正在继续分析…';
+      window.setTimeout(() => analyzeFromWorkbench(), 0);
+    });
+    return option;
+  }));
+  panel.hidden = false;
+  return true;
+}
+
 async function analyzeFromWorkbench() {
   const question = document.querySelector('#agent-question').value.trim();
   const button = document.querySelector('#agent-analyze');
   const status = document.querySelector('#agent-query-status');
   if (question.length < 2) { status.textContent = '请输入至少 2 个字符的问题'; return; }
   if (offerChartRoute(question)) return;
+  hideClarification();
   button.disabled = true; status.textContent = '正在执行 SuperSonic 真实语义查询…';
   workbenchAnalysis = undefined;
   document.querySelector('#agent-query-result').hidden = true;
@@ -1919,7 +1956,7 @@ async function analyzeFromWorkbench() {
   } catch (error) {
     window.clearInterval(processTimer);
     renderAnalysisProcess([], false, Math.round(performance.now() - processStarted), error.message);
-    status.textContent = error.message;
+    status.textContent = renderClarification(error) ? '请选择一个推荐问法，或在输入框中补充口径' : error.message;
   } finally {
     window.clearInterval(processTimer);
     button.disabled = false;

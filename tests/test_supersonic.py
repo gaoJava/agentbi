@@ -205,6 +205,7 @@ class SuperSonicClientTest(unittest.TestCase):
             return AnalysisPlan(
                 confidence=0.35, needs_clarification=True,
                 clarification_question="您说的销量是全球销量还是北美销量？",
+                clarification_options=["按游戏类型统计全球销量前5名", "按游戏类型统计北美销量前5名"],
             )
 
         def unexpected(_: httpx.Request) -> httpx.Response:
@@ -212,8 +213,11 @@ class SuperSonicClientTest(unittest.TestCase):
 
         client = SuperSonicClient(settings(), httpx.MockTransport(unexpected))
         client.configure_llm_resolver(resolver)
-        with self.assertRaisesRegex(SemanticResolutionError, "全球销量还是北美销量"):
+        with self.assertRaisesRegex(SemanticResolutionError, "全球销量还是北美销量") as caught:
             asyncio.run(client.query(analyze_request()))
+        self.assertEqual(caught.exception.options, [
+            "按游戏类型统计全球销量前5名", "按游戏类型统计北美销量前5名",
+        ])
         asyncio.run(client.close())
 
     def test_rejects_successful_result_with_unrelated_requested_fields(self):

@@ -385,6 +385,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "我暂时无法稳定理解这个问题。请补充统计维度、指标和范围，"
                         "例如“按游戏类型统计全球销量前5名并计算平均值”。"
                     ),
+                    clarification_options=[
+                        "按平台统计全球销量前5名",
+                        "按游戏类型统计全球销量前5名",
+                        "按发行商统计全球销量前5名",
+                        "按游戏类型统计全球销量前5名并计算平均值",
+                    ],
                 )
             raise UpstreamError("LLM semantic intent service is unavailable")
 
@@ -2275,7 +2281,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SemanticResolutionError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
+                detail={
+                    "code": "clarification_required",
+                    "message": str(exc),
+                    "options": exc.options,
+                } if exc.options else str(exc),
             ) from exc
         except UpstreamError as exc:
             logger.warning("workbench semantic query failed: %s", exc)

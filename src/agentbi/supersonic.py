@@ -25,6 +25,10 @@ class UpstreamError(RuntimeError):
 class SemanticResolutionError(UpstreamError):
     """The service is healthy, but the question lacks a resolvable metric."""
 
+    def __init__(self, message: str, *, options: list[str] | None = None):
+        super().__init__(message)
+        self.options = list(options or [])[:6]
+
 
 class ResultMismatchError(UpstreamError):
     """The upstream query completed but returned fields unrelated to the question."""
@@ -84,7 +88,8 @@ class SuperSonicClient:
             if isinstance(normalized, AnalysisPlan):
                 if normalized.needs_clarification:
                     raise SemanticResolutionError(
-                        normalized.clarification_question or "这个问题存在多种业务口径，请补充指标、范围或比较对象"
+                        normalized.clarification_question or "这个问题存在多种业务口径，请补充指标、范围或比较对象",
+                        options=normalized.clarification_options or self._default_clarification_options(),
                     )
                 calculation = self._calculation_from_plan(normalized)
                 structured = self._calculation_structure(calculation) or self._query_from_plan(normalized)
@@ -220,6 +225,15 @@ class SuperSonicClient:
         if not plan.dimension or not plan.metric or plan.operation not in {"list", "rank"}:
             return None
         return plan.dimension, plan.metric, plan.ranking.limit if plan.ranking else 100
+
+    @staticmethod
+    def _default_clarification_options() -> list[str]:
+        return [
+            "按平台统计全球销量前5名",
+            "按游戏类型统计全球销量前5名",
+            "按发行商统计全球销量前5名",
+            "按游戏类型统计全球销量前5名并计算平均值",
+        ]
 
     @staticmethod
     def _calculation_from_plan(plan: AnalysisPlan) -> dict[str, Any] | None:

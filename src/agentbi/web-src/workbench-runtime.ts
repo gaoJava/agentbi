@@ -111,6 +111,14 @@ namespace AgentBI {
   }
 
   export interface ApiErrorBody { detail?: unknown }
+  export class RequestError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+      readonly code?: string,
+      readonly options: readonly string[] = [],
+    ) { super(message); this.name = 'RequestError'; }
+  }
 
   interface SessionEnvelope { user: unknown }
   interface WorkspaceEnvelope { workspace: unknown }
@@ -124,8 +132,13 @@ namespace AgentBI {
       const rawDetail = typeof body === 'object' && body !== null && 'detail' in body
         ? (body as ApiErrorBody).detail
         : undefined;
+      const structured = typeof rawDetail === 'object' && rawDetail !== null
+        ? rawDetail as {code?: unknown; message?: unknown; options?: unknown}
+        : undefined;
       const detail = typeof rawDetail === 'string'
         ? rawDetail
+        : structured && typeof structured.message === 'string'
+          ? structured.message
         : Array.isArray(rawDetail)
           ? rawDetail.map(item => {
               if (typeof item !== 'object' || item === null) return String(item);
@@ -134,7 +147,14 @@ namespace AgentBI {
               return `${field ? `${field}：` : ''}${String(issue.msg || '请求参数无效')}`;
             }).join('；')
           : '';
-      throw new Error(detail || '请求失败，请稍后重试');
+      const options = structured && Array.isArray(structured.options)
+        ? structured.options.filter((item): item is string => typeof item === 'string').slice(0, 6)
+        : [];
+      throw new RequestError(
+        detail || '请求失败，请稍后重试', response.status,
+        structured && typeof structured.code === 'string' ? structured.code : undefined,
+        options,
+      );
     }
     return body as T;
   }
