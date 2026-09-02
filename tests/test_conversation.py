@@ -85,3 +85,23 @@ def test_token_threshold_also_triggers_compression_and_actor_isolation():
         assert "unavailable" in str(exc)
     else:
         raise AssertionError("another actor must not access the conversation")
+
+
+def test_report_query_evidence_is_actor_bound():
+    repo = repository()
+    manager = ConversationContextManager(base_settings(), repo)
+    chat_id, _, _ = manager.resolve("actor-1", None)
+    manager.record(
+        "actor-1",
+        chat_id,
+        "按平台统计销量",
+        {
+            "queryId": "query-evidence-001",
+            "queryResults": [{"platform": "PS2"}],
+            "response": "PS2 排名第一",
+        },
+    )
+
+    assert repo.actor_owns_query("actor-1", "query-evidence-001") is True
+    assert repo.actor_owns_query("actor-2", "query-evidence-001") is False
+    assert repo.actor_owns_query("actor-1", "missing-query") is False

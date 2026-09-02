@@ -589,6 +589,26 @@ class IdentityRepository:
                 for turn in turns
             ]
 
+    def actor_owns_query(self, actor_user_id: str, query_id: str) -> bool:
+        """Verify that a report evidence id came from this actor's persisted query."""
+
+        with Session(self.engine) as db:
+            results = db.scalars(
+                select(ConversationTurn.tool_result)
+                .join(ConversationState, ConversationState.id == ConversationTurn.conversation_id)
+                .where(ConversationState.actor_user_id == actor_user_id)
+                .order_by(ConversationTurn.created_at.desc())
+                .limit(200)
+            ).all()
+        for raw in results:
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if str(payload.get("queryId") or "") == query_id:
+                return True
+        return False
+
     def compress_conversation(
         self, conversation_id: int, actor_user_id: str, through: int, summary: str
     ) -> None:

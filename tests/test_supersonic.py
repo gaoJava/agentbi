@@ -16,6 +16,7 @@ from agentbi.models import (
     AnalyzeRequest,
     ScreenContext,
     ScreenFilter,
+    SelectedDatum,
 )
 from agentbi.supersonic import (
     ConversationUnavailableError,
@@ -50,6 +51,24 @@ def analyze_request() -> AnalyzeRequest:
 
 
 class SuperSonicClientTest(unittest.TestCase):
+    def test_structured_query_filters_use_allow_list_and_escape_values(self):
+        request = analyze_request()
+        request.context.filters = [
+            ScreenFilter(field="platform", operator="EQ", value="PS2"),
+            ScreenFilter(field="publisher", operator="EQ", value="O'Reilly"),
+            ScreenFilter(field="not_allowed", operator="EQ", value="ignored"),
+        ]
+        request.context.selected = SelectedDatum(
+            label="游戏平台", dimension="platform", value="PS2"
+        )
+
+        clause = SuperSonicClient._structured_where(request)
+
+        self.assertEqual(
+            clause,
+            "WHERE platform = 'PS2' AND publisher = 'O''Reilly'",
+        )
+
     def test_compiles_explicit_top_n_question(self):
         self.assertEqual(
             SuperSonicClient._ranking_query("按发行商统计全球销量前 10 名"),

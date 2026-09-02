@@ -111,6 +111,9 @@ class ReportCreatePayload(BaseModel):
 
     title: str = Field(min_length=2, max_length=200)
     dashboard_name: str = Field(min_length=2, max_length=200)
+    summary: str | None = Field(default=None, min_length=2, max_length=4000)
+    evidence_path: str | None = Field(default=None, min_length=2, max_length=4000)
+    query_id: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class UserUpdatePayload(BaseModel):
@@ -939,12 +942,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "report:view" not in identity.permissions:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
         enforce_csrf(request, identity)
+        if payload.query_id and not sessions.repository.actor_owns_query(
+            identity.subject, payload.query_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="查询证据不存在或不属于当前账号，请重新执行分析",
+            )
+        summary = payload.summary or (
+            f"{identity.data_scope}经营指标快照已生成，可继续通过 AgentBI 下钻原因。"
+        )
+        evidence_path = payload.evidence_path or f"{payload.dashboard_name} → {identity.data_scope}"
         report = sessions.create_report(
             title=payload.title,
             dashboard_name=payload.dashboard_name,
             data_scope=identity.data_scope,
-            summary=f"{identity.data_scope}最近 30 天经营指标快照已生成，可继续通过 AgentBI 下钻原因。",
-            evidence_path=f"{payload.dashboard_name} → 最近30天 → {identity.data_scope}",
+            summary=summary,
+            evidence_path=evidence_path,
             actor_user_id=identity.subject,
         )
         sessions.audit(

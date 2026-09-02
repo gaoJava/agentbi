@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -114,6 +115,7 @@ class SuperSonicClient:
                 request.context.semantic_model_id
             )
             started = time.perf_counter()
+            where_clause = self._structured_where(request)
             data = await self._request_data(
                 "POST",
                 "/api/semantic/query/sql",
@@ -122,6 +124,7 @@ class SuperSonicClient:
                     "sql": (
                         f"SELECT {dimension}, SUM({metric}) AS {metric} "
                         f"FROM {model_biz_name} "
+                        f"{where_clause} "
                         f"GROUP BY {dimension} ORDER BY {metric} {sort_direction} LIMIT {limit}"
                     ),
                 },
@@ -140,6 +143,7 @@ class SuperSonicClient:
                 rows = [{dimension_label: row.get(dimension), metric_label: row.get(metric)}
                         for row in calculation_result["rows"]]
             result = {
+                "queryId": str(uuid.uuid4()),
                 "queryResults": rows,
                 "querySql": data.get("sql"),
                 "queryTimeCost": round((time.perf_counter() - started) * 1000),
@@ -200,6 +204,48 @@ class SuperSonicClient:
         result["resolutionMode"] = "SuperSonic 原生语义解析"
         self._conversations.record(request.actor.subject, conversation_id, request.question, result)
         return result
+
+    @staticmethod
+    def _structured_where(request: AnalyzeRequest) -> str:
+        """Compile trusted screen selections into an allow-listed semantic SQL filter."""
+
+        allowed = {
+            "platform", "genre", "publisher", "name", "year",
+            "global_sales", "na_sales", "eu_sales", "jp_sales", "other_sales",
+        }
+        predicates: list[str] = []
+        seen: set[tuple[str, str]] = set()
+
+        def literal(value: Any) -> str:
+            if isinstance(value, bool):
+                return "TRUE" if value else "FALSE"
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return str(value)
+            return "'" + str(value).replace("'", "''") + "'"
+
+        candidates: list[tuple[str, str, Any]] = [
+            (item.field, item.operator.value, item.value) for item in request.context.filters
+        ]
+        if request.context.selected and request.context.selected.dimension:
+            candidates.append((
+                request.context.selected.dimension,
+                "EQ",
+                request.context.selected.value,
+            ))
+        for field, operator, value in candidates:
+            if field not in allowed or value is None:
+                continue
+            key = (field, str(value))
+            if key in seen:
+                continue
+            seen.add(key)
+            if operator == "EQ":
+                predicates.append(f"{field} = {literal(value)}")
+            elif operator in {"GTE", "LTE"}:
+                predicates.append(f"{field} {'>=' if operator == 'GTE' else '<='} {literal(value)}")
+            elif operator == "IN" and isinstance(value, list) and value:
+                predicates.append(f"{field} IN ({', '.join(literal(item) for item in value[:50])})")
+        return f"WHERE {' AND '.join(predicates)}" if predicates else ""
 
     async def _view_model_biz_name(self, view_id: int) -> str:
         view = await self._request_data("GET", f"/api/semantic/view/{view_id}")

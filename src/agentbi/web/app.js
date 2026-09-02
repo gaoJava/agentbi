@@ -60,6 +60,8 @@ let temporaryVisualization;
 let agentPanelExpanded = false;
 let workbenchDrillDepth = 0;
 let workbenchPendingDrill = false;
+let workbenchDrillTrail = [];
+let workbenchDrillLayers = [];
 
 function isValidDrillConfiguration(config) {
   return Boolean(
@@ -83,6 +85,8 @@ function showLogin() {
   currentUser = undefined;
   workbenchChatId = undefined;
   workbenchAnalysis = undefined;
+  workbenchDrillTrail = [];
+  workbenchDrillLayers = [];
   window.AgentBI.session.clear();
   window.AgentBI.supersetWorkspace.clear();
   supersetWorkspace = undefined;
@@ -445,6 +449,8 @@ function selectDashboardCanvas(mode) {
 function showWorkbench(user) {
   workbenchChatId = undefined;
   workbenchAnalysis = undefined;
+  workbenchDrillTrail = [];
+  workbenchDrillLayers = [];
   currentUser = window.AgentBI.session.accept(user);
   const permissions = new Set(user.permissions);
   document.querySelectorAll('[data-permission]').forEach(item => { item.hidden = !permissions.has(item.dataset.permission); });
@@ -732,7 +738,7 @@ function switchView(view) {
     const target = document.querySelector(`#${view}-view`);
     if (target) target.hidden = false;
   }
-  document.querySelector('#dashboard-agent').hidden = !dashboard;
+  document.querySelector('#dashboard-agent').hidden = !(dashboard || drilldown);
   document.querySelector('#drill-agent').hidden = !drilldown || !workbenchAnalysis;
   document.querySelector('.agent-input').hidden = drilldown && !workbenchAnalysis;
   document.querySelectorAll('.nav-item[data-view]').forEach(item => {
@@ -1844,12 +1850,76 @@ function renderRealDrilldownResult(empty, detail, header) {
   header.hidden = true;
   detail.hidden = true;
   empty.hidden = false;
-  const heading = document.createElement('strong');
-  heading.textContent = `第 ${workbenchDrillDepth} 层 · 真实语义查询结果`;
-  const answer = document.createElement('p'); answer.textContent = workbenchAnalysis.answer;
-  const evidence = document.createElement('small');
-  evidence.textContent = `查询编号 ${workbenchAnalysis.evidence.query_id} · ${workbenchAnalysis.evidence.row_count} 行 · SQL 指纹 ${workbenchAnalysis.evidence.sql_fingerprint || '—'}`;
-  empty.replaceChildren(heading, answer, resultTable(workbenchAnalysis.data), evidence);
+  const title = document.createElement('strong'); title.textContent = '真实下钻证据链';
+  const path = document.createElement('p'); path.className = 'real-drill-path';
+  path.textContent = workbenchDrillTrail.length
+    ? `原始分析 → ${workbenchDrillTrail.map(item => `${friendlyDimensionLabel(item.dimension)}=${item.value}`).join(' → ')}`
+    : '原始分析结果；请选择数据项继续下钻';
+  const layers = document.createElement('div'); layers.className = 'real-drill-layers';
+  layers.replaceChildren(...workbenchDrillLayers.map((layer, index) => {
+    const card = document.createElement('article'); card.className = 'real-drill-layer';
+    const heading = document.createElement('header');
+    const label = document.createElement('span'); label.textContent = `第 ${index} 层`;
+    const question = document.createElement('strong'); question.textContent = layer.question;
+    heading.append(label, question);
+    const answer = document.createElement('p'); answer.textContent = layer.analysis.answer;
+    const evidence = document.createElement('small');
+    evidence.textContent = `查询 ${layer.analysis.evidence.query_id} · ${layer.analysis.evidence.row_count} 行 · SQL 指纹 ${layer.analysis.evidence.sql_fingerprint || '—'}`;
+    const analyze = document.createElement('button'); analyze.type = 'button'; analyze.textContent = '✦ 继续追问此层';
+    analyze.addEventListener('click', () => {
+      workbenchAnalysis = layer.analysis;
+      document.querySelector('#agent-question').value = layer.question;
+      document.querySelector('#drill-insight').textContent = layer.analysis.answer;
+      document.querySelector('#drill-insight-source').textContent = `查询编号 ${layer.analysis.evidence.query_id}`;
+      setAgentPanelExpanded(true);
+    });
+    card.append(heading, answer, resultTable(layer.analysis.data), evidence, analyze);
+    return card;
+  }));
+  empty.replaceChildren(title, path, layers);
+}
+
+const governedDrillDimensions = ['platform', 'genre', 'publisher'];
+const drillDimensionAliases = {
+  platform: ['platform', '平台', '游戏平台'],
+  genre: ['genre', '游戏类型', '类型'],
+  publisher: ['publisher', '发行商', '厂商'],
+};
+
+function resultDimension(rows) {
+  if (!Array.isArray(rows) || !rows.length) return undefined;
+  for (const canonical of governedDrillDimensions) {
+    const field = drillDimensionAliases[canonical].find(alias => Object.hasOwn(rows[0], alias));
+    if (field) return {canonical, field};
+  }
+  const field = Object.keys(rows[0]).find(key => typeof rows[0][key] === 'string');
+  return field ? {canonical: field, field} : undefined;
+}
+
+function configureResultDrilldown(rows) {
+  const controls = document.querySelector('#agent-drill-controls');
+  const button = document.querySelector('#start-result-drilldown');
+  const dimension = resultDimension(rows);
+  const used = new Set(workbenchDrillTrail.map(item => item.dimension));
+  if (dimension) used.add(dimension.canonical);
+  const nextDimensions = governedDrillDimensions.filter(item => !used.has(item));
+  const members = dimension ? rows.slice(0, 20).filter(row => row[dimension.field] !== undefined) : [];
+  const available = Boolean(members.length && nextDimensions.length);
+  controls.hidden = !available; button.hidden = !available;
+  if (!available) return;
+  document.querySelector('#agent-drill-member').replaceChildren(...members.map(row =>
+    new Option(String(row[dimension.field]), String(row[dimension.field]))));
+  document.querySelector('#agent-drill-member').dataset.dimension = dimension.canonical;
+  document.querySelector('#agent-drill-dimension').replaceChildren(...nextDimensions.map(item =>
+    new Option(friendlyDimensionLabel(item), item)));
+}
+
+function reportEvidencePath() {
+  const dashboard = document.querySelector('#agent-dashboard-name').textContent || '经营总览';
+  const layers = workbenchDrillLayers.map(layer =>
+    `${layer.question} [${layer.analysis.evidence.query_id}; ${layer.analysis.evidence.sql_fingerprint || '无SQL指纹'}]`);
+  return [dashboard, ...workbenchDrillTrail.map(item =>
+    `${friendlyDimensionLabel(item.dimension)}=${item.value}`), ...layers].join(' → ');
 }
 
 function workbenchContext() {
@@ -1862,7 +1932,9 @@ function workbenchContext() {
     ...(selectedSupersetContext?.dataset_id ? {dataset_id: selectedSupersetContext.dataset_id} : {}),
     semantic_model_id: semanticModel,
     time_range: timeRange,
-    filters: [],
+    filters: workbenchDrillTrail.map(item => ({
+      field: item.dimension, operator: 'EQ', value: item.value,
+    })),
     ...(workbenchSelected ? { selected: workbenchSelected } : {}),
   };
 }
@@ -1938,15 +2010,20 @@ async function analyzeFromWorkbench() {
     if (workbenchPendingDrill) {
       workbenchDrillDepth += 1;
       workbenchPendingDrill = false;
+      workbenchDrillLayers.push({question, analysis: body});
+    } else {
+      workbenchDrillDepth = 0;
+      workbenchDrillTrail = [];
+      workbenchDrillLayers = [{question, analysis: body}];
     }
     document.querySelector('#agent-result-question').textContent = question;
     document.querySelector('#agent-answer').textContent = body.answer;
     renderTemporaryVisualization(body.data, temporaryVisualization);
     temporaryVisualization = undefined;
     document.querySelector('#agent-result-table').replaceChildren(resultTable(body.data));
+    configureResultDrilldown(body.data);
     document.querySelector('#agent-evidence-summary').textContent = `查询编号 ${body.evidence.query_id} · ${body.evidence.row_count} 行 · SQL 指纹 ${body.evidence.sql_fingerprint || '—'}`;
     document.querySelector('#agent-query-result').hidden = false;
-    document.querySelector('#start-result-drilldown').hidden = !body.data.length;
     status.textContent = body.warnings?.length ? body.warnings.join('；') : '真实查询完成';
     loadConversationHistory().catch(() => {});
     if (activeView === 'drilldown') {
@@ -1998,6 +2075,7 @@ function visualizationProposal(question, dimension) {
 }
 
 function offerChartRoute(question) {
+  if (workbenchPendingDrill) return false;
   const dimension = questionDimension(question);
   const currentDimension = selectedNativeChart?.configuration?.dimension;
   const signature = `${selectedNativeChart?.superset_id || ''}:${question}`;
@@ -2142,6 +2220,11 @@ document.querySelector('#agent-panel-toggle').addEventListener('click', () => {
   setAgentPanelExpanded(!agentPanelExpanded);
 });
 document.querySelector('#agent-analyze').addEventListener('click', analyzeFromWorkbench);
+document.querySelectorAll('[data-demo-question]').forEach(button => button.addEventListener('click', () => {
+  document.querySelector('#agent-question').value = button.dataset.demoQuestion;
+  document.querySelector('#agent-query-status').textContent = '已填入闭环测试问题，正在执行真实查询…';
+  analyzeFromWorkbench();
+}));
 document.querySelector('#agent-chart-route-confirm').addEventListener('click', () => {
   if (!pendingChartRoute) return;
   const {target, proposal, question, signature} = pendingChartRoute;
@@ -2184,19 +2267,51 @@ document.querySelector('#agent-question').addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') analyzeFromWorkbench();
 });
 document.querySelector('#start-result-drilldown').addEventListener('click', () => {
-  const row = workbenchAnalysis?.data?.[0];
-  if (!row) return;
-  const dimension = Object.keys(row).find(key => ['string', 'number'].includes(typeof row[key]));
-  if (!dimension) return;
-  workbenchSelected = { label: dimension, dimension, value: row[dimension] };
+  const member = document.querySelector('#agent-drill-member');
+  const dimension = member.dataset.dimension;
+  const value = member.value;
+  const nextDimension = document.querySelector('#agent-drill-dimension').value;
+  if (!dimension || !value || !nextDimension) return;
+  workbenchSelected = { label: friendlyDimensionLabel(dimension), dimension, value };
+  workbenchDrillTrail.push({dimension, value});
   workbenchPendingDrill = true;
-  document.querySelector('#agent-question').value = `请围绕 ${dimension}=${row[dimension]} 下钻分析，并说明主要差异`;
-  document.querySelector('#drill-agent-context').textContent = `待执行：${dimension}=${row[dimension]}`;
+  const conditions = workbenchDrillTrail.map(item =>
+    `${friendlyDimensionLabel(item.dimension)}=${item.value}`).join('、');
+  const question = `按${friendlyDimensionLabel(nextDimension)}统计全球销量前10名，并分析主要差异`;
+  document.querySelector('#agent-question').value = question;
+  document.querySelector('#drill-agent-context').textContent = `待执行：${conditions} → ${friendlyDimensionLabel(nextDimension)}`;
   document.querySelector('#drill-insight').textContent = workbenchAnalysis.answer;
   document.querySelector('#drill-insight-source').textContent = `查询编号 ${workbenchAnalysis.evidence.query_id}`;
   document.querySelector('#drill-evidence').textContent = `返回 ${workbenchAnalysis.evidence.row_count} 行 · SQL 指纹 ${workbenchAnalysis.evidence.sql_fingerprint || '—'}`;
   switchView('drilldown');
   renderDrilldown();
+  analyzeFromWorkbench();
+});
+
+document.querySelector('#save-analysis-report').addEventListener('click', async event => {
+  if (!workbenchAnalysis) return;
+  const button = event.currentTarget;
+  button.disabled = true; button.textContent = '正在生成…';
+  const dashboardName = document.querySelector('#agent-dashboard-name').textContent || '经营总览';
+  try {
+    await request('/api/v1/reports', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({
+        title: `游戏市场闭环分析 · ${document.querySelector('#agent-result-question').textContent}`.slice(0, 200),
+        dashboard_name: dashboardName,
+        summary: workbenchDrillLayers.map((layer, index) =>
+          `第${index}层：${layer.analysis.answer}`).join('\n').slice(0, 4000),
+        evidence_path: reportEvidencePath().slice(0, 4000),
+        query_id: workbenchAnalysis.evidence.query_id,
+      }),
+    });
+    showManagementFeedback('已根据当前问答与下钻证据生成分析报告');
+  } catch (error) {
+    showManagementFeedback(error.message, true);
+  } finally {
+    button.disabled = false; button.textContent = '生成分析报告';
+  }
 });
 document.querySelector('#refresh-dashboard').addEventListener('click', async () => {
   if (dashboardCanvasMode === 'superset') {
