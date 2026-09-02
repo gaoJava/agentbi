@@ -81,6 +81,9 @@ class ChartCreatePayload(BaseModel):
     visualization_type: Literal["bar", "line", "donut", "table"]
     semantic_model: str = Field(min_length=2, max_length=128)
     dimensions: list[str] = Field(min_length=2, max_length=5)
+    superset_dashboard_id: int | None = Field(default=None, gt=0)
+    superset_chart_id: int | None = Field(default=None, gt=0)
+    superset_dataset_id: int | None = Field(default=None, gt=0)
 
 
 class ChartUpdatePayload(BaseModel):
@@ -94,6 +97,9 @@ class ChartUpdatePayload(BaseModel):
     visualization_type: Literal["bar", "line", "donut", "table"]
     semantic_model: str = Field(min_length=2, max_length=128)
     dimensions: list[str] = Field(min_length=2, max_length=5)
+    superset_dashboard_id: int | None = Field(default=None, gt=0)
+    superset_chart_id: int | None = Field(default=None, gt=0)
+    superset_dataset_id: int | None = Field(default=None, gt=0)
 
 
 class ChartPublishPayload(BaseModel):
@@ -353,6 +359,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     sessions = SessionManager(settings)
     supersonic = SuperSonicClient(settings, repository=sessions.repository)
     semantic_llm = SemanticDraftLlm(settings)
+
+    async def validate_chart_binding(payload: ChartCreatePayload | ChartUpdatePayload) -> str:
+        """Validate that a governed definition points at one real chart and model."""
+
+        binding = (
+            payload.superset_dashboard_id,
+            payload.superset_chart_id,
+            payload.superset_dataset_id,
+        )
+        if not any(binding):
+            return "pending"
+        if not all(binding):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="请完整选择 Superset 仪表盘、图表和 Dataset",
+            )
+        try:
+            dashboard = await app.state.superset_client.get_native_dashboard(
+                payload.superset_dashboard_id
+            )
+            models = await app.state.supersonic_client.list_semantic_models()
+        except (SupersetApiError, UpstreamError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="真实图表或语义模型校验失败，请检查上游连接",
+            ) from exc
+        chart = next(
+            (
+                item for item in dashboard.get("charts", [])
+                if int(item.get("superset_id") or 0) == payload.superset_chart_id
+            ),
+            None,
+        )
+        if chart is None:
+            raise HTTPException(status_code=422, detail="所选 Superset 图表不属于该仪表盘")
+        configuration = chart.get("configuration") or {}
+        if int(configuration.get("dataset_id") or 0) != payload.superset_dataset_id:
+            raise HTTPException(status_code=422, detail="所选图表与 Dataset 不一致")
+        if configuration.get("metric_column") != payload.metric:
+            raise HTTPException(status_code=422, detail="核心指标与 Superset 图表指标不一致")
+        if configuration.get("dimension") != payload.dimensions[0].strip():
+            raise HTTPException(status_code=422, detail="下钻首层必须与 Superset 图表维度一致")
+        try:
+            model_id = int(payload.semantic_model.split(":", 1)[1]) \
+                if payload.semantic_model.startswith("supersonic:") else None
+        except ValueError:
+            model_id = None
+        if model_id is None or not any(int(item.get("id") or 0) == model_id for item in models):
+            raise HTTPException(status_code=422, detail="所选 SuperSonic 语义模型不存在")
+        return "ready"
     stored_llm = sessions.repository.get_llm_provider_config()
     if stored_llm and stored_llm["enabled"]:
         try:
@@ -2147,6 +2203,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
         dimensions = validated_dimensions(payload.dimensions)
+        validation_status = await validate_chart_binding(payload)
         try:
             chart = sessions.create_chart_with_drilldown(
                 chart_key=payload.chart_key,
@@ -2156,6 +2213,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 visualization_type=payload.visualization_type,
                 semantic_model=payload.semantic_model,
                 dimensions=dimensions,
+                superset_dashboard_id=payload.superset_dashboard_id,
+                superset_chart_id=payload.superset_chart_id,
+                superset_dataset_id=payload.superset_dataset_id,
+                validation_status=validation_status,
                 actor_user_id=identity.subject,
             )
         except ValueError as exc:
@@ -2179,6 +2240,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         identity: SessionIdentity = dashboard_management_session,
     ) -> dict[str, object]:
         enforce_csrf(request, identity)
+        validation_status = await validate_chart_binding(payload)
         try:
             chart = sessions.update_chart_with_drilldown(
                 chart_key=chart_key,
@@ -2188,6 +2250,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 visualization_type=payload.visualization_type,
                 semantic_model=payload.semantic_model,
                 dimensions=validated_dimensions(payload.dimensions),
+                superset_dashboard_id=payload.superset_dashboard_id,
+                superset_chart_id=payload.superset_chart_id,
+                superset_dataset_id=payload.superset_dataset_id,
+                validation_status=validation_status,
             )
         except KeyError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在") from exc

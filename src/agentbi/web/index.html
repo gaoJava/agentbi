@@ -227,6 +227,7 @@
       <header><div><span>新增图表与下钻配置</span><h2 id="chart-wizard-title">创建受治理分析图表</h2></div><button id="close-chart-wizard" type="button" aria-label="关闭">×</button></header>
       <form id="chart-wizard-form">
         <div class="wizard-grid">
+          <label class="wizard-full">真实 Superset 图表<small>选择后自动带入 Dashboard、Chart、Dataset、首层维度和指标</small><select id="new-chart-superset"><option value="">暂不绑定（不能启用真实下钻）</option></select></label>
           <label>图表 ID<small>保存后不可重复，建议使用英文</small><input id="new-chart-key" required minlength="2" maxlength="128" pattern="[A-Za-z][A-Za-z0-9_-]*" placeholder="customer_growth"></label>
           <label>图表名称<small>显示在分析工作台</small><input id="new-chart-title" required maxlength="200" placeholder="新增客户趋势"></label>
           <label>数据集<small>对应 Superset Dataset</small><input id="new-chart-dataset" required maxlength="200" placeholder="customer_sales"></label>
@@ -236,7 +237,7 @@
           <label class="wizard-full">下钻维度路径<small>支持逗号或箭头分隔，至少两层，例如：区域 → 渠道 → 客户</small><input id="new-chart-dimensions" required placeholder="区域 → 渠道 → 销售人员 → 客户"></label>
         </div>
         <div id="chart-wizard-error" class="form-error" hidden></div>
-        <aside class="wizard-preview"><strong>发布后的交互</strong><span>分析工作台 → 图表三点菜单 → 进入下钻分析 → AgentBI 证据路径</span></aside>
+        <aside class="wizard-preview"><strong>发布后的交互</strong><span>绑定并校验真实图表后：分析工作台 → AI 分析 → 在查询结果底部选择数据项 → 执行下钻</span></aside>
         <footer><button id="cancel-chart-wizard" type="button">取消</button><button id="save-chart-wizard" class="primary-button" type="submit">创建并发布</button></footer>
       </form>
     </section>
@@ -428,6 +429,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260902.4" defer></script>
+  <script src="/app/assets/app.js?v=20260902.5" defer></script>
 </body>
 </html>

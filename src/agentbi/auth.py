@@ -259,6 +259,10 @@ class SessionManager:
         visualization_type: str,
         semantic_model: str,
         dimensions: list[str],
+        superset_dashboard_id: int | None = None,
+        superset_chart_id: int | None = None,
+        superset_dataset_id: int | None = None,
+        validation_status: str = "pending",
         actor_user_id: str,
     ) -> dict[str, object]:
         return self.repository.create_chart_with_drilldown(
@@ -269,6 +273,10 @@ class SessionManager:
             visualization_type=visualization_type,
             semantic_model=semantic_model,
             dimensions=dimensions,
+            superset_dashboard_id=superset_dashboard_id,
+            superset_chart_id=superset_chart_id,
+            superset_dataset_id=superset_dataset_id,
+            validation_status=validation_status,
             actor_user_id=actor_user_id,
         )
 

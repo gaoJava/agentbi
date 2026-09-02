@@ -183,7 +183,10 @@ applyChartTimeRange('');
 function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id) {
   workbenchChatId = undefined;
   workbenchSelected = undefined;
-  selectedSupersetContext = {dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id)};
+  selectedSupersetContext = {
+    dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id),
+    ...(chart.configuration?.dataset_id ? {dataset_id: String(chart.configuration.dataset_id)} : {}),
+  };
   selectedNativeChart = chart;
   pendingChartRoute = undefined;
   temporaryVisualization = undefined;
@@ -1577,7 +1580,8 @@ function showManagementFeedback(message, isError = false) {
 
 function renderRegistryCenter() {
   const entries = managedCharts.map(chart => [chart.chart_key, chart]);
-  const validEntries = [];
+  const validEntries = entries.filter(([, chart]) =>
+    chart.validation_status === 'ready' && Boolean(chart.superset_chart_id));
   const models = new Set(managedCharts.map(chart => chart.semantic_model).filter(Boolean));
   document.querySelector('#registry-count').textContent = `${entries.length} 个已注册图表`;
   document.querySelector('#registry-chart-total').textContent = String(entries.length);
@@ -1598,10 +1602,10 @@ function renderRegistryCenter() {
     const status = document.createElement('td');
     const badge = document.createElement('span');
     const managed = managedCharts.find(item => item.chart_key === chartId);
-    const valid = false;
+    const valid = config.validation_status === 'ready' && Boolean(config.superset_chart_id);
     const offline = managed?.is_published === false;
     badge.className = offline ? 'registry-status offline' : valid ? 'registry-status ready' : 'registry-status invalid';
-    badge.textContent = offline ? '● 已下线' : '● 待绑定真实查询';
+    badge.textContent = offline ? '● 已下线' : valid ? '● 配置正常' : '● 待绑定真实查询';
     status.append(badge);
     const action = document.createElement('td');
     appendGovernanceActions(action, managed || { chart_key: chartId, builtin: true, is_published: true }, valid);
@@ -1900,9 +1904,13 @@ function configureResultDrilldown(rows) {
   const controls = document.querySelector('#agent-drill-controls');
   const button = document.querySelector('#start-result-drilldown');
   const dimension = resultDimension(rows);
+  const governed = managedCharts.find(chart =>
+    chart.validation_status === 'ready' &&
+    Number(chart.superset_chart_id) === Number(selectedSupersetContext?.chart_id));
+  const configuredDimensions = governed?.dimensions || governedDrillDimensions;
   const used = new Set(workbenchDrillTrail.map(item => item.dimension));
   if (dimension) used.add(dimension.canonical);
-  const nextDimensions = governedDrillDimensions.filter(item => !used.has(item));
+  const nextDimensions = configuredDimensions.filter(item => !used.has(item));
   const members = dimension ? rows.slice(0, 20).filter(row => row[dimension.field] !== undefined) : [];
   const available = Boolean(members.length && nextDimensions.length);
   controls.hidden = !available; button.hidden = !available;
@@ -2714,6 +2722,17 @@ function openChartWizard(chart) {
   document.querySelector('#save-chart-wizard').textContent = chart ? '保存修改' : '创建并发布';
   const keyInput = document.querySelector('#new-chart-key');
   keyInput.disabled = Boolean(chart);
+  const realChartSelect = document.querySelector('#new-chart-superset');
+  const dashboardId = Number(supersetHomeSnapshot?.superset_id || supersetWorkspace?.dashboard_id || 0);
+  const realCharts = (supersetHomeSnapshot?.charts || []).filter(item =>
+    item.status === 'ready' && item.configuration);
+  realChartSelect.replaceChildren(
+    new Option('暂不绑定（不能启用真实下钻）', ''),
+    ...realCharts.map(item => new Option(
+      `${item.title} · Chart ${item.superset_id} · Dataset ${item.configuration.dataset_id}`,
+      `${dashboardId}:${item.superset_id}:${item.configuration.dataset_id}`,
+    )),
+  );
   if (chart) {
     keyInput.value = chart.chart_key;
     document.querySelector('#new-chart-title').value = chart.title;
@@ -2729,10 +2748,30 @@ function openChartWizard(chart) {
     }
     modelSelect.value = chart.semantic_model;
     document.querySelector('#new-chart-dimensions').value = chart.dimensions.join(' → ');
+    if (chart.superset_dashboard_id && chart.superset_chart_id && chart.superset_dataset_id) {
+      realChartSelect.value = `${chart.superset_dashboard_id}:${chart.superset_chart_id}:${chart.superset_dataset_id}`;
+    }
   }
   chartWizard.hidden = false;
   (chart ? document.querySelector('#new-chart-title') : keyInput).focus();
 }
+
+document.querySelector('#new-chart-superset').addEventListener('change', event => {
+  if (!event.target.value) return;
+  const [, chartId] = event.target.value.split(':').map(Number);
+  const chart = (supersetHomeSnapshot?.charts || []).find(item =>
+    Number(item.superset_id) === chartId);
+  if (!chart?.configuration) return;
+  document.querySelector('#new-chart-title').value = chart.title;
+  document.querySelector('#new-chart-metric').value = chart.configuration.metric_column;
+  const type = resolveNativeChartAdapter(chart.visualization_type);
+  document.querySelector('#new-chart-type').value =
+    ['bar', 'line', 'donut', 'table'].includes(type) ? type : 'bar';
+  const input = document.querySelector('#new-chart-dimensions');
+  const current = input.value.split(/[,，→>]+/).map(item => item.trim()).filter(Boolean);
+  input.value = [chart.configuration.dimension,
+    ...current.filter(item => item !== chart.configuration.dimension)].join(' → ');
+});
 
 function closeChartWizard() {
   chartWizard.hidden = true;
@@ -3088,6 +3127,12 @@ chartWizardForm.addEventListener('submit', async event => {
       semantic_model: document.querySelector('#new-chart-model').value.trim(),
       dimensions,
     };
+    const binding = document.querySelector('#new-chart-superset').value;
+    if (binding) {
+      const [superset_dashboard_id, superset_chart_id, superset_dataset_id] =
+        binding.split(':').map(Number);
+      Object.assign(payload, {superset_dashboard_id, superset_chart_id, superset_dataset_id});
+    }
     if (!editingKey) payload.chart_key = document.querySelector('#new-chart-key').value.trim();
     await request(editingKey
       ? `/api/v1/admin/charts/${encodeURIComponent(editingKey)}`

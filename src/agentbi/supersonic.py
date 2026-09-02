@@ -648,7 +648,8 @@ class SuperSonicClient:
                 database_id = model.get("databaseId")
                 if isinstance(database_id, int):
                     model_names.setdefault(database_id, []).append(
-                        str(model.get("name") or model.get("bizName") or model.get("id"))[:128]
+                        f"{str(model.get('name') or model.get('bizName') or model.get('id'))[:96]}"
+                        f"（Model ID {model.get('id', '—')}）"
                     )
         return {
             "domains": [

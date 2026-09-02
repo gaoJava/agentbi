@@ -187,6 +187,10 @@ class DrilldownDefinition(Base):
     )
     semantic_model: Mapped[str] = mapped_column(String(128))
     dimensions_json: Mapped[str] = mapped_column(Text)
+    superset_dashboard_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    superset_chart_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    superset_dataset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    validation_status: Mapped[str] = mapped_column(String(32), default="pending")
     status: Mapped[str] = mapped_column(String(32), default="published")
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -351,6 +355,28 @@ class IdentityRepository:
         admin_password: str,
     ) -> None:
         Base.metadata.create_all(self.engine)
+        # create_all does not add columns to an existing SQLite demo database.
+        # Keep this small additive migration here so older local workspaces retain
+        # their registered charts and can bind them to real Superset assets.
+        if self.engine.dialect.name == "sqlite":
+            with self.engine.begin() as connection:
+                existing = {
+                    row[1]
+                    for row in connection.exec_driver_sql(
+                        "PRAGMA table_info(drilldown_definitions)"
+                    ).fetchall()
+                }
+                additions = {
+                    "superset_dashboard_id": "INTEGER",
+                    "superset_chart_id": "INTEGER",
+                    "superset_dataset_id": "INTEGER",
+                    "validation_status": "VARCHAR(32) DEFAULT 'pending' NOT NULL",
+                }
+                for column, ddl in additions.items():
+                    if column not in existing:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE drilldown_definitions ADD COLUMN {column} {ddl}"
+                        )
         with Session(self.engine) as db, db.begin():
             for code, name in PERMISSIONS.items():
                 if db.get(Permission, code) is None:
@@ -1345,6 +1371,10 @@ class IdentityRepository:
         visualization_type: str,
         semantic_model: str,
         dimensions: list[str],
+        superset_dashboard_id: int | None = None,
+        superset_chart_id: int | None = None,
+        superset_dataset_id: int | None = None,
+        validation_status: str = "pending",
         actor_user_id: str,
     ) -> dict[str, object]:
         normalized_key = chart_key.strip().lower()
@@ -1373,6 +1403,10 @@ class IdentityRepository:
                 chart_id=chart.id,
                 semantic_model=semantic_model.strip(),
                 dimensions_json=json.dumps(dimensions, ensure_ascii=False),
+                superset_dashboard_id=superset_dashboard_id,
+                superset_chart_id=superset_chart_id,
+                superset_dataset_id=superset_dataset_id,
+                validation_status=validation_status,
                 created_by=actor_user_id,
             )
             db.add(drilldown)
@@ -1401,6 +1435,10 @@ class IdentityRepository:
         visualization_type: str,
         semantic_model: str,
         dimensions: list[str],
+        superset_dashboard_id: int | None = None,
+        superset_chart_id: int | None = None,
+        superset_dataset_id: int | None = None,
+        validation_status: str = "pending",
     ) -> dict[str, object]:
         normalized_key = chart_key.strip().lower()
         with Session(self.engine) as db, db.begin():
@@ -1422,6 +1460,10 @@ class IdentityRepository:
             chart.updated_at = utc_now()
             drilldown.semantic_model = semantic_model.strip()
             drilldown.dimensions_json = json.dumps(dimensions, ensure_ascii=False)
+            drilldown.superset_dashboard_id = superset_dashboard_id
+            drilldown.superset_chart_id = superset_chart_id
+            drilldown.superset_dataset_id = superset_dataset_id
+            drilldown.validation_status = validation_status
             drilldown.updated_at = utc_now()
             db.flush()
             return self._chart_payload(chart, drilldown)
@@ -1471,6 +1513,10 @@ class IdentityRepository:
             "visualization_type": chart.visualization_type,
             "semantic_model": drilldown.semantic_model,
             "dimensions": json.loads(drilldown.dimensions_json),
+            "superset_dashboard_id": drilldown.superset_dashboard_id,
+            "superset_chart_id": drilldown.superset_chart_id,
+            "superset_dataset_id": drilldown.superset_dataset_id,
+            "validation_status": drilldown.validation_status,
             "status": drilldown.status,
             "is_published": chart.is_published,
             "created_at": chart.created_at.isoformat(),

@@ -38,7 +38,7 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260831.9" in shell.text
-        assert "app.js?v=20260902.4" in shell.text
+        assert "app.js?v=20260902.5" in shell.text
         assert 'id="agent-chart-route"' in shell.text
         assert 'id="agent-result-visual"' in shell.text
         assert 'id="agent-result-question"' in shell.text
@@ -671,6 +671,96 @@ def test_admin_creates_governed_chart_and_drilldown() -> None:
         )
         assert deleted.status_code == 204
         assert client.get("/api/v1/admin/charts").json()["charts"] == []
+
+
+def test_admin_binds_governed_chart_to_real_superset_query() -> None:
+    app = create_app(settings())
+
+    async def native_dashboard(dashboard_id: int):
+        assert dashboard_id == 7
+        return {"superset_id": 7, "charts": [{
+            "superset_id": 114,
+            "status": "ready",
+            "configuration": {
+                "dataset_id": 21,
+                "dimension": "platform",
+                "metric_column": "global_sales",
+            },
+        }]}
+
+    async def semantic_models():
+        return [{"id": 4, "name": "视频游戏销量"}]
+
+    app.state.superset_client.get_native_dashboard = native_dashboard
+    app.state.supersonic_client.list_semantic_models = semantic_models
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin-password"},
+        )
+        response = client.post(
+            "/api/v1/admin/charts",
+            headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
+            json={
+                "chart_key": "platform_sales",
+                "title": "平台销量对比",
+                "metric": "global_sales",
+                "dataset_name": "video_game_sales",
+                "visualization_type": "bar",
+                "semantic_model": "supersonic:4",
+                "dimensions": ["platform", "genre", "publisher"],
+                "superset_dashboard_id": 7,
+                "superset_chart_id": 114,
+                "superset_dataset_id": 21,
+            },
+        )
+        assert response.status_code == 201
+        chart = response.json()["chart"]
+        assert chart["validation_status"] == "ready"
+        assert chart["superset_chart_id"] == 114
+
+
+def test_chart_binding_rejects_mismatched_metric() -> None:
+    app = create_app(settings())
+
+    async def native_dashboard(_dashboard_id: int):
+        return {"charts": [{
+            "superset_id": 114,
+            "configuration": {
+                "dataset_id": 21,
+                "dimension": "platform",
+                "metric_column": "global_sales",
+            },
+        }]}
+
+    async def semantic_models():
+        return [{"id": 4}]
+
+    app.state.superset_client.get_native_dashboard = native_dashboard
+    app.state.supersonic_client.list_semantic_models = semantic_models
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin-password"},
+        )
+        response = client.post(
+            "/api/v1/admin/charts",
+            headers={"X-AgentBI-CSRF": login.json()["user"]["csrf_token"]},
+            json={
+                "chart_key": "wrong_metric",
+                "title": "错误指标绑定",
+                "metric": "jp_sales",
+                "dataset_name": "video_game_sales",
+                "visualization_type": "bar",
+                "semantic_model": "supersonic:4",
+                "dimensions": ["platform", "genre"],
+                "superset_dashboard_id": 7,
+                "superset_chart_id": 114,
+                "superset_dataset_id": 21,
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "核心指标与 Superset 图表指标不一致"
 
 
 def test_normal_user_cannot_create_chart() -> None:

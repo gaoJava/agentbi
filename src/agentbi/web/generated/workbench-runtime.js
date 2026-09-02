@@ -290,6 +290,10 @@ var AgentBI;
             visualization_type: visualization,
             semantic_model: requiredText(raw, 'semantic_model'), dimensions,
             status: requiredText(raw, 'status'), is_published: raw.is_published,
+            validation_status: typeof raw.validation_status === 'string' ? raw.validation_status : 'pending',
+            ...(typeof raw.superset_dashboard_id === 'number' ? { superset_dashboard_id: raw.superset_dashboard_id } : {}),
+            ...(typeof raw.superset_chart_id === 'number' ? { superset_chart_id: raw.superset_chart_id } : {}),
+            ...(typeof raw.superset_dataset_id === 'number' ? { superset_dataset_id: raw.superset_dataset_id } : {}),
             created_at: requiredText(raw, 'created_at'),
         };
     }
