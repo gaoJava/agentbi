@@ -1874,10 +1874,10 @@ function renderClarification(error) {
   if (!panel) {
     panel = document.createElement('section');
     panel.id = 'agent-clarification'; panel.className = 'agent-clarification';
-    const eyebrow = document.createElement('span'); eyebrow.textContent = '还需要确认一个口径';
+    const eyebrow = document.createElement('span'); eyebrow.textContent = '帮我确认一下';
     const question = document.createElement('strong'); question.id = 'agent-clarification-question';
     const options = document.createElement('div'); options.id = 'agent-clarification-options';
-    const hint = document.createElement('small'); hint.textContent = '点击推荐问法后将自动继续，也可以在下方修改问题。';
+    const hint = document.createElement('small'); hint.textContent = '点击一个选项直接继续，或在下方修改问题';
     panel.append(eyebrow, question, options, hint);
     document.querySelector('#agent-analysis-process').before(panel);
   }
@@ -1885,7 +1885,7 @@ function renderClarification(error) {
   const options = document.querySelector('#agent-clarification-options');
   options.replaceChildren(...error.options.map((suggestion, index) => {
     const option = document.createElement('button'); option.type = 'button';
-    option.innerHTML = `<span>${index + 1}</span><strong></strong><i>继续 →</i>`;
+    option.innerHTML = `<span>${index + 1}</span><strong></strong>`;
     option.querySelector('strong').textContent = suggestion;
     option.addEventListener('click', () => {
       document.querySelector('#agent-question').value = suggestion;
