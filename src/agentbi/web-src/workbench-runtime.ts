@@ -52,7 +52,8 @@ namespace AgentBI {
   }
   export interface SavedAnalysisReport {
     id: string; title: string; dashboard_name: string; data_scope: string;
-    summary: string; evidence_path: string; created_at: string;
+    summary: string; evidence_path: string; content: Record<string, unknown>;
+    status: 'draft' | 'published'; created_at: string; updated_at: string;
   }
   export interface AuditEvent {
     id: string; event_type: string; outcome: string; actor: string;
@@ -368,12 +369,18 @@ namespace AgentBI {
   }
 
   export function parseSavedReports(value: unknown): SavedAnalysisReport[] {
-    return objectList(value, '报告').map(raw => ({
-      id: requiredText(raw, 'id'), title: requiredText(raw, 'title'),
-      dashboard_name: requiredText(raw, 'dashboard_name'), data_scope: requiredText(raw, 'data_scope'),
-      summary: requiredText(raw, 'summary'), evidence_path: requiredText(raw, 'evidence_path'),
-      created_at: requiredText(raw, 'created_at'),
-    }));
+    return objectList(value, '报告').map(raw => {
+      const created_at = requiredText(raw, 'created_at');
+      const content = raw.content && typeof raw.content === 'object' && !Array.isArray(raw.content)
+        ? raw.content as Record<string, unknown> : {};
+      return {
+        id: requiredText(raw, 'id'), title: requiredText(raw, 'title'),
+        dashboard_name: requiredText(raw, 'dashboard_name'), data_scope: requiredText(raw, 'data_scope'),
+        summary: requiredText(raw, 'summary'), evidence_path: requiredText(raw, 'evidence_path'), content,
+        status: raw.status === 'published' ? 'published' as const : 'draft' as const,
+        created_at, updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : created_at,
+      };
+    });
   }
 
   export function parseAuditEvents(value: unknown): AuditEvent[] {

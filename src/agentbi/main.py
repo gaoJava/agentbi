@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agentbi.auth import SESSION_COOKIE, AuthenticationError, SessionIdentity, SessionManager
 from agentbi.config import Settings
-from agentbi.models import Actor, AnalysisPlan, AnalyzeRequest, AnalyzeResponse, ScreenContext
+from agentbi.models import Actor, AnalyzeRequest, AnalyzeResponse, ScreenContext
 from agentbi.orchestrator import Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
 from agentbi.semantic_draft import build_semantic_draft
@@ -120,6 +120,19 @@ class ReportCreatePayload(BaseModel):
     summary: str | None = Field(default=None, min_length=2, max_length=4000)
     evidence_path: str | None = Field(default=None, min_length=2, max_length=4000)
     query_id: str | None = Field(default=None, min_length=8, max_length=128)
+    content: dict[str, object] = Field(default_factory=dict)
+    status: Literal["draft", "published"] = "draft"
+
+
+class ReportUpdatePayload(BaseModel):
+    """Editable narrative fields; governed evidence remains immutable."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=200)
+    summary: str = Field(min_length=2, max_length=4000)
+    content: dict[str, object]
+    status: Literal["draft", "published"] = "draft"
 
 
 class UserUpdatePayload(BaseModel):
@@ -278,6 +291,8 @@ class LlmProviderPayload(BaseModel):
 class SuperSonicLlmBindingPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider_id: int | None = Field(default=None, gt=0)
+    draft_provider_id: int | None = Field(default=None, gt=0)
+    report_provider_id: int | None = Field(default=None, gt=0)
     enabled: bool = False
     mode: Literal["rule_first", "llm_enhanced"] = "rule_first"
     timeout_seconds: int = Field(default=60, ge=10, le=180)
@@ -420,9 +435,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SemanticLlmError:
             logger.warning("Stored LLM provider key cannot be decrypted; provider disabled")
 
-    async def resolve_semantic_question_with_llm(question: str):
+    async def resolve_semantic_question_with_llm(question: str, context: ScreenContext):
         binding = sessions.repository.get_supersonic_llm_binding()
         if not binding["enabled"] or binding["provider_id"] is None:
+            return None
+        # The current strict LLM plan contract contains the governed video-game
+        # field allow-list. Newly modeled datasets have their own fields and are
+        # already understood by SuperSonic's published semantic metadata. Do not
+        # let the video-specific planner rewrite a custom-model question into
+        # publisher/global_sales; delegate those models to native semantic parse.
+        try:
+            semantic_models = await supersonic.list_semantic_models()
+        except UpstreamError:
+            semantic_models = []
+        selected_model = next(
+            (item for item in semantic_models
+             if int(item.get("id") or 0) == context.semantic_model_id),
+            None,
+        )
+        if selected_model and not str(selected_model.get("biz_name") or "").startswith(
+            "video_game_sales"
+        ):
             return None
         provider = sessions.repository.get_llm_provider_config(int(binding["provider_id"]))
         if provider is None:
@@ -434,24 +467,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 api_key=semantic_llm.decrypt_key(str(provider["encrypted_api_key"])),
                 model=str(provider["model"]),
                 timeout_seconds=int(binding["timeout_seconds"]),
+                context_hint={
+                    "chart_name": context.chart_name,
+                    "dimensions": [item.model_dump() for item in context.dimensions],
+                    "metrics": [item.model_dump() for item in context.metrics],
+                    "filters": [item.model_dump(mode="json") for item in context.filters],
+                },
             )
         except SemanticLlmError as exc:
             if bool(binding["fallback_to_rules"]):
-                logger.warning("LLM analysis planning failed; requesting explicit clarification: %s", exc)
-                return AnalysisPlan(
-                    confidence=0,
-                    needs_clarification=True,
-                    clarification_question=(
-                        "我暂时无法稳定理解这个问题。请补充统计维度、指标和范围，"
-                        "例如“按游戏类型统计全球销量前5名并计算平均值”。"
-                    ),
-                    clarification_options=[
-                        "按平台统计全球销量前5名",
-                        "按游戏类型统计全球销量前5名",
-                        "按发行商统计全球销量前5名",
-                        "按游戏类型统计全球销量前5名并计算平均值",
-                    ],
-                )
+                logger.warning("LLM analysis planning failed; continuing with native semantic parser: %s", exc)
+                return None
             raise UpstreamError("LLM semantic intent service is unavailable")
 
     supersonic.configure_llm_resolver(resolve_semantic_question_with_llm)
@@ -1015,6 +1041,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data_scope=identity.data_scope,
             summary=summary,
             evidence_path=evidence_path,
+            content=payload.content,
+            status=payload.status,
             actor_user_id=identity.subject,
         )
         sessions.audit(
@@ -1025,6 +1053,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detail=str(report["id"]),
         )
         return {"report": report}
+
+    @app.patch("/api/v1/reports/{report_id}")
+    async def update_report(
+        report_id: str,
+        payload: ReportUpdatePayload,
+        request: Request,
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "report:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        enforce_csrf(request, identity)
+        try:
+            report = sessions.update_report(
+                report_id,
+                title=payload.title,
+                summary=payload.summary,
+                content=payload.content,
+                status=payload.status,
+                actor_user_id=identity.subject,
+                include_all=identity.is_admin,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="报告不存在") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权修改该报告") from exc
+        sessions.audit(
+            "report_updated", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=report_id,
+        )
+        return {"report": report}
+
+    @app.post("/api/v1/reports/{report_id}/ai-polish")
+    async def polish_report(
+        report_id: str,
+        request: Request,
+        identity: SessionIdentity = current_session,
+    ) -> dict[str, object]:
+        if "report:view" not in identity.permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+        enforce_csrf(request, identity)
+        report = next((item for item in sessions.list_reports(
+            actor_user_id=identity.subject, include_all=identity.is_admin
+        ) if item["id"] == report_id), None)
+        if report is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="报告不存在")
+        binding = sessions.repository.get_supersonic_llm_binding()
+        report_provider_id = binding.get("report_provider_id") or binding.get("provider_id")
+        provider = sessions.repository.get_llm_provider_config(report_provider_id) \
+            if binding["enabled"] and report_provider_id else None
+        if provider is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="请先启用 SuperSonic 的 LLM 增强配置")
+        try:
+            polished = await app.state.semantic_llm.polish_report_with(
+                report,
+                base_url=str(provider["base_url"]),
+                api_key=app.state.semantic_llm.decrypt_key(str(provider["encrypted_api_key"])),
+                model=str(provider["model"]),
+                timeout_seconds=int(binding["timeout_seconds"]),
+            )
+        except SemanticLlmError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        sessions.audit("report_ai_polished", "success", actor_user_id=identity.subject,
+                       source_ip=request.client.host if request.client else "", detail=report_id)
+        return {"content": {**dict(report.get("content") or {}), **polished},
+                "provider_model": provider["model"]}
 
     @app.delete("/api/v1/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_report(
@@ -1210,7 +1304,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="启用 LLM 增强必须选择模型服务")
         try:
             saved = sessions.repository.save_supersonic_llm_binding(
-                provider_id=payload.provider_id, enabled=payload.enabled, mode=payload.mode,
+                provider_id=payload.provider_id,
+                draft_provider_id=payload.draft_provider_id,
+                report_provider_id=payload.report_provider_id,
+                enabled=payload.enabled, mode=payload.mode,
                 timeout_seconds=payload.timeout_seconds,
                 fallback_to_rules=payload.fallback_to_rules, actor_user_id=identity.subject,
             )
@@ -1325,13 +1422,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 base_url=str(item["base_url"]), api_key=api_key, model=str(item["model"])
             )
         except SemanticLlmError as exc:
-            raise HTTPException(status_code=422, detail=f"切换前连接测试失败：{exc}") from exc
+            raise HTTPException(status_code=422, detail=f"启用前连接测试失败：{exc}") from exc
         sessions.repository.activate_llm_provider_config(config_id)
         semantic_llm.configure(base_url=str(item["base_url"]), api_key=api_key,
                                model=str(item["model"]), enabled=True)
         sessions.audit("llm_provider_activated", "success", actor_user_id=identity.subject,
                        source_ip=request.client.host if request.client else "", detail=f"id:{config_id}:model:{item['model']}")
-        return {"message": f"已切换至 {item['model']}", "active_id": config_id}
+        return {"message": f"{item['model']} 已通过测试并启用", "active_id": config_id}
 
     @app.delete("/api/v1/admin/llm-provider/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_llm_provider(
@@ -1435,6 +1532,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             selected_provider = sessions.repository.get_llm_provider_config(payload.provider_id)
             if selected_provider is None:
                 raise HTTPException(status_code=404, detail="所选 LLM 模型配置不存在")
+        elif payload.use_llm:
+            binding = sessions.repository.get_supersonic_llm_binding()
+            draft_provider_id = binding.get("draft_provider_id") or binding.get("provider_id")
+            if draft_provider_id:
+                selected_provider = sessions.repository.get_llm_provider_config(
+                    int(draft_provider_id)
+                )
         if payload.use_llm and (selected_provider is not None or app.state.semantic_llm.configured):
             llm_started = time.perf_counter()
             try:
@@ -1527,11 +1631,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=422, detail="语义项引用了不存在的字段")
             return items
 
-        identifiers = reviewed(payload.identifiers)
-        dimensions = reviewed(payload.dimensions)
+        identifiers = [item for item in reviewed(payload.identifiers) if item.get("field") != "year"]
+        dimensions = [item for item in reviewed(payload.dimensions) if item.get("field") != "year"]
         measures = reviewed(payload.measures)
-        field_aliases = {"year": "game_year"} if "year" in reviewed_fields else {}
-        reserved_unused = {"rank", "row_number"} - {
+        if not identifiers and "name" in reviewed_fields:
+            identifiers = [{"name": "游戏", "field": "name", "type": "primary", "synonyms": ["游戏名称"]}]
+        if "year" in reviewed_fields and not any(item.get("type") == "time" for item in dimensions):
+            dimensions.append({"name": "统计日期", "field": "__current_date__", "type": "time", "synonyms": []})
+        # Keep physical-table datasets on SuperSonic's table-query path. Using a
+        # SQL projection only to rename `year` creates a view whose parser has no
+        # field map in SuperSonic 0.8.6, so otherwise-valid queries fail at runtime.
+        field_aliases: dict[str, str] = {}
+        # `year` is a reserved token in the SQL parser bundled with SuperSonic
+        # 0.8.6. Excluding it keeps the physical-table model queryable; the
+        # regional sales demo does not rely on a time drilldown.
+        reserved_unused = {"rank", "row_number", "year"} - {
             str(item["field"]) for item in identifiers + dimensions + measures
         }
         published_fields = [
@@ -1541,9 +1655,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         def published_field(value: object) -> str:
             return field_aliases.get(str(value), str(value))
 
+        # SuperSonic qualifies table_query with the connection's configured
+        # schema. Passing an already-qualified name makes PostgreSQL receive
+        # `public.public.table`. Keep SQL-query sources qualified, but provide
+        # only the physical table name for the normal table-query path.
         source_table = ".".join(
             filter(None, [str(dataset.get("schema") or ""), str(dataset["name"])])
         )
+        physical_table = str(dataset["name"])
         safe_projection = ", ".join(
             f'"{item["name"]!s}" AS {published_field(item["name"])}'
             if str(item["name"]) in field_aliases else f'"{item["name"]!s}"'
@@ -1551,7 +1670,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         model_detail = {
             "queryType": "sql_query" if field_aliases else "table_query",
-            "tableQuery": None if field_aliases else source_table,
+            "tableQuery": None if field_aliases else physical_table,
             "sqlQuery": f"SELECT {safe_projection} FROM {source_table}" if field_aliases else None,
             "fields": [
                 {"fieldName": published_field(item["name"]),
@@ -1571,11 +1690,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "dimensions": [
                 {
                     "name": str(item.get("name") or item["field"]),
-                    "bizName": published_field(item["field"]),
+                    "bizName": ("stat_date" if item["field"] == "__current_date__" else published_field(item["field"])),
                     "type": str(item.get("type") or "categorical"),
                     "expr": (
                         "CURRENT_DATE"
-                        if str(item["field"]) == "year" and item.get("type") == "time"
+                        if str(item["field"]) in {"year", "__current_date__"} and item.get("type") == "time"
                         else published_field(item["field"])
                     ),
                     "isCreateDimension": 1,

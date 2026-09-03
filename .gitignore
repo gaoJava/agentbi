@@ -8,9 +8,24 @@ __pycache__/
 .idea/
 *.log
 .runtime/
+.tmp/
 data/*.db
 data/*.db-*
 data/.agentbi-session-secret
+config/supersonic-databases.json
+delivery/offline/.env.runtime
+delivery/*.tar
+delivery/*.tar.sha256
+delivery/*.zip
+delivery/docker/*.tar
+delivery/docker/*.tar.sha256
+delivery/offline/images/*.tar
+delivery/offline/images/*.tar.sha256
+# Database runtime snapshots are distributed with the offline delivery package,
+# not through the public source repository. Keep auditable SQL/CSV seed files.
+data/supersonic/*.mv.db
+delivery/database/snapshots/
+delivery/offline/data/
 node_modules/
 dist/
 deploy/docker-anonymous/

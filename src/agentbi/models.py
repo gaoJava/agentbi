@@ -32,6 +32,25 @@ class SelectedDatum(BaseModel):
     dimension: str | None = Field(default=None, max_length=128)
 
 
+class ChartDimension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1, max_length=128)
+
+
+class ChartMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1, max_length=128)
+    aggregation: Literal["SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT"] = "SUM"
+
+
+class ChartSort(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str = Field(min_length=1, max_length=128)
+    direction: Literal["ASC", "DESC"] = "DESC"
+
+
 class ScreenContext(BaseModel):
     """The minimum trusted context captured from the visible Superset dashboard."""
 
@@ -39,11 +58,15 @@ class ScreenContext(BaseModel):
 
     dashboard_id: str = Field(min_length=1, max_length=128)
     chart_id: str | None = Field(default=None, max_length=128)
+    chart_name: str | None = Field(default=None, max_length=256)
     dataset_id: str | None = Field(default=None, max_length=128)
     semantic_model_id: int = Field(gt=0)
     time_range: str = Field(default="", max_length=256)
     filters: list[ScreenFilter] = Field(default_factory=list, max_length=50)
     selected: SelectedDatum | None = None
+    dimensions: list[ChartDimension] = Field(default_factory=list, max_length=10)
+    metrics: list[ChartMetric] = Field(default_factory=list, max_length=10)
+    sort: ChartSort | None = None
 
 
 class Actor(BaseModel):

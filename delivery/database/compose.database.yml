@@ -1,0 +1,26 @@
+name: insightpilot-database
+
+services:
+  db:
+    image: postgres:17
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-InsightPilot_DB_2026}
+      POSTGRES_DB: superset
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - insightpilot-database:/var/lib/postgresql/data
+      - ./snapshots/postgres:/offline-seed:ro
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  insightpilot-database:
+

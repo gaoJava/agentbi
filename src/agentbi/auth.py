@@ -214,6 +214,9 @@ class SessionManager:
             include_all=include_all,
         )
 
+    def update_report(self, report_id: str, **values: object) -> dict[str, object]:
+        return self.repository.update_report(report_id, **values)
+
     def delete_report(
         self, report_id: str, *, actor_user_id: str, include_all: bool = False
     ) -> str:

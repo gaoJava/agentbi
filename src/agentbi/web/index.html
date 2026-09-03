@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>InsightPilot AgentBI</title>
+<title>InsightPilot AgentBI</title>
   <link rel="stylesheet" href="/app/assets/app.css?v=20260829.4">
-  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260902.1">
+  <link rel="stylesheet" href="/app/assets/prototype.css?v=20260902.9">
 </head>
 <body>
   <main id="login-view" class="login-layout">
@@ -44,7 +44,7 @@
 
   <main id="workbench-view" class="workbench" hidden>
     <aside class="sidebar">
-      <div class="sidebar-brand"><span class="product-logo" aria-hidden="true"><svg viewBox="0 0 32 32"><defs><linearGradient id="brand-a" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2ed0ff"/><stop offset="1" stop-color="#1768ff"/></linearGradient><linearGradient id="brand-b" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4287ff"/><stop offset="1" stop-color="#6948ee"/></linearGradient></defs><path fill="url(#brand-a)" d="M15 2 3 9v14l12-7z"/><path fill="url(#brand-b)" d="m17 2 12 7-12 7z"/><path fill="#1677f2" d="m17 18 12-7v12l-12 7z"/><path fill="#39a8ff" d="M15 18 3 25l12 5z"/></svg></span><strong>InsightPilot</strong></div>
+      <div class="sidebar-brand"><span class="product-logo" aria-hidden="true"><svg viewBox="0 0 36 36"><defs><linearGradient id="pilot-left" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#36c4ff"/><stop offset="1" stop-color="#3867ff"/></linearGradient><linearGradient id="pilot-top" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#3096ff"/><stop offset="1" stop-color="#5d55f0"/></linearGradient><linearGradient id="pilot-bottom" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#247dff"/><stop offset="1" stop-color="#7449ed"/></linearGradient></defs><path fill="url(#pilot-left)" d="M4 8.5 16.5 2v15L4 30.5z"/><path fill="url(#pilot-top)" d="M19 2.5 33 10v8L19 10.5z"/><path fill="url(#pilot-bottom)" d="M19 12.5 33 20v6.5L19 34z"/></svg></span><strong>InsightPilot</strong></div>
       <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="收起功能菜单" aria-expanded="true" title="收起功能菜单"><svg viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></svg></button>
       <nav aria-label="主导航">
         <button class="nav-item active" data-view="dashboard" data-permission="workspace:view"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></svg>分析工作台</button>
@@ -182,7 +182,7 @@
 
       <section id="semantic-models-view" class="registry-view module-view" hidden>
         <header class="registry-header"><div><h1>语义模型</h1><p>管理 AI 模型服务，并读取 SuperSonic 业务语义模型元数据</p></div><div><span id="live-model-total" class="scope-badge">0 个真实模型</span><button id="open-llm-provider" type="button">＋ 新增模型服务</button><button id="open-semantic-draft" class="primary-small" type="button">✦ 智能建模草稿</button><button class="module-refresh" data-module="semantic-models" title="重新读取模型、主题域及配置状态，不同步业务表数据" type="button">⟳ 刷新元数据</button></div></header>
-        <div class="registry-content"><section class="registry-table-card llm-provider-card"><header><div><strong>AI 模型服务</strong><small>统一维护 OpenAI-compatible 服务，可供智能建模和 SuperSonic 语义解析绑定</small></div><span id="llm-provider-count" class="registry-version">0 个配置</span></header><table><thead><tr><th>模型</th><th>Base URL</th><th>密钥</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="llm-provider-table-body"></tbody></table></section><section class="registry-table-card supersonic-llm-card"><header><div><strong>SuperSonic LLM 增强</strong><small>规则优先；复杂问题可交给 LLM_S2SQL，失败时安全回退</small></div><span id="supersonic-llm-status" class="registry-version">正在读取</span></header><form id="supersonic-llm-form" class="supersonic-llm-form"><section class="supersonic-llm-column"><div class="supersonic-llm-column-title"><strong>基础配置</strong><small>选择负责语义解析的模型与调用限制</small></div><div class="supersonic-llm-fields"><label>模型服务<select id="supersonic-llm-provider"></select></label><label>查询模式<select id="supersonic-llm-mode"><option value="rule_first">规则优先</option><option value="llm_enhanced">LLM 增强</option></select></label><label>超时（秒）<input id="supersonic-llm-timeout" type="number" min="10" max="180" value="60"></label></div></section><section class="supersonic-llm-column supersonic-llm-strategy"><div class="supersonic-llm-column-title"><strong>执行策略</strong><small>控制失败回退与 LLM_S2SQL 是否参与查询</small></div><label class="account-state"><input id="supersonic-llm-fallback" type="checkbox" checked><span>失败时回退规则解析</span></label><label class="account-state"><input id="supersonic-llm-enabled" type="checkbox"><span>启用 LLM_S2SQL</span></label><div class="supersonic-llm-actions"><small>保存后更新全局解析策略</small><button class="primary-small supersonic-save" type="submit">保存配置</button></div></section></form><p id="supersonic-llm-message" class="supersonic-runtime-note"></p></section><aside class="registry-note"><strong>安全边界</strong><p>业务数据仍由 SuperSonic 查询真实数据库；LLM 只辅助理解复杂问题和生成受校验的 S2SQL。模型密钥复用上方配置，不在 SuperSonic 页面重复保存。</p></aside><section class="registry-table-card semantic-domain-card"><header><div><strong>主题域管理</strong><small>按业务领域组织语义模型，智能建模时可直接选择</small></div><button id="create-semantic-domain" class="primary-small" type="button">＋ 新增主题域</button></header><table><thead><tr><th>ID</th><th>主题域名称</th><th>业务标识</th><th>说明</th><th>使用仪表盘</th><th>关联模型</th><th>操作</th></tr></thead><tbody id="semantic-domain-table-body"></tbody></table></section><section class="registry-table-card"><header><div><strong>SuperSonic 业务语义模型</strong><small>来自上游实时接口；名称重复时请结合 Model ID、主题域和仪表盘识别</small></div></header><table><thead><tr><th>Model ID</th><th>模型名称</th><th>主题域</th><th>使用仪表盘</th><th>数据连接</th><th>业务标识</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
+        <div class="registry-content"><section class="registry-table-card llm-provider-card"><header><div><strong>AI 模型服务</strong><small>统一维护 OpenAI-compatible 服务，可供智能建模和 SuperSonic 语义解析绑定</small></div><span id="llm-provider-count" class="registry-version">0 个配置</span></header><table><thead><tr><th>模型</th><th>Base URL</th><th>密钥</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="llm-provider-table-body"></tbody></table></section><section class="registry-table-card supersonic-llm-card"><header><div><strong>SuperSonic LLM 增强</strong><small>规则优先；复杂问题可交给 LLM_S2SQL，失败时安全回退</small></div><span id="supersonic-llm-status" class="registry-version">正在读取</span></header><form id="supersonic-llm-form" class="supersonic-llm-form"><section class="supersonic-llm-column"><div class="supersonic-llm-column-title"><strong>基础配置</strong><small>选择负责语义解析的模型与调用限制</small></div><div class="supersonic-llm-fields"><label>模型服务<select id="supersonic-llm-provider"></select></label><label>查询模式<select id="supersonic-llm-mode"><option value="rule_first">规则优先</option><option value="llm_enhanced">LLM 增强</option></select></label><label>超时（秒）<input id="supersonic-llm-timeout" type="number" min="10" max="180" value="60"></label></div></section><section class="supersonic-llm-column supersonic-llm-strategy"><div class="supersonic-llm-column-title"><strong>执行策略</strong><small>控制失败回退与 LLM_S2SQL 是否参与查询</small></div><label class="account-state"><input id="supersonic-llm-fallback" type="checkbox" checked><span>失败时回退规则解析</span></label><label class="account-state"><input id="supersonic-llm-enabled" type="checkbox"><span>启用 LLM_S2SQL</span></label><div class="supersonic-llm-actions"><small>保存后更新全局解析策略</small><button class="primary-small supersonic-save" type="submit">保存配置</button></div></section></form><p id="supersonic-llm-message" class="supersonic-runtime-note"></p></section><aside class="registry-note"><strong>安全边界</strong><p>业务数据仍由 SuperSonic 查询真实数据库；LLM 只辅助理解复杂问题和生成受校验的 S2SQL。模型密钥复用上方配置，不在 SuperSonic 页面重复保存。</p></aside><section class="registry-table-card semantic-domain-card"><header><div><strong>主题域管理</strong><small>按业务领域组织语义模型，智能建模时可直接选择</small></div><button id="create-semantic-domain" class="primary-small" type="button">＋ 新增主题域</button></header><table><thead><tr><th>ID</th><th>主题域名称</th><th>业务标识</th><th>说明</th><th>使用仪表盘</th><th>关联模型</th><th>操作</th></tr></thead><tbody id="semantic-domain-table-body"></tbody></table></section><section class="registry-table-card"><header><div><strong>SuperSonic 业务语义模型</strong><small>来自上游实时接口；名称重复时请结合语义视图 ID、主题域和仪表盘识别</small></div></header><table><thead><tr><th>语义视图 ID</th><th>模型名称</th><th>主题域</th><th>使用仪表盘</th><th>数据连接</th><th>业务标识</th><th>状态</th></tr></thead><tbody id="semantic-model-table-body"></tbody></table></section></div>
       </section>
 
       <section id="data-sources-view" class="registry-view module-view" hidden>
@@ -197,7 +197,7 @@
           </div>
           <div id="supersonic-source-panel" class="source-system-panel" hidden>
           <aside class="registry-note"><strong>SuperSonic 语义连接</strong><p>连接配置独立保存在 SuperSonic，用于语义模型执行；应与 Superset 数据库指向同一业务数据源。</p></aside>
-          <section class="registry-table-card sonic-source-card"><header><div><strong>SuperSonic 同源连接</strong><small>与 Superset 连接按名称和数据库类型匹配，凭据由两个系统分别保存</small></div><div class="card-header-actions"><span id="sonic-database-count" class="registry-version">0 个连接</span><button id="open-sonic-database" class="card-create-button" type="button"><span>＋</span>新增同源连接</button></div></header><table><thead><tr><th>连接别名</th><th>数据库类型</th><th>匹配的 Superset 连接</th><th>匹配状态</th><th>关联模型</th><th>SuperSonic ID</th><th>操作</th></tr></thead><tbody id="sonic-database-table-body"></tbody></table></section>
+          <section class="registry-table-card sonic-source-card"><header><div><strong>SuperSonic 同源连接</strong><small>与 Superset 连接按名称和数据库类型匹配；关联项与“业务语义模型”页面保持一致</small></div><div class="card-header-actions"><span id="sonic-database-count" class="registry-version">0 个连接</span><button id="open-sonic-database" class="card-create-button" type="button"><span>＋</span>新增同源连接</button></div></header><table><thead><tr><th>连接别名</th><th>数据库类型</th><th>匹配的 Superset 连接</th><th>匹配状态</th><th>关联业务语义模型</th><th>SuperSonic ID</th><th>操作</th></tr></thead><tbody id="sonic-database-table-body"></tbody></table></section>
           </div>
         </div>
       </section>
@@ -293,6 +293,26 @@
       <header><div><span>不可恢复操作</span><h2 id="delete-report-title">确认删除分析报告</h2></div><button id="close-delete-report" type="button" aria-label="关闭">×</button></header>
       <div><p>将永久删除报告及其已保存的证据路径：</p><strong id="delete-report-name"></strong><small>仅报告创建者或系统管理员可执行此操作。</small></div>
       <footer><button id="cancel-delete-report" type="button">取消</button><button id="confirm-delete-report" class="danger-button" type="button">确认删除</button></footer>
+    </section>
+  </div>
+  <div id="report-editor" class="modal-backdrop" hidden>
+    <section class="report-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="report-editor-title">
+      <header><div><span>受治理分析报告</span><h2 id="report-editor-title">查看分析报告</h2><small id="report-editor-subtitle"></small></div><button id="close-report-editor" type="button" aria-label="关闭">×</button></header>
+      <form id="report-editor-form">
+        <div class="report-editor-toolbar">
+          <label>状态<select id="report-status"><option value="draft">草稿</option><option value="published">已发布</option></select></label>
+          <div><button id="download-report-word" type="button">下载 Word</button><button id="print-report-pdf" type="button">打印 / PDF</button></div>
+        </div>
+        <section class="report-ai-assist"><div><span>✦</span><p><strong>AI 辅助完善报告</strong><small>基于真实查询证据补全摘要、关键发现与经营建议，不允许创造或修改数字。</small></p></div><button id="polish-report-ai" type="button">AI 生成内容</button></section>
+        <label>报告标题<input id="report-edit-title" required minlength="2" maxlength="200"></label>
+        <label>执行摘要<textarea id="report-edit-summary" required minlength="2" maxlength="4000"></textarea></label>
+        <label>关键发现<textarea id="report-edit-findings" maxlength="12000" placeholder="每行一条关键发现"></textarea></label>
+        <label>经营建议<textarea id="report-edit-actions" maxlength="12000" placeholder="每行一条建议动作"></textarea></label>
+        <label>限制与说明<textarea id="report-edit-caveats" maxlength="4000"></textarea></label>
+        <section class="report-evidence-lock"><strong>数据证据（不可编辑）</strong><p id="report-edit-evidence"></p><small>所有下载版本都会携带查询路径，确保文字调整不改变数据事实。</small></section>
+        <div id="report-editor-error" class="form-error" hidden></div>
+        <footer><button id="cancel-report-editor" type="button">取消</button><button class="primary-button" type="submit">保存修改</button></footer>
+      </form>
     </section>
   </div>
   <div id="asset-editor" class="modal-backdrop" hidden>
@@ -416,7 +436,7 @@
     </section>
   </div>
   <div id="management-feedback" class="management-feedback" role="status" hidden></div>
-  <script src="/app/assets/generated/workbench-runtime.js?v=20260831.9" defer></script>
+  <script src="/app/assets/generated/workbench-runtime.js?v=20260902.10" defer></script>
   <div id="sonic-database-editor" class="modal-backdrop" hidden>
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="sonic-database-title"><header><div><span>一次性安全转交</span><h2 id="sonic-database-title">配置 SuperSonic 同源连接</h2></div><button id="close-sonic-database" type="button">×</button></header><form id="sonic-database-form"><div class="wizard-grid"><label>连接名称<input id="sonic-db-name" required></label><label>数据库类型<select id="sonic-db-engine"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="doris">Doris</option></select></label><label>主机<input id="sonic-db-host" required></label><label>端口<input id="sonic-db-port" type="number" value="5432" min="1" max="65535" required></label><label>数据库<input id="sonic-db-database" required></label><label>用户名<input id="sonic-db-username" autocomplete="username" required></label><label class="wizard-full">密码<small>仅用于本次测试并转交 SuperSonic，AgentBI 不保存</small><input id="sonic-db-password" type="password" autocomplete="new-password" required></label></div><div id="sonic-database-error" class="form-error" hidden></div><footer><button id="cancel-sonic-database" type="button">取消</button><button class="primary-button" type="submit">测试并保存</button></footer></form></section>
   </div>
@@ -429,6 +449,6 @@
     <section class="chart-wizard compact-editor" role="dialog" aria-modal="true" aria-labelledby="llm-provider-title"><header><div><span>管理员安全配置</span><h2 id="llm-provider-title">新增 AI 模型服务</h2></div><button id="close-llm-provider" type="button">×</button></header><form id="llm-provider-form"><div class="wizard-grid"><label class="wizard-full">OpenAI-compatible Base URL<input id="llm-base-url" type="url" placeholder="https://provider.example/v1" required></label><label>模型名称<input id="llm-model-name" placeholder="glm-5.3" required></label><label>API Key<small id="llm-key-hint">仅服务端加密保存</small><input id="llm-api-key" type="password" autocomplete="new-password" placeholder="新建配置必须填写"></label><label class="account-state"><input id="llm-enabled" type="checkbox"><span>保存后设为当前生效模型（将先测试连接）</span></label></div><aside class="draft-source-note">只发送 Dataset 名称和字段元数据；不发送数据行、SQL、数据库凭据或用户问题。</aside><div id="llm-provider-error" class="form-error" hidden></div><footer><button id="cancel-llm-provider" type="button">取消</button><button class="primary-button" type="submit">保存模型服务</button></footer></form></section>
   </div>
 
-  <script src="/app/assets/app.js?v=20260902.5" defer></script>
+  <script src="/app/assets/app.js?v=20260902.17" defer></script>
 </body>
 </html>

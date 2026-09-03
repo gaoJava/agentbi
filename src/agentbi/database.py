@@ -208,9 +208,14 @@ class AnalysisReport(Base):
     data_scope: Mapped[str] = mapped_column(String(256))
     summary: Mapped[str] = mapped_column(Text)
     evidence_path: Mapped[str] = mapped_column(Text)
+    content_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(32), default="draft")
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
 
 
@@ -265,6 +270,8 @@ class SuperSonicLlmBinding(Base):
     __tablename__ = "supersonic_llm_bindings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     provider_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("llm_provider_configs.id"))
+    draft_provider_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("llm_provider_configs.id"))
+    report_provider_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("llm_provider_configs.id"))
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mode: Mapped[str] = mapped_column(String(32), default="rule_first")
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=60)
@@ -377,6 +384,36 @@ class IdentityRepository:
                         connection.exec_driver_sql(
                             f"ALTER TABLE drilldown_definitions ADD COLUMN {column} {ddl}"
                         )
+                report_columns = {
+                    row[1]
+                    for row in connection.exec_driver_sql(
+                        "PRAGMA table_info(analysis_reports)"
+                    ).fetchall()
+                }
+                report_additions = {
+                    "content_json": "TEXT DEFAULT '{}' NOT NULL",
+                    "status": "VARCHAR(32) DEFAULT 'draft' NOT NULL",
+                    "updated_at": "DATETIME",
+                }
+                for column, ddl in report_additions.items():
+                    if column not in report_columns:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE analysis_reports ADD COLUMN {column} {ddl}"
+                        )
+                connection.exec_driver_sql(
+                    "UPDATE analysis_reports SET updated_at = created_at WHERE updated_at IS NULL"
+                )
+                llm_binding_columns = {
+                    row[1]
+                    for row in connection.exec_driver_sql(
+                        "PRAGMA table_info(supersonic_llm_bindings)"
+                    ).fetchall()
+                }
+                for column in ("draft_provider_id", "report_provider_id"):
+                    if column not in llm_binding_columns:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE supersonic_llm_bindings ADD COLUMN {column} INTEGER"
+                        )
         with Session(self.engine) as db, db.begin():
             for code, name in PERMISSIONS.items():
                 if db.get(Permission, code) is None:
@@ -461,9 +498,6 @@ class IdentityRepository:
                 next_id = int(db.scalar(select(func.max(LlmProviderConfig.id))) or 0) + 1
                 item = LlmProviderConfig(id=next_id)
                 db.add(item)
-            if enabled:
-                for other in db.scalars(select(LlmProviderConfig)).all():
-                    other.enabled = False
             item.base_url = base_url
             item.model_name = model
             item.encrypted_api_key = encrypted_api_key
@@ -478,8 +512,7 @@ class IdentityRepository:
             item = db.get(LlmProviderConfig, config_id)
             if item is None:
                 raise KeyError("LLM provider not found")
-            for other in db.scalars(select(LlmProviderConfig)).all():
-                other.enabled = other.id == config_id
+            item.enabled = True
             item.updated_at = utc_now()
             db.flush()
             return self._llm_provider_dict(item)
@@ -489,33 +522,45 @@ class IdentityRepository:
             item = db.get(LlmProviderConfig, config_id)
             if item is None:
                 raise KeyError("LLM provider not found")
-            if item.enabled:
-                raise PermissionError("active LLM provider cannot be deleted")
+            binding = db.get(SuperSonicLlmBinding, 1)
+            bound_ids = ({binding.provider_id, binding.draft_provider_id, binding.report_provider_id}
+                         if binding else set())
+            if item.id in bound_ids:
+                raise PermissionError("bound LLM provider cannot be deleted")
             db.delete(item)
 
     def get_supersonic_llm_binding(self) -> dict[str, object]:
         with Session(self.engine) as db:
             item = db.get(SuperSonicLlmBinding, 1)
             if item is None:
-                return {"provider_id": None, "enabled": False, "mode": "rule_first",
+                return {"provider_id": None, "intent_provider_id": None,
+                        "draft_provider_id": None, "report_provider_id": None,
+                        "enabled": False, "mode": "rule_first",
                         "timeout_seconds": 60, "fallback_to_rules": True, "updated_at": None}
-            return {"provider_id": item.provider_id, "enabled": item.enabled, "mode": item.mode,
+            return {"provider_id": item.provider_id, "intent_provider_id": item.provider_id,
+                    "draft_provider_id": item.draft_provider_id or item.provider_id,
+                    "report_provider_id": item.report_provider_id or item.provider_id,
+                    "enabled": item.enabled, "mode": item.mode,
                     "timeout_seconds": item.timeout_seconds,
                     "fallback_to_rules": item.fallback_to_rules,
                     "updated_at": item.updated_at.isoformat()}
 
     def save_supersonic_llm_binding(
-        self, *, provider_id: int | None, enabled: bool, mode: str,
+        self, *, provider_id: int | None, draft_provider_id: int | None = None,
+        report_provider_id: int | None = None, enabled: bool, mode: str,
         timeout_seconds: int, fallback_to_rules: bool, actor_user_id: str,
     ) -> dict[str, object]:
         with Session(self.engine) as db, db.begin():
-            if provider_id is not None and db.get(LlmProviderConfig, provider_id) is None:
-                raise KeyError("LLM provider not found")
+            for selected_id in (provider_id, draft_provider_id, report_provider_id):
+                if selected_id is not None and db.get(LlmProviderConfig, selected_id) is None:
+                    raise KeyError("LLM provider not found")
             item = db.get(SuperSonicLlmBinding, 1)
             if item is None:
                 item = SuperSonicLlmBinding(id=1)
                 db.add(item)
             item.provider_id = provider_id
+            item.draft_provider_id = draft_provider_id or provider_id
+            item.report_provider_id = report_provider_id or provider_id
             item.enabled = enabled
             item.mode = mode
             item.timeout_seconds = timeout_seconds
@@ -1155,6 +1200,8 @@ class IdentityRepository:
         data_scope: str,
         summary: str,
         evidence_path: str,
+        content: dict[str, object] | None = None,
+        status: str = "draft",
         actor_user_id: str,
     ) -> dict[str, object]:
         with Session(self.engine) as db, db.begin():
@@ -1165,6 +1212,8 @@ class IdentityRepository:
                 data_scope=data_scope.strip(),
                 summary=summary.strip(),
                 evidence_path=evidence_path.strip(),
+                content_json=json.dumps(content or {}, ensure_ascii=False),
+                status=status,
                 created_by=actor_user_id,
             )
             db.add(report)
@@ -1180,6 +1229,31 @@ class IdentityRepository:
                 statement = statement.where(AnalysisReport.created_by == actor_user_id)
             reports = db.scalars(statement).all()
             return [self._report_payload(report) for report in reports]
+
+    def update_report(
+        self,
+        report_id: str,
+        *,
+        title: str,
+        summary: str,
+        content: dict[str, object],
+        status: str,
+        actor_user_id: str,
+        include_all: bool = False,
+    ) -> dict[str, object]:
+        with Session(self.engine) as db, db.begin():
+            report = db.get(AnalysisReport, report_id)
+            if report is None:
+                raise KeyError("report not found")
+            if not include_all and report.created_by != actor_user_id:
+                raise PermissionError("report does not belong to actor")
+            report.title = title.strip()
+            report.summary = summary.strip()
+            report.content_json = json.dumps(content, ensure_ascii=False)
+            report.status = status
+            report.updated_at = utc_now()
+            db.flush()
+            return self._report_payload(report)
 
     def delete_report(
         self,
@@ -1207,7 +1281,10 @@ class IdentityRepository:
             "data_scope": report.data_scope,
             "summary": report.summary,
             "evidence_path": report.evidence_path,
+            "content": json.loads(report.content_json or "{}"),
+            "status": report.status,
             "created_at": report.created_at.isoformat(),
+            "updated_at": report.updated_at.isoformat(),
         }
 
     def sync_superset_dashboards(

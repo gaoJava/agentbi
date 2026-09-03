@@ -16,7 +16,7 @@ import httpx
 from agentbi.config import Settings
 from agentbi.conversation import ConversationContextManager
 from agentbi.database import IdentityRepository
-from agentbi.models import AnalysisPlan, AnalyzeRequest
+from agentbi.models import AnalysisPlan, AnalyzeRequest, ScreenContext
 
 
 class UpstreamError(RuntimeError):
@@ -64,7 +64,7 @@ class SuperSonicClient:
         # by WEB_PAGE plugins. AgentBI therefore owns tenant-bound conversation history
         # and serializes access to that upstream stateless context.
         self._query_lock = asyncio.Lock()
-        self._llm_resolver: Callable[[str], Awaitable[AnalysisPlan | str | None]] | None = None
+        self._llm_resolver: Callable[[str, ScreenContext], Awaitable[AnalysisPlan | str | None]] | None = None
         if repository is None:
             repository = IdentityRepository("sqlite:///:memory:")
             repository.initialize(seed_demo_accounts=False, user_password="", admin_password="")
@@ -74,7 +74,7 @@ class SuperSonicClient:
         await self._client.aclose()
 
     def configure_llm_resolver(
-        self, resolver: Callable[[str], Awaitable[AnalysisPlan | str | None]] | None
+        self, resolver: Callable[[str, ScreenContext], Awaitable[AnalysisPlan | str | None]] | None
     ) -> None:
         self._llm_resolver = resolver
 
@@ -85,11 +85,14 @@ class SuperSonicClient:
         resolved_question = request.question
         resolution_mode = "SuperSonic 规则解析"
         normalized: AnalysisPlan | str | None = None
-        calculation = self._calculation_query(resolved_question)
+        calculation = self._contextual_calculation_query(
+            resolved_question, request.context
+        )
         ranked_query = self._ranking_query(resolved_question)
-        structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(request.question)
+        contextual_query = self._chart_context_query(resolved_question, request.context)
+        structured = self._calculation_structure(calculation) or ranked_query or contextual_query or self._grouped_metric_query(request.question)
         if not structured and self._llm_resolver is not None:
-            normalized = await self._llm_resolver(request.question)
+            normalized = await self._llm_resolver(request.question, request.context)
             if isinstance(normalized, AnalysisPlan):
                 if normalized.needs_clarification:
                     raise SemanticResolutionError(
@@ -101,7 +104,9 @@ class SuperSonicClient:
                 resolved_question = self._describe_plan(normalized)
             elif isinstance(normalized, str) and normalized:
                 resolved_question = normalized
-                calculation = self._calculation_query(resolved_question)
+                calculation = self._contextual_calculation_query(
+                    resolved_question, request.context
+                )
                 ranked_query = self._ranking_query(resolved_question)
                 structured = self._calculation_structure(calculation) or ranked_query or self._grouped_metric_query(resolved_question)
             if normalized:
@@ -110,7 +115,8 @@ class SuperSonicClient:
             dimension, metric, limit = structured
             plan_bottom = (isinstance(normalized, AnalysisPlan) and normalized.ranking is not None
                            and normalized.ranking.direction == "bottom")
-            sort_direction = "ASC" if (calculation and calculation.get("sort") == "asc") or plan_bottom else "DESC"
+            phrase_bottom = self._ranking_direction(request.question) == "ASC"
+            sort_direction = "ASC" if (calculation and calculation.get("sort") == "asc") or plan_bottom or phrase_bottom else "DESC"
             model_biz_name = await self._view_model_biz_name(
                 request.context.semantic_model_id
             )
@@ -142,14 +148,26 @@ class SuperSonicClient:
             if calculation_result:
                 rows = [{dimension_label: row.get(dimension), metric_label: row.get(metric)}
                         for row in calculation_result["rows"]]
+            rank_side = "后" if sort_direction == "ASC" else "前"
+            ranking_response = f"已按{dimension_label}汇总{metric_label}，返回{rank_side} {limit} 名。"
+            if limit == 1 and raw_rows:
+                leader = raw_rows[0].get(dimension)
+                leader_value = raw_rows[0].get(metric)
+                if leader is not None and leader_value is not None:
+                    try:
+                        formatted_value = self._format_decimal(Decimal(str(leader_value)))
+                    except (ArithmeticError, ValueError):
+                        formatted_value = str(leader_value)
+                    extreme = "最低" if sort_direction == "ASC" else "最高"
+                    ranking_response = f"{leader} 的{metric_label}{extreme}，为 {formatted_value}。"
             result = {
                 "queryId": str(uuid.uuid4()),
                 "queryResults": rows,
                 "querySql": data.get("sql"),
                 "queryTimeCost": round((time.perf_counter() - started) * 1000),
                 "response": calculation_result["response"] if calculation_result else (
-                    f"已按{dimension_label}汇总{metric_label}，返回前 {limit} 名。"
-                    if ranked_query or (isinstance(normalized, AnalysisPlan) and normalized.operation == "rank")
+                    ranking_response
+                    if ranked_query or contextual_query or (isinstance(normalized, AnalysisPlan) and normalized.operation == "rank")
                     else f"已按{dimension_label}汇总{metric_label}。"
                 ),
                 "effectiveTimeRange": "全部数据（本问题未应用时间筛选）",
@@ -311,7 +329,7 @@ class SuperSonicClient:
     def _chinese_number(value: str) -> int | None:
         if value.isdigit():
             return int(value)
-        digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+        digits = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6,
                   "七": 7, "八": 8, "九": 9, "十": 10}
         if value in digits:
             return digits[value]
@@ -330,18 +348,26 @@ class SuperSonicClient:
         if metric is None and ("销量" in normalized or "销售" in normalized):
             metric = "global_sales"
         operation = ("average" if any(word in normalized for word in ("平均", "均值"))
-                     else "sum" if any(word in normalized for word in ("合计", "总和", "加总"))
+                     else "sum" if any(word in normalized for word in ("合计", "总和", "加总", "一共"))
                      else None)
-        range_match = re.search(r"(?:排名)?(前|后|最低)([一二三四五六七八九十\d]{1,3})(?:名)?", normalized)
+        range_match = re.search(r"(?:排名)?(前|后|最低|最后)([一二两三四五六七八九十\d]{1,3})(?:名)?", normalized)
         if dimension and metric and operation and range_match:
             limit = cls._chinese_number(range_match.group(2))
             if limit:
-                bottom_scope = range_match.group(1) in {"后", "最低"}
+                bottom_scope = range_match.group(1) in {"后", "最低", "最后"}
                 return {"operation": operation, "dimension": dimension, "metric": metric,
                         "limit": min(limit, 100),
                         **({"sort": "asc", "scope": "Bottom"} if bottom_scope else {})}
-        rank_pair = re.search(r"第([一二三四五六七八九十\d]{1,3})名?(?:和|与|、)第?"
-                              r"([一二三四五六七八九十\d]{1,3})名?.*?(?:差|相差)", normalized)
+        rank_ratio = re.search(r"第([一二两三四五六七八九十\d]{1,3})名?(?:是|为)第?"
+                               r"([一二两三四五六七八九十\d]{1,3})名?(?:的)?(?:多少|几)倍", normalized)
+        if dimension and metric and rank_ratio:
+            ranks = [cls._chinese_number(rank_ratio.group(index)) for index in (1, 2)]
+            if all(ranks):
+                return {"operation": "rank_ratio", "dimension": dimension, "metric": metric,
+                        "limit": min(max(ranks), 100), "ranks": ranks}
+        rank_pair = re.search(r"第([一二两三四五六七八九十\d]{1,3})名?(?:和|与|、|比)第?"
+                              r"([一二两三四五六七八九十\d]{1,3})名?.*?"
+                              r"(?:差|相差|高|低|多|少|百分之)", normalized)
         if dimension and metric and rank_pair:
             ranks = [cls._chinese_number(rank_pair.group(index)) for index in (1, 2)]
             if all(ranks):
@@ -408,6 +434,61 @@ class SuperSonicClient:
                     "limit": 100, "members": [share.group(1).strip()]}
         return None
 
+    @classmethod
+    def _contextual_calculation_query(
+        cls, question: str, context: ScreenContext
+    ) -> dict[str, Any] | None:
+        """Inherit omitted calculation fields from the pinned governed chart.
+
+        A question such as “第一名比第二名高多少” is unambiguous after the
+        user pins a chart.  The chart configuration, rather than an LLM guess,
+        supplies its dimension and metric.  Explicit terms in the question are
+        still parsed first and therefore take precedence.
+        """
+
+        calculation = cls._calculation_query(question)
+        if calculation:
+            return calculation
+        allowed_dimensions = {"publisher", "platform", "genre"}
+        allowed_metrics = {
+            "global_sales", "na_sales", "eu_sales", "jp_sales", "other_sales"
+        }
+        dimensions = [
+            item.field for item in context.dimensions
+            if item.field in allowed_dimensions
+        ]
+        metrics = [
+            item.field for item in context.metrics if item.field in allowed_metrics
+        ]
+        if len(dimensions) != 1 or len(metrics) != 1:
+            return None
+        inherited_question = (
+            f"{cls._field_label(dimensions[0])} {cls._field_label(metrics[0])} {question}"
+        )
+        inherited = cls._calculation_query(inherited_question)
+        if inherited:
+            return inherited
+
+        # Named members may also omit both the dimension and the metric once a
+        # chart is pinned. Parse the member names without prepending labels so
+        # those labels cannot accidentally become part of a member value.
+        normalized = re.sub(r"[，。！？?\s]", "", question)
+        difference = re.fullmatch(r"(.+?)(?:比)(.+?)(?:高|低|多|少)(?:了)?多少", normalized)
+        if difference:
+            return {"operation": "difference", "dimension": dimensions[0],
+                    "metric": metrics[0], "limit": 100,
+                    "members": [difference.group(1), difference.group(2)]}
+        ratio = re.fullmatch(r"(.+?)(?:是|为)(.+?)(?:的)?(?:多少|几)倍", normalized)
+        if ratio:
+            return {"operation": "ratio", "dimension": dimensions[0],
+                    "metric": metrics[0], "limit": 100,
+                    "members": [ratio.group(1), ratio.group(2)]}
+        share = re.fullmatch(r"(.+?)(?:占)(?:全部|总体|总量|合计)(?:的)?(?:比例|占比)?(?:是多少|多少)", normalized)
+        if share:
+            return {"operation": "share", "dimension": dimensions[0],
+                    "metric": metrics[0], "limit": 100, "members": [share.group(1)]}
+        return None
+
     @staticmethod
     def _calculation_structure(calculation: dict[str, Any] | None) -> tuple[str, str, int] | None:
         return ((calculation["dimension"], calculation["metric"], calculation["limit"])
@@ -450,7 +531,7 @@ class SuperSonicClient:
                     "response": f"第 {rank} 名{cls._field_label(dimension)}是 {member}，{cls._field_label(metric)}为 {cls._format_decimal(value)}。",
                     "detail": f"运算：排名取值\n排序：{cls._field_label(metric)}从高到低\n结果：第 {rank} 名 {member} = {cls._format_decimal(value)}",
                     "duration_ms": round((time.perf_counter() - started) * 1000)}
-        if calculation["operation"] == "rank_difference":
+        if calculation["operation"] in {"rank_difference", "rank_ratio"}:
             ranks = calculation["ranks"]
             if len(values) < max(ranks):
                 raise SemanticResolutionError("真实查询结果不足以完成排名差值计算")
@@ -478,7 +559,7 @@ class SuperSonicClient:
                 found.append(match)
             members = calculation["members"]
         left, right = found[0][1], found[1][1]
-        if calculation["operation"] == "ratio":
+        if calculation["operation"] in {"ratio", "rank_ratio"}:
             ratio_value = left / right if right else None
             if ratio_value is None:
                 raise SemanticResolutionError("作为除数的指标值为 0，无法计算倍数")
@@ -516,12 +597,81 @@ class SuperSonicClient:
                    "其他地区销量": "other_sales"}
         if match:
             return dimensions[match.group(1)], metrics[match.group(2)], min(int(match.group(3)), 100)
+
+        # Common business-language superlatives should not require an LLM round trip.
+        # Resolve the dimension and regional metric independently so both
+        # “北美发行商卖得最好的是谁” and “哪个发行商北美销量最高” work.
+        normalized = re.sub(r"[\s，。！？?、]", "", question)
+        dimension_aliases = (
+            (r"游戏类型|游戏品类|品类|类型", "genre"),
+            (r"游戏平台|平台", "platform"),
+            (r"发行商|出版商|厂商", "publisher"),
+        )
+        metric_aliases = (
+            (r"其他地区|其它地区", "other_sales"),
+            (r"北美", "na_sales"),
+            (r"欧洲", "eu_sales"),
+            (r"日本", "jp_sales"),
+            (r"全球|总销量|总销售", "global_sales"),
+        )
+        dimension = next(
+            (field for pattern, field in dimension_aliases if re.search(pattern, normalized)), None
+        )
+        metric = next(
+            (field for pattern, field in metric_aliases if re.search(pattern, normalized)),
+            "global_sales",
+        )
+        has_sales_cue = bool(re.search(r"销量|销售|卖得|卖的|畅销", normalized))
+        has_region_cue = bool(re.search(r"北美|欧洲|日本|全球|其他地区|其它地区", normalized))
+        has_extreme_cue = bool(re.search(
+            r"最好|最高|最多|最畅销|第一|冠军|最差|最低|最少|最不畅销|倒数第一|垫底|末位",
+            normalized,
+        ))
+        if dimension and (has_sales_cue or has_region_cue) and has_extreme_cue:
+            return dimension, metric, 1
+
         shorthand = re.search(
             r"(发行商|平台|游戏类型|类型)\s*(?:销售|销量)?\s*(?:排名|排行)", question
         )
         if shorthand:
             return dimensions[shorthand.group(1)], "global_sales", 10
         return None
+
+    @classmethod
+    def _chart_context_query(
+        cls, question: str, context: ScreenContext
+    ) -> tuple[str, str, int] | None:
+        """Resolve omitted BI terms from the selected chart's trusted configuration."""
+
+        allowed_dimensions = {"publisher", "platform", "genre"}
+        allowed_metrics = {"global_sales", "na_sales", "eu_sales", "jp_sales", "other_sales"}
+        dimensions = [item.field for item in context.dimensions if item.field in allowed_dimensions]
+        metrics = [item.field for item in context.metrics if item.field in allowed_metrics]
+        if not dimensions or not metrics:
+            return None
+        normalized = re.sub(r"[\s，。！？?、]", "", question)
+        ranking_cue = re.search(
+            r"最好|最高|最多|最畅销|第一|冠军|头部|领先|最差|最低|最少|最不畅销|倒数|垫底|末位|排名|排行|前\d+|后\d+|Top\d+|Bottom\d+",
+            normalized,
+            re.IGNORECASE,
+        )
+        chart_reference = re.search(r"谁|哪家|哪个|哪一个|这张图|该图|最好|最高|最多|领先|最差|最低|最少|垫底|末位", normalized)
+        if not ranking_cue or not chart_reference:
+            return None
+        limit_match = re.search(r"(?:前|后|倒数|Top|Bottom)(\d{1,3})", normalized, re.IGNORECASE)
+        limit = min(int(limit_match.group(1)), 100) if limit_match else 1
+        return dimensions[0], metrics[0], limit
+
+    @staticmethod
+    def _ranking_direction(question: str) -> str:
+        """Map natural top/bottom language to an allow-listed SQL sort direction."""
+
+        normalized = re.sub(r"[\s，。！？?、]", "", question)
+        return "ASC" if re.search(
+            r"最差|最低|最少|最不畅销|卖得最差|卖的最差|倒数|垫底|末位|后\d+|Bottom\d+",
+            normalized,
+            re.IGNORECASE,
+        ) else "DESC"
 
     @classmethod
     def _grouped_metric_query(cls, question: str) -> tuple[str, str, int] | None:
@@ -732,7 +882,21 @@ class SuperSonicClient:
     async def publish_semantic_model(self, payload: dict[str, Any]) -> None:
         """Publish an administrator-reviewed model through SuperSonic's governed API."""
 
-        await self._request_data("POST", "/api/semantic/model/createModel", payload=payload)
+        models = await self._request_data(
+            "GET", f"/api/semantic/model/getModelList/{int(payload['domainId'])}"
+        )
+        existing_model = next((item for item in (models or []) if isinstance(item, dict)
+                               and item.get("bizName") == payload.get("bizName")), None)
+        if isinstance(existing_model, dict) and isinstance(existing_model.get("id"), int):
+            update_payload = dict(payload)
+            update_payload["id"] = existing_model["id"]
+            await self._request_data(
+                "POST", "/api/semantic/model/updateModel", payload=update_payload
+            )
+        else:
+            await self._request_data(
+                "POST", "/api/semantic/model/createModel", payload=payload
+            )
         models = await self._request_data(
             "GET", f"/api/semantic/model/getModelList/{int(payload['domainId'])}"
         )
@@ -748,9 +912,15 @@ class SuperSonicClient:
                                                   "metrics": [], "dimensions": []}]},
             "admins": payload.get("admins") or [], "adminOrgs": payload.get("adminOrgs") or [],
         }
-        view = await self._request_data("POST", "/api/semantic/view", payload=view_payload)
+        views = await self._request_data(
+            "GET", f"/api/semantic/view/getViewList?domainId={int(payload['domainId'])}"
+        )
+        view = next((item for item in (views or []) if isinstance(item, dict)
+                     and item.get("bizName") == view_payload["bizName"]), None)
         if not isinstance(view, dict) or not isinstance(view.get("id"), int):
-            raise UpstreamError("SuperSonic did not create a query view for the semantic model")
+            view = await self._request_data("POST", "/api/semantic/view", payload=view_payload)
+            if not isinstance(view, dict) or not isinstance(view.get("id"), int):
+                raise UpstreamError("SuperSonic did not create a query view for the semantic model")
         await self._request_data("POST", "/api/chat/conf", payload={"modelId": view["id"]})
 
     async def get_database_columns(

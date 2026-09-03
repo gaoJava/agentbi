@@ -40,6 +40,7 @@ let pendingSupersetDashboardDelete;
 let managingSupersetDashboard;
 let editingSupersetChart;
 let pendingReport;
+let editingReport;
 let pendingAsset;
 let dashboardCanvasMode = 'superset';
 let supersetWorkspace;
@@ -62,6 +63,7 @@ let workbenchDrillDepth = 0;
 let workbenchPendingDrill = false;
 let workbenchDrillTrail = [];
 let workbenchDrillLayers = [];
+let freeDrillMode = false;
 
 function isValidDrillConfiguration(config) {
   return Boolean(
@@ -180,11 +182,37 @@ function applyChartTimeRange(timeRange) {
 
 applyChartTimeRange('');
 
+function resetAnalysisForChartSelection(chartTitle) {
+  workbenchAnalysis = undefined;
+  workbenchDrillDepth = 0;
+  workbenchPendingDrill = false;
+  workbenchDrillTrail = [];
+  workbenchDrillLayers = [];
+  freeDrillMode = false;
+  const freeMode = document.querySelector('#agent-drill-free-mode');
+  if (freeMode) freeMode.checked = false;
+  document.querySelector('#agent-question').value = '';
+  document.querySelector('#agent-query-result').hidden = true;
+  document.querySelector('#agent-analysis-process').hidden = true;
+  document.querySelector('#agent-chart-route').hidden = true;
+  document.querySelector('#agent-result-table').replaceChildren();
+  document.querySelector('#agent-result-visual').hidden = true;
+  document.querySelector('#agent-query-status').textContent =
+    `已切换到“${chartTitle}”，请输入针对该图表的问题`;
+  const contextBox = document.querySelector('.context-box');
+  contextBox.classList.remove('context-switched');
+  window.requestAnimationFrame(() => contextBox.classList.add('context-switched'));
+  const panel = document.querySelector('.agent-panel');
+  panel.scrollTo({top: 0, behavior: 'smooth'});
+  document.querySelector('#agent-question').focus({preventScroll: true});
+}
+
 function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id) {
   workbenchChatId = undefined;
   workbenchSelected = undefined;
   selectedSupersetContext = {
     dashboard_id: String(dashboardId || ''), chart_id: String(chart.superset_id),
+    chart_name: String(chart.title || `图表 ${chart.superset_id}`),
     ...(chart.configuration?.dataset_id ? {dataset_id: String(chart.configuration.dataset_id)} : {}),
   };
   selectedNativeChart = chart;
@@ -197,6 +225,10 @@ function selectNativeChart(chart, dashboardId = supersetWorkspace?.dashboard_id)
   document.querySelector('#agent-question').placeholder = `针对“${chart.title}”提问…`;
   applyChartTimeRange(chart.time_range);
   setAgentPanelExpanded(true);
+  document.querySelectorAll('.native-chart-card').forEach(card => {
+    card.classList.toggle('ai-context-selected', card.dataset.chartId === String(chart.superset_id));
+  });
+  resetAnalysisForChartSelection(chart.title);
 }
 
 function resolveNativeChartAdapter(visualizationType) {
@@ -355,10 +387,39 @@ function renderNativeChartVisual(chart) {
     }); return visual;
   }
   if (adapter === 'bar' && numeric) {
-    visual.classList.add('native-bars'); const data = rows.slice(0, 12); const max = Math.max(...data.map(row => Number(row[numeric]) || 0), 1);
-    data.forEach(row => { const item = document.createElement('div'); const label = document.createElement('span'); label.textContent = formatNativeValue(row[dimension]);
-      const track = document.createElement('i'); const fill = document.createElement('b'); fill.style.width = `${Math.max(2, (Number(row[numeric]) || 0) / max * 100)}%`;
-      const amount = document.createElement('em'); amount.textContent = formatNativeValue(row[numeric]); track.append(fill); item.append(label, track, amount); visual.append(item); });
+    const data = rows.slice(0, 12).map(row => ({
+      label: formatNativeValue(row[dimension]), value: Number(row[numeric]) || 0,
+    }));
+    const useHorizontalBars = /排名|排行|top/i.test(String(chart.title || ''))
+      || data.some(item => item.label.length > 14);
+    const max = Math.max(...data.map(item => item.value), 1);
+    if (useHorizontalBars) {
+      visual.classList.add('native-bars');
+      data.forEach(row => { const item = document.createElement('div'); const label = document.createElement('span'); label.textContent = row.label; label.title = row.label;
+        const track = document.createElement('i'); const fill = document.createElement('b'); fill.style.width = `${Math.max(2, row.value / max * 100)}%`;
+        const amount = document.createElement('em'); amount.textContent = formatNativeValue(row.value); track.append(fill); item.append(label, track, amount); visual.append(item); });
+      return visual;
+    }
+    visual.classList.add('native-columns');
+    const width = 640; const height = 260; const left = 58; const right = 18; const top = 26; const bottom = 48;
+    const plotWidth = width - left - right; const plotHeight = height - top - bottom; const slot = plotWidth / data.length;
+    const barWidth = Math.max(12, Math.min(38, slot * .62));
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${chart.title}柱状图`);
+    for (let index = 0; index <= 4; index += 1) {
+      const gridY = top + index / 4 * plotHeight; const value = max - index / 4 * max;
+      const grid = document.createElementNS(svg.namespaceURI, 'line'); grid.setAttribute('x1', left); grid.setAttribute('x2', width - right); grid.setAttribute('y1', gridY); grid.setAttribute('y2', gridY); grid.setAttribute('class', 'native-line-grid');
+      const label = document.createElementNS(svg.namespaceURI, 'text'); label.setAttribute('x', left - 9); label.setAttribute('y', gridY + 4); label.setAttribute('class', 'native-line-y-label'); label.textContent = formatNativeValue(value);
+      svg.append(grid, label);
+    }
+    data.forEach((item, index) => {
+      const x = left + index * slot + (slot - barWidth) / 2; const barHeight = Math.max(2, item.value / max * plotHeight); const y = top + plotHeight - barHeight;
+      const bar = document.createElementNS(svg.namespaceURI, 'rect'); bar.setAttribute('x', x); bar.setAttribute('y', y); bar.setAttribute('width', barWidth); bar.setAttribute('height', barHeight); bar.setAttribute('rx', 4); bar.setAttribute('class', 'native-column-bar');
+      const tooltip = document.createElementNS(svg.namespaceURI, 'title'); tooltip.textContent = `${item.label}：${formatNativeValue(item.value)}`; bar.append(tooltip); svg.append(bar);
+      const label = document.createElementNS(svg.namespaceURI, 'text'); label.setAttribute('x', x + barWidth / 2); label.setAttribute('y', height - 19); label.setAttribute('class', 'native-column-label'); label.textContent = compactChartLabel(item.label, 9);
+      const labelTitle = document.createElementNS(svg.namespaceURI, 'title'); labelTitle.textContent = item.label; label.append(labelTitle); svg.append(label);
+    });
+    visual.append(svg);
     return visual;
   }
   if (adapter === 'unsupported') {
@@ -377,7 +438,7 @@ function renderNativeDashboard(dashboard) {
   const grid = document.querySelector('#native-dashboard-grid'); document.querySelector('#dashboard-title').textContent = dashboard.title || '经营总览';
   const charts = Array.isArray(dashboard.charts) ? dashboard.charts : [];
   if (!charts.length) grid.innerHTML = '<div class="native-dashboard-empty"><strong>当前仪表盘还没有图表</strong><p>请通过“仪表盘管理 → 添加图表”创建真实分析图表。</p></div>';
-  else grid.replaceChildren(...charts.map(chart => { const card = document.createElement('article'); card.className = 'native-chart-card'; const header = document.createElement('header');
+  else grid.replaceChildren(...charts.map(chart => { const card = document.createElement('article'); card.className = 'native-chart-card'; card.dataset.chartId = String(chart.superset_id); const header = document.createElement('header');
     const title = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = chart.title; const small = document.createElement('small');
     const lineHint = ['line', 'area'].includes(resolveNativeChartAdapter(chart.visualization_type)) ? ' · 最多16个数据点，横轴约6个标签' : '';
     small.textContent = `Chart ${chart.superset_id} · ${chart.status === 'ready' ? '真实查询' : '待配置'}${lineHint}`; title.append(strong, small);
@@ -525,13 +586,13 @@ function populateLiveModelSelectors() {
   const agentOptions = loadedLiveSemanticModels.map(model => {
     const option = document.createElement('option');
     option.value = String(model.id);
-    option.textContent = `${model.name}（${model.domain_name} · ID ${model.id}）`;
+    option.textContent = `${model.name}（${model.domain_name} · 视图 ID ${model.id}）`;
     return option;
   });
   const chartOptions = loadedLiveSemanticModels.map(model => {
     const option = document.createElement('option');
     option.value = model.key;
-    option.textContent = `${model.name}（${model.domain_name} · ID ${model.id}）`;
+    option.textContent = `${model.name}（${model.domain_name} · 视图 ID ${model.id}）`;
     return option;
   });
   agentSelect.replaceChildren(...agentOptions);
@@ -621,11 +682,12 @@ async function openSemanticDraftEditor() {
     (provider.items || []).forEach(item => {
       const option = document.createElement('option');
       option.value = String(item.id);
-      option.textContent = `${item.model}${item.id === provider.active_id ? '（当前生效）' : ''}`;
+      option.textContent = `${item.model}${item.enabled ? '' : '（已停用）'}`;
       option.dataset.model = item.model;
       providerSelect.append(option);
     });
-    providerSelect.value = provider.active_id ? String(provider.active_id) : '';
+    const draftProviderId = supersonicLlmBinding?.draft_provider_id || provider.active_id;
+    providerSelect.value = draftProviderId ? String(draftProviderId) : '';
     fillSelect(document.querySelector('#semantic-draft-domain'), semanticCatalogDomains,
       item => `${item.name}（ID ${item.id}）`);
     fillSelect(document.querySelector('#semantic-draft-database'), semanticCatalogDatabases,
@@ -810,6 +872,10 @@ function receiveSupersetChartSelection(event) {
     '已固定当前 Superset 图表；问答将携带 Chart ID 与 Dataset ID';
   document.querySelector('#agent-question').placeholder = `针对“${title}”提问…`;
   setAgentPanelExpanded(true);
+  document.querySelectorAll('.native-chart-card').forEach(card => {
+    card.classList.toggle('ai-context-selected', card.dataset.chartId === context.chart_id);
+  });
+  resetAnalysisForChartSelection(title);
 }
 
 window.addEventListener('message', receiveSupersetChartSelection);
@@ -834,8 +900,16 @@ async function loadManagedCharts() {
 
 function formatTimestamp(value) {
   if (!value) return '尚未登录';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
+  const raw = String(value).trim();
+  // SQLite may return a UTC timestamp without its offset.  Treat those values
+  // as UTC explicitly, then render every screen in the product timezone.
+  const hasTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw);
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const date = new Date(hasTime && !hasZone ? `${raw}Z` : raw);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+  });
 }
 
 function replaceTableRows(bodyId, rows) {
@@ -872,6 +946,71 @@ function renderDashboardList(dashboards) {
   }));
 }
 
+function reportContent(report) {
+  const content = report.content && typeof report.content === 'object' ? report.content : {};
+  return {
+    executive_summary: String(content.executive_summary || report.summary || ''),
+    findings: Array.isArray(content.findings) ? content.findings.map(String) : [],
+    actions: Array.isArray(content.actions) ? content.actions.map(String) : [],
+    caveats: String(content.caveats || '结论基于当前数据范围和语义模型口径；AI仅辅助组织文字，关键决策前请复核业务背景。'),
+    methodology: String(content.methodology || '基于受治理语义查询结果，按下钻路径逐层汇总、比较并形成结论。'),
+  };
+}
+
+function reportLines(value) {
+  return String(value || '').split('\n').map(item => item.trim()).filter(Boolean);
+}
+
+function openReportEditor(report) {
+  editingReport = report;
+  const content = reportContent(report);
+  document.querySelector('#report-editor-title').textContent = report.title;
+  document.querySelector('#report-editor-subtitle').textContent = `${report.dashboard_name} · ${report.data_scope} · 最后更新 ${formatTimestamp(report.updated_at || report.created_at)}`;
+  document.querySelector('#report-edit-title').value = report.title;
+  document.querySelector('#report-edit-summary').value = content.executive_summary;
+  document.querySelector('#report-edit-findings').value = content.findings.join('\n');
+  document.querySelector('#report-edit-actions').value = content.actions.join('\n');
+  document.querySelector('#report-edit-caveats').value = content.caveats;
+  document.querySelector('#report-status').value = report.status || 'draft';
+  document.querySelector('#report-edit-evidence').textContent = report.evidence_path;
+  document.querySelector('#report-editor-error').hidden = true;
+  document.querySelector('#report-editor').hidden = false;
+}
+
+function closeReportEditor() {
+  document.querySelector('#report-editor').hidden = true;
+  editingReport = undefined;
+}
+
+function reportExportHtml(report) {
+  const content = reportContent(report);
+  const escape = value => String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const list = items => items.length ? `<ol>${items.map(item => `<li>${escape(item)}</li>`).join('')}</ol>` : '<p>暂无</p>';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(report.title)}</title><style>
+    @page{margin:22mm}body{font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif;color:#20344f;line-height:1.7;max-width:900px;margin:auto}h1{font-size:26px;color:#122a4a;border-bottom:3px solid #3478ed;padding-bottom:12px}h2{margin-top:28px;font-size:18px;color:#174f9b}header{color:#6e7f96;font-size:12px}.lead{padding:15px 17px;border-left:4px solid #3478ed;background:#f3f7ff}li{margin:7px 0}.evidence{white-space:pre-wrap;padding:14px;border:1px solid #dbe5f1;background:#f7f9fc;font-size:12px}footer{margin-top:28px;color:#8895a6;font-size:11px}</style></head><body>
+    <h1>${escape(report.title)}</h1><header>${escape(report.dashboard_name)} · ${escape(report.data_scope)} · ${escape(formatTimestamp(report.updated_at || report.created_at))}</header>
+    <h2>执行摘要</h2><p class="lead">${escape(content.executive_summary)}</p>
+    <h2>关键发现</h2>${list(content.findings)}
+    <h2>经营建议</h2>${list(content.actions)}
+    <h2>分析方法</h2><p>${escape(content.methodology)}</p>
+    <h2>限制与说明</h2><p>${escape(content.caveats)}</p>
+    <h2>数据证据</h2><div class="evidence">${escape(report.evidence_path)}</div>
+    <footer>InsightPilot AgentBI · 受治理查询生成 · 人工可编辑版本</footer></body></html>`;
+}
+
+function downloadReportWord(report) {
+  const blob = new Blob(['\ufeff', reportExportHtml(report)], {type:'application/msword;charset=utf-8'});
+  const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+  anchor.href = url; anchor.download = `${report.title.replace(/[\\/:*?"<>|]/g, '_')}.doc`;
+  anchor.click(); URL.revokeObjectURL(url);
+}
+
+function printReportPdf(report) {
+  const frame = document.createElement('iframe'); frame.hidden = true; document.body.append(frame);
+  frame.contentDocument.open(); frame.contentDocument.write(reportExportHtml(report)); frame.contentDocument.close();
+  frame.onload = () => { frame.contentWindow.focus(); frame.contentWindow.print(); window.setTimeout(() => frame.remove(), 1000); };
+}
+
 function renderReportList(reports) {
   const container = document.querySelector('#report-list');
   if (!reports.length) {
@@ -888,17 +1027,22 @@ function renderReportList(reports) {
     header.append(title, time);
     const summary = document.createElement('p'); summary.textContent = report.summary;
     const meta = document.createElement('div'); meta.textContent = `${report.dashboard_name}　·　${report.data_scope}`;
+    const state = document.createElement('span'); state.className = `report-card-status ${report.status === 'published' ? 'published' : ''}`;
+    state.textContent = report.status === 'published' ? '已发布' : '草稿';
     const evidence = document.createElement('small'); evidence.className = 'report-evidence';
     evidence.textContent = `证据路径：${report.evidence_path}`; evidence.hidden = true;
     const actions = document.createElement('div'); actions.className = 'report-actions';
     actions.append(
+      actionButton('查看 / 编辑', 'report-primary', () => openReportEditor(report)),
+      actionButton('Word', '', () => downloadReportWord(report)),
+      actionButton('PDF', '', () => printReportPdf(report)),
       actionButton('查看证据', '', event => {
         evidence.hidden = !evidence.hidden;
         event.currentTarget.textContent = evidence.hidden ? '查看证据' : '收起证据';
       }),
       actionButton('删除报告', 'danger-action', () => openReportDeleteConfirmation(report)),
     );
-    card.append(header, summary, meta, evidence, actions); return card;
+    card.append(header, state, summary, meta, evidence, actions); return card;
   }));
 }
 
@@ -1031,9 +1175,10 @@ async function loadModuleView(view) {
         model.status === 'active' ? '● 已启用' : '● 已下线',
       ]);
     } else if (view === 'data-sources') {
-      const [assetsBody, catalog] = await Promise.all([
+      const [assetsBody, catalog, businessModels] = await Promise.all([
         request('/api/v1/admin/superset/data-assets'),
         request('/api/v1/admin/semantic-drafts/catalog'),
+        loadLiveSemanticModels(),
       ]);
       const assets = window.AgentBI.parseSupersetDataAssets(
         assetsBody,
@@ -1066,10 +1211,14 @@ async function loadModuleView(view) {
           String(source.name || '').trim().toLowerCase() === String(database.name || '').trim().toLowerCase() &&
           String(source.backend || '').trim().toLowerCase() === String(database.type || '').trim().toLowerCase()
         );
-        const linkedModels = database.model_names || [];
+        const linkedModels = businessModels
+          .filter(model => Number(model.database_id) === Number(database.id))
+          .map(model => `${model.name}（语义视图 ID ${model.id}）`);
         const relation = document.createElement('span');
         relation.textContent = linkedModels.length ? `${linkedModels.length} 个 · ${linkedModels.join('、')}` : '暂无关联';
-        relation.title = linkedModels.length ? linkedModels.join('\n') : '当前没有语义模型使用该连接';
+        relation.title = linkedModels.length
+          ? `${linkedModels.join('\n')}\n\n底层物理模型 ${database.model_count || 0} 个（仅用于 SuperSonic 内部建模）`
+          : `当前没有业务语义模型使用该连接；底层物理模型 ${database.model_count || 0} 个`;
         return [database.name, database.type || '—', match?.name || '—',
           match ? '● 已匹配' : '● 未匹配', relation, database.id];
       }, database => {
@@ -1851,36 +2000,162 @@ function renderAnalysisProcess(steps, running = false, elapsedMs = 0, failedMess
 }
 
 function renderRealDrilldownResult(empty, detail, header) {
-  header.hidden = true;
-  detail.hidden = true;
-  empty.hidden = false;
-  const title = document.createElement('strong'); title.textContent = '真实下钻证据链';
-  const path = document.createElement('p'); path.className = 'real-drill-path';
-  path.textContent = workbenchDrillTrail.length
-    ? `原始分析 → ${workbenchDrillTrail.map(item => `${friendlyDimensionLabel(item.dimension)}=${item.value}`).join(' → ')}`
-    : '原始分析结果；请选择数据项继续下钻';
+  empty.hidden = true;
+  header.hidden = false;
+  detail.hidden = false;
+  document.querySelector('#drill-page-title').textContent = '真实下钻分析';
+  document.querySelector('#drill-breadcrumb').textContent = workbenchDrillTrail.length
+    ? `来源图表 → ${workbenchDrillTrail.map(item => `${friendlyDimensionLabel(item.dimension)}：${item.value}`).join(' → ')}`
+    : '来源图表 → 选择数据项开始下钻';
+
+  const sourceSection = document.createElement('section'); sourceSection.className = 'real-drill-source';
+  const sourceHeader = document.createElement('header');
+  const sourceHeading = document.createElement('div');
+  const sourceBadge = document.createElement('span'); sourceBadge.textContent = '来源图表';
+  const sourceTitle = document.createElement('strong'); sourceTitle.textContent = selectedNativeChart?.title || workbenchDrillLayers[0]?.question || '原始分析结果';
+  const sourceMeta = document.createElement('small');
+  sourceMeta.textContent = selectedNativeChart?.superset_id
+    ? `Superset Chart ${selectedNativeChart.superset_id} · 保留原始查询口径`
+    : '保留进入下钻前的真实查询口径';
+  sourceHeading.append(sourceBadge, sourceTitle, sourceMeta); sourceHeader.append(sourceHeading); sourceSection.append(sourceHeader);
+  if (selectedNativeChart?.rows?.length) sourceSection.append(renderNativeChartVisual(selectedNativeChart));
+  else if (workbenchDrillLayers[0]?.analysis?.data?.length) {
+    const sourceRows = workbenchDrillLayers[0].analysis.data;
+    sourceSection.append(renderNativeChartVisual({title: sourceTitle.textContent, visualization_type: 'bar',
+      columns: Object.keys(sourceRows[0]), rows: sourceRows, status: 'ready'}));
+  }
+
+  const path = document.createElement('div'); path.className = 'real-drill-path';
+  const pathTitle = document.createElement('strong'); pathTitle.textContent = '下钻路径';
+  const pathSteps = document.createElement('div');
+  const origin = document.createElement('span'); origin.textContent = sourceTitle.textContent; pathSteps.append(origin);
+  workbenchDrillTrail.forEach(item => {
+    const arrow = document.createElement('i'); arrow.textContent = '→';
+    const step = document.createElement('span'); step.textContent = `${friendlyDimensionLabel(item.dimension)} = ${item.value}`;
+    pathSteps.append(arrow, step);
+  });
+  path.append(pathTitle, pathSteps);
+
+  // The first analysis is the source query used to choose a member. It belongs to
+  // the source chart context, not to the drill chain. Only queries executed after
+  // a member was selected are rendered as drill layers.
+  const drillLayers = workbenchDrillLayers.slice(1);
   const layers = document.createElement('div'); layers.className = 'real-drill-layers';
-  layers.replaceChildren(...workbenchDrillLayers.map((layer, index) => {
+  layers.replaceChildren(...drillLayers.map((layer, index) => {
     const card = document.createElement('article'); card.className = 'real-drill-layer';
-    const heading = document.createElement('header');
-    const label = document.createElement('span'); label.textContent = `第 ${index} 层`;
+    const heading = document.createElement('header'); const headingText = document.createElement('div');
+    const label = document.createElement('span'); label.textContent = `第 ${index + 1} 层`;
     const question = document.createElement('strong'); question.textContent = layer.question;
-    heading.append(label, question);
-    const answer = document.createElement('p'); answer.textContent = layer.analysis.answer;
-    const evidence = document.createElement('small');
-    evidence.textContent = `查询 ${layer.analysis.evidence.query_id} · ${layer.analysis.evidence.row_count} 行 · SQL 指纹 ${layer.analysis.evidence.sql_fingerprint || '—'}`;
-    const analyze = document.createElement('button'); analyze.type = 'button'; analyze.textContent = '✦ 继续追问此层';
-    analyze.addEventListener('click', () => {
-      workbenchAnalysis = layer.analysis;
-      document.querySelector('#agent-question').value = layer.question;
-      document.querySelector('#drill-insight').textContent = layer.analysis.answer;
-      document.querySelector('#drill-insight-source').textContent = `查询编号 ${layer.analysis.evidence.query_id}`;
-      setAgentPanelExpanded(true);
-    });
-    card.append(heading, answer, resultTable(layer.analysis.data), evidence, analyze);
+    const analyze = document.createElement('button'); analyze.type = 'button'; analyze.textContent = '✦ AI 分析此层';
+    analyze.addEventListener('click', () => reanalyzeDrillLayer(layer, index, analyze));
+    headingText.append(label, question); heading.append(headingText, analyze);
+    const answer = document.createElement('p'); answer.className = 'real-drill-answer'; answer.textContent = layer.analysis.answer;
+    const rows = Array.isArray(layer.analysis.data) ? layer.analysis.data : [];
+    const body = document.createElement('div'); body.className = 'real-drill-body';
+    if (rows.length) {
+      const chart = {title: layer.question, visualization_type: 'bar', columns: Object.keys(rows[0]), rows, status: 'ready'};
+      body.append(renderNativeChartVisual(chart));
+      const tableDetails = document.createElement('details'); tableDetails.className = 'real-drill-table';
+      const tableSummary = document.createElement('summary'); tableSummary.textContent = '查看明细数据';
+      tableDetails.append(tableSummary, resultTable(rows)); body.append(tableDetails);
+    }
+    const evidence = document.createElement('small'); evidence.className = 'real-drill-evidence';
+    evidence.textContent = `真实查询 ${layer.analysis.evidence.query_id} · ${layer.analysis.evidence.row_count} 行 · SQL 指纹 ${layer.analysis.evidence.sql_fingerprint || '—'}`;
+    card.append(heading, answer, body, evidence);
+    if (index === drillLayers.length - 1) {
+      const controls = createDrillPageControls(rows);
+      if (controls) card.append(controls);
+      else {
+        const finish = document.createElement('div'); finish.className = 'real-drill-finish';
+        const finishText = document.createElement('span'); finishText.textContent = '已到达当前配置的最深层级，可以生成完整分析报告。';
+        const report = document.createElement('button'); report.type = 'button'; report.textContent = '生成分析报告';
+        report.addEventListener('click', () => document.querySelector('#save-analysis-report').click());
+        finish.append(finishText, report); card.append(finish);
+      }
+    }
     return card;
   }));
-  empty.replaceChildren(title, path, layers);
+  detail.replaceChildren(sourceSection, path, layers);
+}
+
+async function reanalyzeDrillLayer(layer, drillIndex, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = 'AI 正在重新分析…';
+  document.querySelector('#agent-query-status').textContent = `正在重新分析第 ${drillIndex + 1} 层…`;
+  try {
+    const trail = workbenchDrillTrail.slice(0, drillIndex + 1);
+    const semanticModel = Number(document.querySelector('#agent-semantic-model').value);
+    const body = await request('/api/v1/workbench/analyze', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-AgentBI-CSRF':currentUser.csrf_token},
+      body: JSON.stringify({
+        question: layer.question,
+        context: {
+          dashboard_id: selectedSupersetContext?.dashboard_id || String(supersetWorkspace?.dashboard_id || 'workbench-home'),
+          ...(selectedSupersetContext?.chart_id ? {chart_id:selectedSupersetContext.chart_id} : {}),
+          ...(selectedSupersetContext?.dataset_id ? {dataset_id:selectedSupersetContext.dataset_id} : {}),
+          semantic_model_id: semanticModel,
+          time_range: document.querySelector('#agent-time-range').value.trim(),
+          filters: trail.map(item => ({field:item.dimension, operator:'EQ', value:item.value})),
+          ...(trail.length ? {selected:{label:friendlyDimensionLabel(trail.at(-1).dimension), ...trail.at(-1)}} : {}),
+        },
+        client_request_id: crypto.randomUUID(),
+      }),
+    });
+    layer.analysis = body;
+    workbenchAnalysis = body;
+    document.querySelector('#agent-question').value = layer.question;
+    document.querySelector('#drill-insight').textContent = body.answer;
+    document.querySelector('#drill-insight-source').textContent = `查询编号 ${body.evidence.query_id}`;
+    document.querySelector('#drill-evidence').textContent = `返回 ${body.evidence.row_count} 行 · SQL 指纹 ${body.evidence.sql_fingerprint || '—'}`;
+    document.querySelector('#agent-query-status').textContent = `第 ${drillIndex + 1} 层 AI 分析已更新`;
+    renderDrilldown();
+    setAgentPanelExpanded(true);
+  } catch (error) {
+    document.querySelector('#agent-query-status').textContent = error.message;
+    showManagementFeedback(`本层分析失败：${error.message}`, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+function drillOptionsForRows(rows) {
+  const dimension = resultDimension(rows);
+  const governed = managedCharts.find(chart => chart.validation_status === 'ready' &&
+    Number(chart.superset_chart_id) === Number(selectedSupersetContext?.chart_id));
+  const configuredDimensions = governed?.dimensions || governedDrillDimensions;
+  const used = new Set(workbenchDrillTrail.map(item => item.dimension));
+  if (dimension) used.add(dimension.canonical);
+  const remaining = configuredDimensions.filter(item => !used.has(item));
+  const currentIndex = dimension ? configuredDimensions.indexOf(dimension.canonical) : -1;
+  const strictNext = currentIndex >= 0
+    ? configuredDimensions.slice(currentIndex + 1).find(item => !used.has(item))
+    : remaining[0];
+  return {dimension, members: dimension ? rows.slice(0, 20).filter(row => row[dimension.field] !== undefined) : [],
+    nextDimensions: freeDrillMode ? remaining : (strictNext ? [strictNext] : [])};
+}
+
+function createDrillPageControls(rows) {
+  const {dimension, members, nextDimensions} = drillOptionsForRows(rows);
+  if (!dimension || !members.length || !nextDimensions.length) return undefined;
+  const controls = document.createElement('section'); controls.className = 'real-drill-controls';
+  const heading = document.createElement('div');
+  const title = document.createElement('strong'); title.textContent = '继续下钻';
+  const hint = document.createElement('small');
+  hint.textContent = freeDrillMode ? '自由分析：可选择任一尚未使用的维度' : '顺序下钻：仅进入配置路径的下一层';
+  const mode = document.createElement('button'); mode.type = 'button'; mode.className = 'drill-mode-button';
+  mode.textContent = freeDrillMode ? '切换为顺序下钻' : '切换为自由分析';
+  mode.addEventListener('click', () => { freeDrillMode = !freeDrillMode; renderDrilldown(); });
+  heading.append(title, hint, mode);
+  const memberLabel = document.createElement('label'); memberLabel.textContent = '当前数据项';
+  const member = document.createElement('select'); members.forEach(row => member.add(new Option(String(row[dimension.field]), String(row[dimension.field])))); memberLabel.append(member);
+  const dimensionLabel = document.createElement('label'); dimensionLabel.textContent = '下一分析维度';
+  const next = document.createElement('select'); nextDimensions.forEach(item => next.add(new Option(friendlyDimensionLabel(item), item))); dimensionLabel.append(next);
+  const button = document.createElement('button'); button.type = 'button'; button.textContent = '下钻到下一层';
+  button.addEventListener('click', () => beginResultDrilldown(dimension.canonical, member.value, next.value));
+  controls.append(heading, memberLabel, dimensionLabel, button); return controls;
 }
 
 const governedDrillDimensions = ['platform', 'genre', 'publisher'];
@@ -1904,17 +2179,31 @@ function configureResultDrilldown(rows) {
   const controls = document.querySelector('#agent-drill-controls');
   const button = document.querySelector('#start-result-drilldown');
   const dimension = resultDimension(rows);
-  const governed = managedCharts.find(chart =>
-    chart.validation_status === 'ready' &&
-    Number(chart.superset_chart_id) === Number(selectedSupersetContext?.chart_id));
-  const configuredDimensions = governed?.dimensions || governedDrillDimensions;
-  const used = new Set(workbenchDrillTrail.map(item => item.dimension));
-  if (dimension) used.add(dimension.canonical);
-  const nextDimensions = configuredDimensions.filter(item => !used.has(item));
-  const members = dimension ? rows.slice(0, 20).filter(row => row[dimension.field] !== undefined) : [];
+  let mode = document.querySelector('#agent-drill-free-mode');
+  if (!mode) {
+    const heading = document.createElement('div'); heading.className = 'agent-drill-heading';
+    const title = controls.querySelector(':scope > strong');
+    const modeLabel = document.createElement('label');
+    mode = document.createElement('input'); mode.id = 'agent-drill-free-mode'; mode.type = 'checkbox';
+    modeLabel.append(mode, document.createTextNode(' 自由分析'));
+    const hint = document.createElement('small'); hint.id = 'agent-drill-mode-hint';
+    if (title) heading.append(title, modeLabel, hint); else heading.append(modeLabel, hint);
+    controls.prepend(heading);
+    mode.addEventListener('change', () => {
+      freeDrillMode = mode.checked;
+      configureResultDrilldown(workbenchAnalysis?.data || []);
+    });
+  }
+  mode.checked = freeDrillMode;
+  document.querySelector('#agent-drill-mode-hint').textContent = freeDrillMode
+    ? '自由分析：可选择任一尚未使用的维度'
+    : '顺序下钻：仅进入配置路径的下一层';
+  const {members, nextDimensions} = drillOptionsForRows(rows);
   const available = Boolean(members.length && nextDimensions.length);
-  controls.hidden = !available; button.hidden = !available;
+  controls.hidden = !available || activeView === 'drilldown';
+  button.hidden = !available || activeView === 'drilldown';
   if (!available) return;
+  button.textContent = workbenchDrillLayers.length > 1 ? '继续下钻分析' : '进入下钻分析';
   document.querySelector('#agent-drill-member').replaceChildren(...members.map(row =>
     new Option(String(row[dimension.field]), String(row[dimension.field]))));
   document.querySelector('#agent-drill-member').dataset.dimension = dimension.canonical;
@@ -1930,13 +2219,43 @@ function reportEvidencePath() {
     `${friendlyDimensionLabel(item.dimension)}=${item.value}`), ...layers].join(' → ');
 }
 
+function buildDetailedReportContent() {
+  const layers = workbenchDrillLayers.length ? workbenchDrillLayers :
+    (workbenchAnalysis ? [{question: workbenchAnalysis.evidence?.question || '当前分析', analysis: workbenchAnalysis}] : []);
+  const findings = layers.map((layer, index) => {
+    const prefix = index === 0 ? '整体分析' : `第${index}层下钻`;
+    return `${prefix}（${layer.question}）：${layer.analysis.answer}`;
+  });
+  const actions = [...new Set(layers.flatMap(layer => layer.analysis.report?.suggested_actions || []))].slice(0, 8);
+  if (!actions.length) actions.push('结合业务事件复核主要差异，并对贡献最高和异常的数据项继续下钻。');
+  const latest = layers.at(-1)?.analysis;
+  return {
+    executive_summary: findings.map(item => item.replace(/^.*?：/, '')).slice(-3).join('；'),
+    findings,
+    actions,
+    methodology: '使用 Superset 图表确定分析上下文，由 SuperSonic 生成并执行受治理语义查询；系统对每层结果进行汇总、排序和证据校验，再由 AgentBI 组织为可读结论。',
+    caveats: `本报告基于${currentUser?.data_scope || '当前账号权限范围'}内可见数据。AI仅辅助理解问题与组织语言，不改写查询结果；结论应结合业务事件复核。${latest?.warnings?.length ? ` 注意：${latest.warnings.join('；')}` : ''}`,
+    evidence: layers.map(layer => ({
+      question: layer.question,
+      query_id: layer.analysis.evidence?.query_id,
+      row_count: layer.analysis.evidence?.row_count,
+      sql_fingerprint: layer.analysis.evidence?.sql_fingerprint,
+    })),
+    narrative_source: 'agentbi_ai_assisted',
+  };
+}
+
 function workbenchContext() {
   const semanticModel = Number(document.querySelector('#agent-semantic-model').value);
   if (!Number.isInteger(semanticModel) || semanticModel < 1) throw new Error('请输入有效的 SuperSonic 语义模型 ID');
   const timeRange = document.querySelector('#agent-time-range').value.trim();
+  const configuration = selectedNativeChart?.configuration;
+  const chartDimension = configuration?.dimension;
+  const chartMetric = configuration?.metric_column;
   return {
     dashboard_id: selectedSupersetContext?.dashboard_id || String(supersetWorkspace?.dashboard_id || 'workbench-home'),
     ...(selectedSupersetContext?.chart_id ? {chart_id: selectedSupersetContext.chart_id} : {}),
+    ...(selectedSupersetContext?.chart_name ? {chart_name: selectedSupersetContext.chart_name} : {}),
     ...(selectedSupersetContext?.dataset_id ? {dataset_id: selectedSupersetContext.dataset_id} : {}),
     semantic_model_id: semanticModel,
     time_range: timeRange,
@@ -1944,6 +2263,11 @@ function workbenchContext() {
       field: item.dimension, operator: 'EQ', value: item.value,
     })),
     ...(workbenchSelected ? { selected: workbenchSelected } : {}),
+    ...(chartDimension ? {dimensions: [{field: chartDimension, label: friendlyDimensionLabel(chartDimension)}]} : {}),
+    ...(chartMetric ? {metrics: [{
+      field: chartMetric, label: friendlyMetricLabel(chartMetric),
+      aggregation: String(configuration.aggregation || 'SUM').toUpperCase(),
+    }], sort: {field: chartMetric, direction: 'DESC'}} : {}),
   };
 }
 
@@ -2274,18 +2598,18 @@ document.querySelector('#agent-time-range').addEventListener('input', () => appl
 document.querySelector('#agent-question').addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') analyzeFromWorkbench();
 });
-document.querySelector('#start-result-drilldown').addEventListener('click', () => {
-  const member = document.querySelector('#agent-drill-member');
-  const dimension = member.dataset.dimension;
-  const value = member.value;
-  const nextDimension = document.querySelector('#agent-drill-dimension').value;
+function beginResultDrilldown(dimension, value, nextDimension) {
   if (!dimension || !value || !nextDimension) return;
   workbenchSelected = { label: friendlyDimensionLabel(dimension), dimension, value };
   workbenchDrillTrail.push({dimension, value});
   workbenchPendingDrill = true;
   const conditions = workbenchDrillTrail.map(item =>
     `${friendlyDimensionLabel(item.dimension)}=${item.value}`).join('、');
-  const question = `按${friendlyDimensionLabel(nextDimension)}统计全球销量前10名，并分析主要差异`;
+  const previousQuestion = workbenchDrillLayers.at(-1)?.question ||
+    document.querySelector('#agent-result-question').textContent || '';
+  const previousLimit = previousQuestion.match(/前\s*(\d{1,3})\s*(?:名|个)?/);
+  const rankingLimit = previousLimit ? Math.min(Number(previousLimit[1]), 100) : 10;
+  const question = `按${friendlyDimensionLabel(nextDimension)}统计全球销量前${rankingLimit}名，并分析主要差异`;
   document.querySelector('#agent-question').value = question;
   document.querySelector('#drill-agent-context').textContent = `待执行：${conditions} → ${friendlyDimensionLabel(nextDimension)}`;
   document.querySelector('#drill-insight').textContent = workbenchAnalysis.answer;
@@ -2294,6 +2618,12 @@ document.querySelector('#start-result-drilldown').addEventListener('click', () =
   switchView('drilldown');
   renderDrilldown();
   analyzeFromWorkbench();
+}
+
+document.querySelector('#start-result-drilldown').addEventListener('click', () => {
+  const member = document.querySelector('#agent-drill-member');
+  beginResultDrilldown(member.dataset.dimension, member.value,
+    document.querySelector('#agent-drill-dimension').value);
 });
 
 document.querySelector('#save-analysis-report').addEventListener('click', async event => {
@@ -2301,6 +2631,7 @@ document.querySelector('#save-analysis-report').addEventListener('click', async 
   const button = event.currentTarget;
   button.disabled = true; button.textContent = '正在生成…';
   const dashboardName = document.querySelector('#agent-dashboard-name').textContent || '经营总览';
+  const content = buildDetailedReportContent();
   try {
     await request('/api/v1/reports', {
       method: 'POST',
@@ -2308,10 +2639,11 @@ document.querySelector('#save-analysis-report').addEventListener('click', async 
       body: JSON.stringify({
         title: `游戏市场闭环分析 · ${document.querySelector('#agent-result-question').textContent}`.slice(0, 200),
         dashboard_name: dashboardName,
-        summary: workbenchDrillLayers.map((layer, index) =>
-          `第${index}层：${layer.analysis.answer}`).join('\n').slice(0, 4000),
+        summary: content.executive_summary.slice(0, 4000),
         evidence_path: reportEvidencePath().slice(0, 4000),
         query_id: workbenchAnalysis.evidence.query_id,
+        content,
+        status: 'draft',
       }),
     });
     showManagementFeedback('已根据当前问答与下钻证据生成分析报告');
@@ -2895,7 +3227,7 @@ function openAssetDeleteConfirmation(kind, asset, returnView = kind) {
   document.querySelector('#delete-asset-confirm p').textContent = llmProvider
     ? '将永久删除这个非活动模型服务配置：' : '将永久删除未被图表引用的资产：';
   document.querySelector('#delete-asset-confirm small').textContent = llmProvider
-    ? 'API Key 密文将同时删除；当前生效模型受服务端保护。'
+    ? 'API Key 密文将同时删除；已分配用途的模型受服务端保护。'
     : '系统内置资产或存在图表引用时，服务端会拒绝删除。';
   document.querySelector('#delete-asset-name').textContent = asset.name;
   document.querySelector('#delete-asset-confirm').hidden = false;
@@ -3084,6 +3416,87 @@ document.querySelector('#cancel-delete-report').addEventListener('click', closeR
 document.querySelector('#delete-report-confirm').addEventListener('click', event => {
   if (event.target.id === 'delete-report-confirm') closeReportDeleteConfirmation();
 });
+document.querySelector('#close-report-editor').addEventListener('click', closeReportEditor);
+document.querySelector('#cancel-report-editor').addEventListener('click', closeReportEditor);
+document.querySelector('#report-editor').addEventListener('click', event => {
+  if (event.target.id === 'report-editor') closeReportEditor();
+});
+document.querySelector('#download-report-word').addEventListener('click', () => {
+  if (editingReport) downloadReportWord({...editingReport,
+    title: document.querySelector('#report-edit-title').value,
+    summary: document.querySelector('#report-edit-summary').value,
+    content: {...reportContent(editingReport),
+      executive_summary: document.querySelector('#report-edit-summary').value,
+      findings: reportLines(document.querySelector('#report-edit-findings').value),
+      actions: reportLines(document.querySelector('#report-edit-actions').value),
+      caveats: document.querySelector('#report-edit-caveats').value,
+    },
+  });
+});
+document.querySelector('#print-report-pdf').addEventListener('click', () => {
+  if (editingReport) printReportPdf({...editingReport,
+    title: document.querySelector('#report-edit-title').value,
+    summary: document.querySelector('#report-edit-summary').value,
+    content: {...reportContent(editingReport),
+      executive_summary: document.querySelector('#report-edit-summary').value,
+      findings: reportLines(document.querySelector('#report-edit-findings').value),
+      actions: reportLines(document.querySelector('#report-edit-actions').value),
+      caveats: document.querySelector('#report-edit-caveats').value,
+    },
+  });
+});
+document.querySelector('#polish-report-ai').addEventListener('click', async () => {
+  if (!editingReport) return;
+  const button = document.querySelector('#polish-report-ai');
+  const error = document.querySelector('#report-editor-error');
+  error.hidden = true;
+  button.disabled = true;
+  button.textContent = 'AI 正在分析证据（约1–3分钟）…';
+  try {
+    const body = await request(`/api/v1/reports/${encodeURIComponent(editingReport.id)}/ai-polish`, {
+      method: 'POST',
+      headers: {'X-AgentBI-CSRF': currentUser.csrf_token},
+    });
+    const content = {...reportContent(editingReport), ...body.content};
+    editingReport = {...editingReport, content, summary: content.executive_summary};
+    document.querySelector('#report-edit-summary').value = content.executive_summary;
+    document.querySelector('#report-edit-findings').value = content.findings.join('\n');
+    document.querySelector('#report-edit-actions').value = content.actions.join('\n');
+    document.querySelector('#report-edit-caveats').value = content.caveats;
+    showManagementFeedback(`AI 已生成建议草稿（${body.provider_model}），请审核后保存`);
+  } catch (caught) {
+    error.textContent = caught.message;
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = '重新生成';
+  }
+});
+document.querySelector('#report-editor-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!editingReport) return;
+  const error = document.querySelector('#report-editor-error'); error.hidden = true;
+  const content = {...reportContent(editingReport),
+    executive_summary: document.querySelector('#report-edit-summary').value.trim(),
+    findings: reportLines(document.querySelector('#report-edit-findings').value),
+    actions: reportLines(document.querySelector('#report-edit-actions').value),
+    caveats: document.querySelector('#report-edit-caveats').value.trim(),
+  };
+  try {
+    await request(`/api/v1/reports/${encodeURIComponent(editingReport.id)}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json','X-AgentBI-CSRF':currentUser.csrf_token},
+      body: JSON.stringify({
+        title: document.querySelector('#report-edit-title').value.trim(),
+        summary: content.executive_summary,
+        content,
+        status: document.querySelector('#report-status').value,
+      }),
+    });
+    closeReportEditor(); await loadModuleView('reports'); showManagementFeedback('报告修改已保存');
+  } catch (caught) {
+    error.textContent = caught.message; error.hidden = false;
+  }
+});
 document.querySelector('#confirm-delete-report').addEventListener('click', async () => {
   if (!pendingReport) return;
   const report = pendingReport;
@@ -3232,35 +3645,60 @@ document.querySelector('#logout-button').addEventListener('click', () => endSess
 
 function renderLlmProviderRows() {
   document.querySelector('#llm-provider-count').textContent = `${loadedLlmProviders.length} 个配置`;
-  renderModuleRows('llm-provider-table-body', loadedLlmProviders, provider => [
-    provider.model, provider.base_url, provider.api_key_masked,
-    provider.enabled ? '● 当前生效' : '待切换', formatTimestamp(provider.updated_at),
-  ], provider => {
+  const rolesFor = provider => {
+    const binding = supersonicLlmBinding || {};
+    const roles = [];
+    if (Number(binding.provider_id) === Number(provider.id)) roles.push('问答');
+    if (Number(binding.draft_provider_id) === Number(provider.id)) roles.push('建模');
+    if (Number(binding.report_provider_id) === Number(provider.id)) roles.push('报告');
+    return roles;
+  };
+  renderModuleRows('llm-provider-table-body', loadedLlmProviders, provider => {
+    const roles = rolesFor(provider);
+    return [provider.model, provider.base_url, provider.api_key_masked,
+      roles.length ? `● 使用中：${roles.join('、')}` : (provider.enabled ? '● 已验证可用' : '已停用'),
+      formatTimestamp(provider.updated_at)];
+  }, provider => {
     const group = document.createElement('div'); group.className = 'registry-actions';
     if (provider.enabled) {
       const active = document.createElement('span'); active.className = 'registry-status ready';
-      active.textContent = '使用中'; group.append(active);
+      active.textContent = '可用'; group.append(active);
     } else {
-      group.append(actionButton('测试并切换', 'primary-small', () => activateLlmProvider(provider)));
+      group.append(actionButton('测试并启用', 'primary-small', () => activateLlmProvider(provider)));
     }
     group.append(actionButton('修改', 'module-action', () => openLlmProviderEditor(provider)));
     const remove = actionButton('删除', 'danger-action', () => {
       openAssetDeleteConfirmation('llm-provider', { id: provider.id, name: provider.model }, 'semantic-models');
     });
-    remove.disabled = provider.enabled;
-    if (remove.disabled) remove.title = '当前生效模型不能删除，请先切换其他模型';
+    remove.disabled = rolesFor(provider).length > 0;
+    if (remove.disabled) remove.title = '该模型已分配用途，请先修改模型用途绑定';
     group.append(remove); return group;
   });
 }
 
 function renderSuperSonicLlmBinding() {
   const binding = supersonicLlmBinding || {};
+  const fields = document.querySelector('.supersonic-llm-fields');
+  const intentLabel = document.querySelector('#supersonic-llm-provider')?.closest('label');
+  if (intentLabel) intentLabel.childNodes[0].textContent = '问答意图解析';
+  [['semantic-draft-default-provider', '智能建模'], ['report-llm-provider', '报告生成']]
+    .forEach(([id, labelText]) => {
+      if (document.querySelector(`#${id}`)) return;
+      const label = document.createElement('label');
+      label.append(document.createTextNode(labelText));
+      const roleSelect = document.createElement('select'); roleSelect.id = id;
+      label.append(roleSelect); fields.insertBefore(label, document.querySelector('#supersonic-llm-mode').closest('label'));
+    });
   const select = document.querySelector('#supersonic-llm-provider');
-  select.replaceChildren(...loadedLlmProviders.map(provider => {
-    const option = document.createElement('option'); option.value = String(provider.id);
-    option.textContent = `${provider.model}${provider.enabled ? '（当前模型）' : ''}`; return option;
-  }));
+  const roleSelects = [select, document.querySelector('#semantic-draft-default-provider'),
+    document.querySelector('#report-llm-provider')];
+  roleSelects.forEach(roleSelect => roleSelect.replaceChildren(...loadedLlmProviders.map(provider => {
+      const option = document.createElement('option'); option.value = String(provider.id);
+      option.textContent = `${provider.model}${provider.enabled ? '' : '（已停用）'}`; return option;
+    })));
   if (binding.provider_id) select.value = String(binding.provider_id);
+  if (binding.draft_provider_id) document.querySelector('#semantic-draft-default-provider').value = String(binding.draft_provider_id);
+  if (binding.report_provider_id) document.querySelector('#report-llm-provider').value = String(binding.report_provider_id);
   document.querySelector('#supersonic-llm-mode').value = binding.mode || 'rule_first';
   document.querySelector('#supersonic-llm-timeout').value = String(binding.timeout_seconds || 60);
   document.querySelector('#supersonic-llm-fallback').checked = binding.fallback_to_rules !== false;
@@ -3275,14 +3713,19 @@ document.querySelector('#supersonic-llm-form').addEventListener('submit', async 
   event.preventDefault();
   const enabled = document.querySelector('#supersonic-llm-enabled').checked;
   const providerValue = document.querySelector('#supersonic-llm-provider').value;
+  const draftProviderValue = document.querySelector('#semantic-draft-default-provider').value;
+  const reportProviderValue = document.querySelector('#report-llm-provider').value;
   try {
     supersonicLlmBinding = await request('/api/v1/admin/supersonic-llm', {
       method: 'PUT', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
-      body: JSON.stringify({provider_id: providerValue ? Number(providerValue) : null, enabled,
+      body: JSON.stringify({provider_id: providerValue ? Number(providerValue) : null,
+        draft_provider_id: draftProviderValue ? Number(draftProviderValue) : null,
+        report_provider_id: reportProviderValue ? Number(reportProviderValue) : null, enabled,
         mode: document.querySelector('#supersonic-llm-mode').value,
         timeout_seconds: Number(document.querySelector('#supersonic-llm-timeout').value),
         fallback_to_rules: document.querySelector('#supersonic-llm-fallback').checked}),
     });
+    renderLlmProviderRows();
     renderSuperSonicLlmBinding();
     showManagementFeedback(enabled ? 'LLM 语义增强已保存并立即应用' : 'SuperSonic 已切换为仅规则模式');
   } catch (cause) { showManagementFeedback(cause.message, true); }
@@ -3294,7 +3737,7 @@ async function activateLlmProvider(provider) {
       method: 'POST', headers: { 'X-AgentBI-CSRF': currentUser.csrf_token },
     });
     await loadModuleView('semantic-models');
-    showManagementFeedback(`已切换至 ${provider.model}`);
+    showManagementFeedback(`${provider.model} 已通过测试并启用`);
   } catch (cause) { showManagementFeedback(cause.message, true); }
 }
 
@@ -3310,6 +3753,9 @@ function openLlmProviderEditor(provider = null) {
   document.querySelector('#llm-key-hint').textContent = provider
     ? `${provider.api_key_masked} 已加密保存，留空沿用` : '仅服务端加密保存';
   document.querySelector('#llm-enabled').checked = Boolean(provider?.enabled);
+  if (!provider) document.querySelector('#llm-enabled').checked = true;
+  const enabledText = document.querySelector('#llm-enabled')?.closest('label')?.querySelector('span');
+  if (enabledText) enabledText.textContent = '启用此模型配置（保存前将测试连接）';
   document.querySelector('#llm-provider-editor').hidden = false;
 }
 
@@ -3344,7 +3790,7 @@ document.querySelector('#llm-provider-form').addEventListener('submit', async ev
     });
     closeLlmProviderEditor();
     await loadModuleView('semantic-models');
-    showManagementFeedback(`${body.model} 模型服务已保存${body.enabled ? '并设为当前模型' : ''}`);
+    showManagementFeedback(`${body.model} 模型服务已保存${body.enabled ? '并通过连接测试' : ''}`);
   } catch (cause) {
     error.textContent = cause.message;
     error.hidden = false;

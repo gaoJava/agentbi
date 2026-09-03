@@ -139,8 +139,12 @@ if (-not (Test-HttpOk 'http://127.0.0.1:9080/api/auth/user/getCurrentUser')) {
         if ($LASTEXITCODE -ne 0) { throw 'Could not extract the SuperSonic distribution.' }
     }
     $java = (Get-Command java -ErrorAction Stop).Source
+    $semanticDataDir = Join-Path $projectRoot 'data\supersonic'
+    New-Item -ItemType Directory -Path $semanticDataDir -Force | Out-Null
+    $semanticJdbcPath = (Join-Path $semanticDataDir 'semantic').Replace('\', '/')
+    $semanticInitMode = if (Test-Path -LiteralPath (Join-Path $semanticDataDir 'semantic.mv.db')) { 'never' } else { 'always' }
     $process = Start-Process -FilePath $java `
-        -ArgumentList '-Dserver.address=127.0.0.1', '-cp', 'conf;lib/*', 'com.tencent.supersonic.StandaloneLauncher' `
+        -ArgumentList '-Dserver.address=127.0.0.1', "-Dspring.datasource.initialization-mode=$semanticInitMode", "-Dspring.sql.init.mode=$semanticInitMode", "-Dspring.datasource.url=jdbc:h2:file:$semanticJdbcPath;DATABASE_TO_UPPER=false", '-cp', 'conf;lib/*', 'com.tencent.supersonic.StandaloneLauncher' `
         -WorkingDirectory $distributionDir `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $runtimeDir 'supersonic.stdout.log') `
@@ -227,5 +231,12 @@ if ((Test-Path -LiteralPath $supersetInitMarker) -and -not $ReinitializeSuperset
 if ($LASTEXITCODE -ne 0) { throw 'Superset Docker Compose startup failed.' }
 Wait-HttpOk -Name 'Apache Superset' -Url 'http://127.0.0.1:8088/health'
 Set-Content -LiteralPath $supersetInitMarker -Value (Get-Date).ToString('o')
+
+# Restore declarative SuperSonic same-source connections after first boot. The
+# operation is idempotent and secrets stay in the local configuration file.
+& (Join-Path $PSScriptRoot 'sync-supersonic-databases.ps1') `
+    -ConfigPath (Join-Path $projectRoot 'config\supersonic-databases.json') `
+    -SuperSonicUser $SuperSonicUser -SuperSonicPassword $SuperSonicPassword
+if ($LASTEXITCODE -ne 0) { throw 'SuperSonic database configuration sync failed.' }
 
 Show-DemoUrls

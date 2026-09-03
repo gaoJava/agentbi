@@ -29,6 +29,18 @@ Superset 大屏与登录会话
 
 ## 一键启动本地演示
 
+### Docker 运行 AgentBI
+
+```powershell
+.\scripts\start-docker.ps1 -Build
+```
+
+Docker 方式把 AgentBI 服务、原生工作台和 SQLite 数据卷封装起来，并通过
+`host.docker.internal` 连接宿主机上的 Superset 与 SuperSonic。离线镜像导出和完整环境边界见
+[`delivery/DOCKER运行说明.md`](delivery/DOCKER运行说明.md)。
+
+### 本机进程方式
+
 仅预览新版登录、权限与三栏工作台（不启动 Superset/SuperSonic）：
 
 ```powershell

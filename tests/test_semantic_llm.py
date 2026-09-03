@@ -179,6 +179,23 @@ def test_connection_checks_chat_protocol_without_requiring_semantic_draft() -> N
     asyncio.run(client.close())
 
 
+def test_alibaba_qwen_connection_disables_thinking_and_accepts_content_parts() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["model"] == "qwen3.7-flash"
+        assert payload["enable_thinking"] is False
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": [{"type": "text", "text": "OK"}]}}]
+        })
+
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    asyncio.run(client.test_connection(
+        base_url="https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        api_key="secret", model="qwen3.7-flash",
+    ))
+    asyncio.run(client.close())
+
+
 def test_glm_semantic_enrichment_uses_fast_non_reasoning_mode() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
@@ -419,4 +436,57 @@ def test_analysis_plan_normalizes_wrapped_composite_provider_shape() -> None:
     assert plan.operation == "average" and plan.confidence == pytest.approx(0.92)
     assert plan.ranking is not None and plan.ranking.limit == 5
     assert plan.assumptions == ["头部默认前5名"]
+    asyncio.run(client.close())
+
+
+def test_analysis_plan_retries_invalid_json_once_and_includes_chart_context() -> None:
+    calls = []
+    valid = {
+        "dimension": "publisher", "metric": "na_sales", "operation": "rank",
+        "ranking": {"direction": "bottom", "limit": 1}, "members": [], "ranks": [],
+        "confidence": 0.95, "assumptions": [], "needs_clarification": False,
+        "clarification_question": None, "clarification_options": [],
+    }
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append(payload)
+        content = "not-json" if len(calls) == 1 else json.dumps(valid)
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+    client = SemanticDraftLlm(settings(), httpx.MockTransport(handler))
+    plan = asyncio.run(client.compile_analysis_plan_with(
+        "垫底的是谁", base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key="secret", model="glm-5.3", timeout_seconds=10,
+        context_hint={"chart_name": "北美发行商销售排名", "dimensions": [{"field": "publisher"}],
+                      "metrics": [{"field": "na_sales"}]},
+    ))
+    assert plan is not None and plan.ranking is not None and plan.ranking.direction == "bottom"
+    assert len(calls) == 2
+    assert calls[0]["model"] == "glm-4-flash"
+    assert calls[0]["thinking"] == {"type": "disabled"}
+    assert "北美发行商销售排名" in calls[0]["messages"][0]["content"]
+    assert "上一次输出未通过结构校验" in calls[1]["messages"][-1]["content"]
+    asyncio.run(client.close())
+
+
+def test_report_polish_normalizes_provider_text_shapes() -> None:
+    result = {
+        "executive_summary": ["销量结构保持集中。"],
+        "findings": "头部平台贡献较高。\n第二梯队仍有差距。",
+        "actions": ["持续跟踪头部平台。"],
+        "caveats": {"text": "现有证据只能证明结构差异。"},
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(
+        200, json={"choices": [{"message": {"content": json.dumps(result, ensure_ascii=False)}}]},
+    ))
+    client = SemanticDraftLlm(settings(), transport)
+    polished = asyncio.run(client.polish_report_with(
+        {"title": "平台分析", "summary": "销量结构保持集中。",
+         "content": {"findings": ["头部平台贡献较高。", "第二梯队仍有差距。"],
+                     "actions": ["持续跟踪头部平台。"]},
+         "evidence_path": "现有证据只能证明结构差异。"},
+        base_url="http://llm.test/v1", api_key="secret", model="model",
+    ))
+    assert polished["executive_summary"] == "销量结构保持集中。"
+    assert polished["findings"] == ["头部平台贡献较高。", "第二梯队仍有差距。"]
+    assert polished["caveats"] == "现有证据只能证明结构差异。"
     asyncio.run(client.close())

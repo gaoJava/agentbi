@@ -1,0 +1,50 @@
+name: insightpilot-agentbi
+
+services:
+  agentbi:
+    image: ${AGENTBI_IMAGE:-insightpilot-agentbi:0.1.0}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${AGENTBI_VERSION:-0.1.0}
+        PYTHON_IMAGE: ${AGENTBI_PYTHON_IMAGE:-python:3.11-slim-bookworm}
+    restart: unless-stopped
+    ports:
+      - "${AGENTBI_BIND_ADDRESS:-127.0.0.1}:${AGENTBI_PORT:-8090}:8090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY:?Set AGENTBI_API_KEY in the generated env file}
+      AGENTBI_SESSION_SECRET: ${AGENTBI_SESSION_SECRET:?Set AGENTBI_SESSION_SECRET in the generated env file}
+      AGENTBI_DATABASE_URL: sqlite:////app/data/agentbi.db
+      AGENTBI_ALLOWED_ORIGINS: ${AGENTBI_ALLOWED_ORIGINS:-http://127.0.0.1:8090,http://localhost:8090}
+      AGENTBI_ENABLE_DEMO_LOGIN: ${AGENTBI_ENABLE_DEMO_LOGIN:-true}
+      AGENTBI_DEMO_USER_PASSWORD: ${AGENTBI_DEMO_USER_PASSWORD:-user}
+      AGENTBI_DEMO_ADMIN_PASSWORD: ${AGENTBI_DEMO_ADMIN_PASSWORD:-admin}
+      SUPERSET_BASE_URL: ${SUPERSET_BASE_URL:-http://host.docker.internal:8088}
+      SUPERSET_DASHBOARD_PATH: ${SUPERSET_DASHBOARD_PATH:-/superset/dashboard/1/}
+      SUPERSET_USER: ${SUPERSET_USER:-}
+      SUPERSET_PASSWORD: ${SUPERSET_PASSWORD:-}
+      SUPERSONIC_BASE_URL: ${SUPERSONIC_BASE_URL:-http://host.docker.internal:9080}
+      SUPERSONIC_TOKEN: ${SUPERSONIC_TOKEN:-}
+      AGENTBI_REQUEST_TIMEOUT_SECONDS: ${AGENTBI_REQUEST_TIMEOUT_SECONDS:-60}
+      AGENTBI_CONVERSATION_TOKEN_THRESHOLD: ${AGENTBI_CONVERSATION_TOKEN_THRESHOLD:-6000}
+      AGENTBI_CONVERSATION_MESSAGE_THRESHOLD: ${AGENTBI_CONVERSATION_MESSAGE_THRESHOLD:-20}
+      AGENTBI_CONVERSATION_KEEP_RECENT_TURNS: ${AGENTBI_CONVERSATION_KEEP_RECENT_TURNS:-4}
+    volumes:
+      - agentbi-data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+volumes:
+  agentbi-data:
+    name: insightpilot-agentbi-data

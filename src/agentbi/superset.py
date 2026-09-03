@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
-import asyncio
 from typing import Any, ClassVar
 from urllib.parse import unquote, urlsplit
 

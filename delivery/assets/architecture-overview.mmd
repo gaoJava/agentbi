@@ -1,0 +1,13 @@
+flowchart LR
+    U[业务用户] --> W[AgentBI 分析工作台]
+    W --> G[身份与安全代理]
+    G --> O[AgentBI 编排引擎]
+    O --> C[会话与上下文压缩]
+    O --> R[多模型角色路由]
+    O --> D[下钻与报告引擎]
+    O --> E[证据校验与审计]
+    O --> S[SuperSonic 语义层]
+    S --> DB[(真实只读数据库)]
+    W -. 图表与筛选上下文 .-> SS[Apache Superset]
+    R -. 结构化意图/文字 .-> L[LLM 服务]
+    L -. 不直接访问数据库 .-> R

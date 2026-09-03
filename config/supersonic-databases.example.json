@@ -1,0 +1,14 @@
+{
+  "connections": [
+    {
+      "name": "examples",
+      "type": "postgresql",
+      "host": "127.0.0.1",
+      "port": "5432",
+      "database": "examples",
+      "username": "replace-with-readonly-user",
+      "password": "replace-with-runtime-secret",
+      "schema": "public"
+    }
+  ]
+}

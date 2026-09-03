@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
+from typing import ClassVar
 
 # ``agentbi.main`` exports an ASGI app at import time and intentionally fails
 # closed without secrets. Tests provide isolated non-production values first.
@@ -37,14 +38,14 @@ def test_product_shell_and_user_session_flow() -> None:
     with TestClient(create_app(settings())) as client:
         shell = client.get("/app")
         assert shell.status_code == 200
-        assert "generated/workbench-runtime.js?v=20260831.9" in shell.text
-        assert "app.js?v=20260902.5" in shell.text
+        assert "generated/workbench-runtime.js?v=20260902.10" in shell.text
+        assert "app.js?v=20260902.17" in shell.text
         assert 'id="agent-chart-route"' in shell.text
         assert 'id="agent-result-visual"' in shell.text
         assert 'id="agent-result-question"' in shell.text
         assert 'id="agent-analysis-process"' in shell.text
         assert 'id="agent-history"' in shell.text
-        assert "prototype.css?v=20260902.1" in shell.text
+        assert "prototype.css?v=20260902.9" in shell.text
         app = client.get("/app/assets/app.js")
         assert app.status_code == 200
         assert "document.querySelector('#agent-query-result').hidden = true" in app.text
@@ -60,6 +61,8 @@ def test_product_shell_and_user_session_flow() -> None:
         assert "parseGovernedUsers" in runtime.text
         assert "parseSupersetDataAssets" in runtime.text
         assert "parseSavedReports" in runtime.text
+        assert "raw.content" in runtime.text
+        assert "updated_at" in runtime.text
         assert "parseAuditEvents" in runtime.text
         app_script = client.get("/app/assets/app.js")
         assert app_script.status_code == 200
@@ -210,7 +213,7 @@ def test_user_reads_sanitized_live_supersonic_models() -> None:
 
 def test_admin_can_sync_and_select_superset_home_dashboard() -> None:
     class FakeSupersetClient:
-        dashboards = [
+        dashboards: ClassVar[list[dict[str, object]]] = [
             {
                 "superset_id": 5,
                 "title": "Sales Dashboard",
@@ -817,6 +820,29 @@ def test_navigation_modules_use_session_scoped_data() -> None:
         assert created.json()["report"]["data_scope"] == "华东区域"
         report_id = created.json()["report"]["id"]
         assert len(client.get("/api/v1/reports").json()["reports"]) == 1
+        report_update = client.patch(
+            f"/api/v1/reports/{report_id}",
+            json={
+                "title": "华东经营深度分析",
+                "summary": "核心指标表现稳定。",
+                "content": {
+                    "executive_summary": "核心指标表现稳定。",
+                    "findings": ["头部业务贡献较高。"],
+                    "actions": ["持续跟踪头部业务。"],
+                },
+                "status": "published",
+            },
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+        )
+        assert report_update.status_code == 200
+        assert report_update.json()["report"]["status"] == "published"
+        assert report_update.json()["report"]["content"]["findings"] == ["头部业务贡献较高。"]
+        ai_polish = client.post(
+            f"/api/v1/reports/{report_id}/ai-polish",
+            headers={"X-AgentBI-CSRF": user["csrf_token"]},
+        )
+        assert ai_polish.status_code == 409
+        assert "LLM 增强配置" in ai_polish.json()["detail"]
 
         admin_login = client.post(
             "/api/v1/auth/login",
@@ -1125,13 +1151,15 @@ def test_admin_generates_and_publishes_reviewed_semantic_draft() -> None:
             },
         )
         assert publish.status_code == 201
-        assert sonic.published["modelDetail"]["tableQuery"] == "public.sales_orders"
+        assert sonic.published["modelDetail"]["tableQuery"] == "sales_orders"
         assert sonic.published["modelDetail"]["measures"][0]["bizName"] == "revenue"
 
 
 def test_admin_manages_real_supersonic_domains_with_reference_guard() -> None:
     class FakeSuperSonicClient:
-        domains = [{"id": 1, "name": "销售域", "biz_name": "sales", "description": ""}]
+        domains: ClassVar[list[dict[str, object]]] = [
+            {"id": 1, "name": "销售域", "biz_name": "sales", "description": ""}
+        ]
 
         async def list_modeling_catalog(self):
             return {"domains": self.domains, "databases": []}
@@ -1296,7 +1324,7 @@ def test_admin_lists_switches_and_deletes_llm_provider_configs() -> None:
         ).status_code == 204
         assert client.delete(
             f"/api/v1/admin/llm-provider/{second.json()['id']}", headers=headers
-        ).status_code == 409
+        ).status_code == 204
 
 
 def test_admin_binds_existing_provider_for_supersonic_llm() -> None:
@@ -1311,9 +1339,15 @@ def test_admin_binds_existing_provider_for_supersonic_llm() -> None:
             json={"base_url": "https://llm.example/v1", "model": "model-one",
                   "api_key": "secret-one", "enabled": False},
         ).json()
+        report_provider = client.post(
+            "/api/v1/admin/llm-provider", headers=headers,
+            json={"base_url": "https://report.example/v1", "model": "report-model",
+                  "api_key": "secret-two", "enabled": False},
+        ).json()
         saved = client.put(
             "/api/v1/admin/supersonic-llm", headers=headers,
-            json={"provider_id": provider["id"], "enabled": True,
+            json={"provider_id": provider["id"], "draft_provider_id": provider["id"],
+                  "report_provider_id": report_provider["id"], "enabled": True,
                   "mode": "llm_enhanced", "timeout_seconds": 75,
                   "fallback_to_rules": True},
         )
@@ -1321,5 +1355,8 @@ def test_admin_binds_existing_provider_for_supersonic_llm() -> None:
         assert saved.json()["runtime_applied"] is True
         binding = client.get("/api/v1/admin/supersonic-llm").json()
         assert binding["provider_model"] == "model-one"
+        assert binding["intent_provider_id"] == provider["id"]
+        assert binding["draft_provider_id"] == provider["id"]
+        assert binding["report_provider_id"] == report_provider["id"]
         assert binding["mode"] == "llm_enhanced"
         assert binding["fallback_to_rules"] is True

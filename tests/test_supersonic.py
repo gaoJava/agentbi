@@ -14,6 +14,8 @@ from agentbi.models import (
     AnalysisPlan,
     AnalysisRanking,
     AnalyzeRequest,
+    ChartDimension,
+    ChartMetric,
     ScreenContext,
     ScreenFilter,
     SelectedDatum,
@@ -80,6 +82,91 @@ class SuperSonicClientTest(unittest.TestCase):
             SuperSonicClient._ranking_query("发行商销售排名"),
             ("publisher", "global_sales", 10),
         )
+
+    def test_compiles_business_language_superlatives_without_llm(self):
+        paraphrases = {
+            "北美发行商卖的最好的是哪一家？": ("publisher", "na_sales", 1),
+            "哪个出版商的欧洲销量最高": ("publisher", "eu_sales", 1),
+            "日本最畅销的游戏平台是什么": ("platform", "jp_sales", 1),
+            "全球销量第一的游戏品类": ("genre", "global_sales", 1),
+        }
+        for question, expected in paraphrases.items():
+            with self.subTest(question=question):
+                self.assertEqual(SuperSonicClient._ranking_query(question), expected)
+
+    def test_compiles_bottom_superlatives_and_sort_direction(self):
+        paraphrases = [
+            "北美发行商卖的最差的是哪一家？",
+            "北美销量最低的出版商是谁",
+            "哪个厂商在北美市场垫底",
+        ]
+        for question in paraphrases:
+            with self.subTest(question=question):
+                self.assertEqual(
+                    SuperSonicClient._ranking_query(question),
+                    ("publisher", "na_sales", 1),
+                )
+                self.assertEqual(SuperSonicClient._ranking_direction(question), "ASC")
+
+    def test_does_not_guess_metric_for_vague_best_publisher_question(self):
+        self.assertIsNone(SuperSonicClient._ranking_query("哪个发行商最好？"))
+
+    def test_selected_chart_resolves_omitted_dimension_and_metric(self):
+        request = analyze_request()
+        request.context.chart_name = "北美发行商销售排名"
+        request.context.dimensions = [ChartDimension(field="publisher", label="发行商")]
+        request.context.metrics = [ChartMetric(field="na_sales", label="北美销量", aggregation="SUM")]
+        self.assertEqual(
+            SuperSonicClient._chart_context_query("卖得最好的是哪一家？", request.context),
+            ("publisher", "na_sales", 1),
+        )
+        self.assertEqual(
+            SuperSonicClient._chart_context_query("卖得最差的是哪一家？", request.context),
+            ("publisher", "na_sales", 1),
+        )
+
+    def test_selected_chart_context_rejects_unknown_fields(self):
+        request = analyze_request()
+        request.context.dimensions = [ChartDimension(field="password", label="密码")]
+        request.context.metrics = [ChartMetric(field="secret", label="秘密", aggregation="SUM")]
+        self.assertIsNone(SuperSonicClient._chart_context_query("最高的是哪个？", request.context))
+
+    def test_selected_chart_resolves_omitted_rank_calculation_fields(self):
+        request = analyze_request()
+        request.context.chart_name = "北美发行商销售排名"
+        request.context.dimensions = [ChartDimension(field="publisher", label="发行商")]
+        request.context.metrics = [ChartMetric(field="na_sales", label="北美销量", aggregation="SUM")]
+        self.assertEqual(
+            SuperSonicClient._contextual_calculation_query(
+                "第一名比第二名高多少，占第二名的百分之几？", request.context
+            ),
+            {"operation": "rank_difference", "dimension": "publisher",
+             "metric": "na_sales", "limit": 2, "ranks": [1, 2]},
+        )
+        cases = {
+            "第二名是谁？": "rank_value",
+            "前三名一共卖了多少？": "sum",
+            "最后两名平均是多少？": "average",
+            "第一名是第二名的几倍？": "rank_ratio",
+            "Nintendo 比 Electronic Arts 高多少？": "difference",
+            "Nintendo 是 Electronic Arts 的几倍？": "ratio",
+            "Nintendo 占总量多少？": "share",
+        }
+        for question, operation in cases.items():
+            with self.subTest(question=question):
+                plan = SuperSonicClient._contextual_calculation_query(question, request.context)
+                self.assertIsNotNone(plan)
+                self.assertEqual(plan["operation"], operation)
+                self.assertEqual(plan["dimension"], "publisher")
+                self.assertEqual(plan["metric"], "na_sales")
+
+    def test_rank_calculation_does_not_inherit_untrusted_chart_fields(self):
+        request = analyze_request()
+        request.context.dimensions = [ChartDimension(field="password", label="密码")]
+        request.context.metrics = [ChartMetric(field="secret", label="秘密", aggregation="SUM")]
+        self.assertIsNone(SuperSonicClient._contextual_calculation_query(
+            "第一名比第二名高多少？", request.context
+        ))
 
     def test_compiles_explicit_grouped_metric_question(self):
         self.assertEqual(
@@ -207,7 +294,7 @@ class SuperSonicClientTest(unittest.TestCase):
                 ], "sql": "SELECT genre, SUM(global_sales) FROM governed_model",
             }})
 
-        async def resolver(_: str):
+        async def resolver(_: str, __):
             return AnalysisPlan(
                 dimension="genre", metric="global_sales", operation="average",
                 ranking=AnalysisRanking(direction="top", limit=5), confidence=0.91,
@@ -225,7 +312,7 @@ class SuperSonicClientTest(unittest.TestCase):
         self.assertIn("LLM", result["resolutionMode"])
 
     def test_returns_llm_clarification_before_query_execution(self):
-        async def resolver(_: str):
+        async def resolver(_: str, __):
             return AnalysisPlan(
                 confidence=0.35, needs_clarification=True,
                 clarification_question="您说的销量是全球销量还是北美销量？",

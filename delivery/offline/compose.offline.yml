@@ -1,0 +1,196 @@
+name: insightpilot-offline
+
+services:
+  db:
+    image: postgres:17
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: superset
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./data/postgres:/offline-seed:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7
+    platform: linux/amd64
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  db-seed:
+    image: postgres:17
+    platform: linux/amd64
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/offline-seed:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        attempt=0; until pg_isready --host db --username superset --dbname superset &&
+        pg_restore --host db --username superset --dbname superset
+        --clean --if-exists --no-owner --no-acl /offline-seed/superset.dump;
+        do attempt=$$((attempt+1));
+        if [ "$$attempt" -ge 40 ]; then exit 1; fi;
+        sleep 3; done &&
+        psql --host db --username superset --dbname superset
+        --set ON_ERROR_STOP=1
+        --command "UPDATE dbs SET password=NULL, encrypted_extra=NULL, server_cert=NULL;" &&
+        (psql --host db --username superset --dbname postgres --tuples-only --no-align
+        --command "SELECT 1 FROM pg_database WHERE datname='examples'" | grep -q '^1$' ||
+        createdb --host db --username superset --encoding UTF8 examples) &&
+        pg_restore --host db --username superset --dbname examples
+        --clean --if-exists --no-owner --no-acl /offline-seed/examples.dump
+
+  supersonic:
+    image: insightpilot-supersonic:0.8.6
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      supersonic-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/opt/supersonic/data/semantic;DATABASE_TO_UPPER=false
+      SPRING_DATASOURCE_INITIALIZATION_MODE: never
+      SPRING_SQL_INIT_MODE: never
+    volumes:
+      - supersonic-data:/opt/supersonic/data
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${SUPERSONIC_PORT:-9080}:9080"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 20
+
+  supersonic-init:
+    image: insightpilot-supersonic:0.8.6
+    platform: linux/amd64
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        if [ ! -f /data/semantic.mv.db ]; then
+          cp /seed/semantic.mv.db /data/semantic.mv.db;
+        fi
+    volumes:
+      - ./data/supersonic:/seed:ro
+      - supersonic-data:/data
+
+  superset:
+    image: insightpilot-superset:0.1.0
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${SUPERSET_PORT:-8088}:8088"
+    environment:
+      PYTHONPATH: /app/pythonpath:/app/docker/pythonpath_dev
+      DATABASE_DIALECT: postgresql
+      DATABASE_USER: superset
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_DB: superset
+      EXAMPLES_USER: superset
+      EXAMPLES_PASSWORD: ${POSTGRES_PASSWORD}
+      EXAMPLES_HOST: db
+      EXAMPLES_PORT: 5432
+      EXAMPLES_DB: examples
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_LOAD_EXAMPLES: "no"
+      AGENTBI_ORCHESTRATOR_URL: http://agentbi:8090
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY}
+
+  superset-init:
+    image: insightpilot-superset:0.1.0
+    platform: linux/amd64
+    restart: "no"
+    depends_on:
+      db-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        superset db upgrade &&
+        superset init &&
+        (superset fab create-admin --username admin --firstname AgentBI --lastname Admin
+        --email admin@localhost --password admin ||
+        superset fab reset-password --username admin --password admin) &&
+        superset set-database-uri --database_name examples
+        --uri "postgresql://superset:$${POSTGRES_PASSWORD}@db:5432/examples"
+    environment:
+      PYTHONPATH: /app/pythonpath:/app/docker/pythonpath_dev
+      DATABASE_DIALECT: postgresql
+      DATABASE_USER: superset
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_DB: superset
+      EXAMPLES_USER: superset
+      EXAMPLES_PASSWORD: ${POSTGRES_PASSWORD}
+      EXAMPLES_HOST: db
+      EXAMPLES_PORT: 5432
+      EXAMPLES_DB: examples
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_LOAD_EXAMPLES: "no"
+      AGENTBI_ORCHESTRATOR_URL: http://agentbi:8090
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY}
+
+  agentbi:
+    image: insightpilot-agentbi:0.1.0
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      supersonic:
+        condition: service_healthy
+      superset:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${AGENTBI_PORT:-8090}:8090"
+    environment:
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY}
+      AGENTBI_SESSION_SECRET: ${AGENTBI_SESSION_SECRET}
+      AGENTBI_DATABASE_URL: sqlite:////app/data/agentbi.db
+      AGENTBI_ALLOWED_ORIGINS: http://127.0.0.1:${AGENTBI_PORT:-8090},http://localhost:${AGENTBI_PORT:-8090},http://127.0.0.1:${SUPERSET_PORT:-8088},http://localhost:${SUPERSET_PORT:-8088}
+      AGENTBI_ENABLE_DEMO_LOGIN: "true"
+      AGENTBI_DEMO_USER_PASSWORD: ${AGENTBI_DEMO_USER_PASSWORD:-user}
+      AGENTBI_DEMO_ADMIN_PASSWORD: ${AGENTBI_DEMO_ADMIN_PASSWORD:-admin}
+      SUPERSET_BASE_URL: http://superset:8088
+      SUPERSET_DASHBOARD_PATH: /superset/dashboard/1/
+      SUPERSET_USER: admin
+      SUPERSET_PASSWORD: admin
+      SUPERSONIC_BASE_URL: http://supersonic:9080
+      SUPERSONIC_TOKEN: ${SUPERSONIC_TOKEN}
+      AGENTBI_REQUEST_TIMEOUT_SECONDS: 60
+    volumes:
+      - ./data/agentbi:/app/data
+
+volumes:
+  postgres-data:
+  supersonic-data:

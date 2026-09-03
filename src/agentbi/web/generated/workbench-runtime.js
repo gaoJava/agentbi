@@ -245,12 +245,18 @@ var AgentBI;
     }
     AgentBI.parseSupersetDataAssets = parseSupersetDataAssets;
     function parseSavedReports(value) {
-        return objectList(value, '报告').map(raw => ({
-            id: requiredText(raw, 'id'), title: requiredText(raw, 'title'),
-            dashboard_name: requiredText(raw, 'dashboard_name'), data_scope: requiredText(raw, 'data_scope'),
-            summary: requiredText(raw, 'summary'), evidence_path: requiredText(raw, 'evidence_path'),
-            created_at: requiredText(raw, 'created_at'),
-        }));
+        return objectList(value, '报告').map(raw => {
+            const created_at = requiredText(raw, 'created_at');
+            const content = raw.content && typeof raw.content === 'object' && !Array.isArray(raw.content)
+                ? raw.content : {};
+            return {
+                id: requiredText(raw, 'id'), title: requiredText(raw, 'title'),
+                dashboard_name: requiredText(raw, 'dashboard_name'), data_scope: requiredText(raw, 'data_scope'),
+                summary: requiredText(raw, 'summary'), evidence_path: requiredText(raw, 'evidence_path'), content,
+                status: raw.status === 'published' ? 'published' : 'draft',
+                created_at, updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : created_at,
+            };
+        });
     }
     AgentBI.parseSavedReports = parseSavedReports;
     function parseAuditEvents(value) {
