@@ -53,6 +53,29 @@ def analyze_request() -> AnalyzeRequest:
 
 
 class SuperSonicClientTest(unittest.TestCase):
+    def test_publish_model_recovers_view_when_create_returns_scalar_ack(self):
+        calls = {"views": 0, "models": 0}
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/api/semantic/model/getModelList/9"):
+                calls["models"] += 1
+                data = [] if calls["models"] == 1 else [{"id": 42, "bizName": "spike"}]
+                return httpx.Response(200, json={"code": 200, "data": data})
+            if request.url.path.endswith("/api/semantic/model/createModel"):
+                return httpx.Response(200, json={"code": 200, "data": True})
+            if request.url.path.endswith("/api/semantic/view/getViewList"):
+                calls["views"] += 1
+                data = [] if calls["views"] == 1 else [{"id": 88, "bizName": "spike_view"}]
+                return httpx.Response(200, json={"code": 200, "data": data})
+            if request.url.path.endswith("/api/semantic/view"):
+                return httpx.Response(200, json={"code": 200, "data": True})
+            if request.url.path.endswith("/api/chat/conf"):
+                return httpx.Response(200, json={"code": 200, "data": 1})
+            raise AssertionError(request.url.path)
+        client = SuperSonicClient(settings(), httpx.MockTransport(handler))
+        asyncio.run(client.publish_semantic_model({"name": "Spike", "bizName": "spike", "domainId": 9, "databaseId": 1, "modelDetail": {}, "admins": ["admin"]}))
+        asyncio.run(client.close())
+        self.assertEqual(calls["views"], 2)
+
     def test_structured_query_filters_use_allow_list_and_escape_values(self):
         request = analyze_request()
         request.context.filters = [
@@ -75,6 +98,12 @@ class SuperSonicClientTest(unittest.TestCase):
         self.assertEqual(
             SuperSonicClient._ranking_query("按发行商统计全球销量前 10 名"),
             ("publisher", "global_sales", 10),
+        )
+
+    def test_compiles_chinese_numeral_top_n_question(self):
+        self.assertEqual(
+            SuperSonicClient._ranking_query("按游戏平台统计全球销量前五名"),
+            ("platform", "global_sales", 5),
         )
 
     def test_compiles_recommended_chart_title_as_default_top_ten(self):

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from agentbi.config import Settings
 from agentbi.main import create_app
-from agentbi.orchestrator import Orchestrator
+from agentbi.models import AnalysisReport, AnalysisStep, AnalyzeResponse, Evidence, StepStatus
 from agentbi.superset import SupersetApiError
 
 
@@ -39,13 +39,13 @@ def test_product_shell_and_user_session_flow() -> None:
         shell = client.get("/app")
         assert shell.status_code == 200
         assert "generated/workbench-runtime.js?v=20260902.10" in shell.text
-        assert "app.js?v=20260902.17" in shell.text
+        assert "app.js?v=20260914.03" in shell.text
         assert 'id="agent-chart-route"' in shell.text
         assert 'id="agent-result-visual"' in shell.text
         assert 'id="agent-result-question"' in shell.text
         assert 'id="agent-analysis-process"' in shell.text
         assert 'id="agent-history"' in shell.text
-        assert "prototype.css?v=20260902.9" in shell.text
+        assert "prototype.css?v=20260914.01" in shell.text
         app = client.get("/app/assets/app.js")
         assert app.status_code == 200
         assert "document.querySelector('#agent-query-result').hidden = true" in app.text
@@ -103,25 +103,35 @@ def test_login_rejects_wrong_password() -> None:
 
 
 def test_workbench_analysis_uses_signed_session_identity() -> None:
-    class CapturingSuperSonic:
+    class CapturingGovernedOrchestrator:
         request = None
 
         async def query(self, request):
             self.request = request
-            return {
-                "queryId": 73,
-                "queryResults": [{"department": "研发", "visits": 19}],
-                "queryTimeCost": 8,
-                "querySql": "SELECT department, COUNT(*) FROM visits GROUP BY department",
-                "response": "研发部门访问次数最高。",
-            }
+            evidence = Evidence(
+                query_id="73", semantic_model_id=request.context.semantic_model_id,
+                question=request.question, time_range=request.context.time_range,
+                filters=request.context.filters, row_count=1, query_time_ms=8,
+                sql_fingerprint="0123456789abcdef",
+                generated_sql="SELECT department, COUNT(*) FROM governed_sales GROUP BY department",
+            )
+            report = AnalysisReport(
+                title="governed test", summary="研发部门访问次数最高。", observations=[],
+                suggested_actions=[], markdown="governed report",
+            )
+            return AnalyzeResponse(
+                request_id="governed-workbench-test", answer="研发部门访问次数最高。",
+                data=[{"department": "研发", "visits": 19}], evidence=evidence,
+                report=report, steps=[AnalysisStep(name="governed_execution", status=StepStatus.COMPLETED, duration_ms=8)],
+                warnings=["GOVERNED_CORE_IS_PRIMARY=YES"],
+            )
 
-        async def close(self) -> None:
-            return None
+        async def analyze(self, request):
+            return await self.query(request)
 
-    upstream = CapturingSuperSonic()
+    upstream = CapturingGovernedOrchestrator()
     app = create_app(settings())
-    app.state.orchestrator = Orchestrator(settings(), upstream)  # type: ignore[arg-type]
+    app.state.orchestrator = upstream
     with TestClient(app) as client:
         user = client.post(
             "/api/v1/auth/login",

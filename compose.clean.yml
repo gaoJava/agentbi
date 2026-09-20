@@ -1,0 +1,149 @@
+name: agentbi-clean
+
+# Empty local development stack.  It intentionally has no bind-mounted seed
+# data: deleting the named volumes is a complete reset of all runtime state.
+services:
+  db:
+    image: postgres:17
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a local password}
+      POSTGRES_DB: superset
+    volumes:
+      - clean-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  agentbi-db-init:
+    image: postgres:17
+    platform: linux/amd64
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      AGENTBI_DATABASE_PASSWORD: ${AGENTBI_DATABASE_PASSWORD:?set a local password}
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        (psql --host db --username superset --dbname superset --tuples-only --no-align
+        --command "SELECT 1 FROM pg_roles WHERE rolname = 'agentbi'" | grep -q '^1$' ||
+        psql --host db --username superset --dbname superset --set ON_ERROR_STOP=1
+        --command "CREATE ROLE agentbi LOGIN") &&
+        psql --host db --username superset --dbname superset --set ON_ERROR_STOP=1
+        --command "ALTER ROLE agentbi WITH PASSWORD '$${AGENTBI_DATABASE_PASSWORD}'" &&
+        (psql --host db --username superset --dbname superset --tuples-only --no-align
+        --command "SELECT 1 FROM pg_database WHERE datname = 'agentbi'" | grep -q '^1$' ||
+        psql --host db --username superset --dbname superset --set ON_ERROR_STOP=1
+        --command "CREATE DATABASE agentbi OWNER agentbi")
+
+  supersonic:
+    image: insightpilot-supersonic:0.8.6
+    platform: linux/amd64
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/opt/supersonic/data/semantic;DATABASE_TO_UPPER=false
+      SPRING_DATASOURCE_INITIALIZATION_MODE: always
+      SPRING_SQL_INIT_MODE: always
+    volumes:
+      - clean-supersonic-data:/opt/supersonic/data
+    ports:
+      - "127.0.0.1:9080:9080"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 20
+
+  superset-init:
+    image: insightpilot-superset:0.1.0
+    platform: linux/amd64
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        superset db upgrade && superset init &&
+        (superset fab create-admin --username admin --firstname AgentBI --lastname Admin
+        --email admin@localhost --password admin ||
+        superset fab reset-password --username admin --password admin)
+    environment: &superset-env
+      PYTHONPATH: /app/pythonpath:/app/docker/pythonpath_dev
+      DATABASE_DIALECT: postgresql
+      DATABASE_USER: superset
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_DB: superset
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?set a local secret}
+      SUPERSET_LOAD_EXAMPLES: "no"
+      AGENTBI_ORCHESTRATOR_URL: http://agentbi:8090
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY:?set a local key}
+
+  superset:
+    image: insightpilot-superset:0.1.0
+    platform: linux/amd64
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8088:8088"
+    environment: *superset-env
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8088/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 24
+
+  agentbi:
+    image: insightpilot-agentbi:2.0-postgres-dev
+    platform: linux/amd64
+    depends_on:
+      superset:
+        condition: service_healthy
+      supersonic:
+        condition: service_healthy
+      agentbi-db-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      AGENTBI_API_KEY: ${AGENTBI_API_KEY}
+      AGENTBI_SESSION_SECRET: ${AGENTBI_SESSION_SECRET:?set a local secret}
+      AGENTBI_DATABASE_URL: postgresql+psycopg://agentbi:${AGENTBI_DATABASE_PASSWORD}@db:5432/agentbi
+      AGENTBI_ALLOWED_ORIGINS: http://127.0.0.1:8090,http://localhost:8090,http://127.0.0.1:8088,http://localhost:8088
+      AGENTBI_ENABLE_DEMO_LOGIN: "true"
+      AGENTBI_DEMO_USER_PASSWORD: user
+      AGENTBI_DEMO_ADMIN_PASSWORD: admin
+      SUPERSET_BASE_URL: http://superset:8088
+      SUPERSET_DASHBOARD_PATH: /superset/dashboard/1/
+      SUPERSET_USER: admin
+      SUPERSET_PASSWORD: admin
+      SUPERSONIC_BASE_URL: http://supersonic:9080
+      SUPERSONIC_TOKEN: ${SUPERSONIC_TOKEN:-}
+      AGENTBI_REQUEST_TIMEOUT_SECONDS: 60
+
+volumes:
+  clean-postgres-data:
+  clean-supersonic-data:

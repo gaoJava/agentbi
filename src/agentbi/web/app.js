@@ -30,6 +30,12 @@ let loadedSupersetDashboards = [];
 let supersetHomeSnapshot;
 let loadedSupersetDatabases = [];
 let loadedLlmProviders = [];
+let loadedOntologyChangeSets = [];
+let loadedOntologySnapshot;
+let ontologyDraftAssets = [];
+let ontologyDraftRelations = [];
+let selectedOntologyKind = 'all';
+let selectedOntologyAssetId;
 let supersonicLlmBinding;
 let editingLlmProviderId;
 let editingSupersetDatabaseId;
@@ -1174,6 +1180,17 @@ async function loadModuleView(view) {
         model.biz_name || '—',
         model.status === 'active' ? '● 已启用' : '● 已下线',
       ]);
+    } else if (view === 'ontology-management') {
+      const [changeSetBody, publication] = await Promise.all([
+        request('/api/v1/admin/ontology/change-sets'),
+        request('/api/v1/admin/ontology/publications').catch(error => {
+          if (error.status === 404) return { snapshot: null };
+          throw error;
+        }),
+      ]);
+      loadedOntologyChangeSets = changeSetBody.change_sets || [];
+      loadedOntologySnapshot = publication.snapshot || null;
+      renderOntologyManagement();
     } else if (view === 'data-sources') {
       const [assetsBody, catalog, businessModels] = await Promise.all([
         request('/api/v1/admin/superset/data-assets'),
@@ -1276,6 +1293,183 @@ async function loadModuleView(view) {
   } finally {
     target.setAttribute('aria-busy', 'false');
   }
+}
+
+function renderOntologyManagement() {
+  const snapshot = loadedOntologySnapshot;
+  document.querySelector('#ontology-publication-version').textContent = snapshot?.version || '尚未发布';
+  document.querySelector('#ontology-version-value').textContent = snapshot?.version || '—';
+  document.querySelector('#ontology-asset-total').textContent = String(snapshot?.assets?.length || 0);
+  document.querySelector('#ontology-relation-total').textContent = String(snapshot?.relations?.length || 0);
+  document.querySelector('#ontology-review-total').textContent = String(
+    loadedOntologyChangeSets.filter(item => item.state === 'in_review').length,
+  );
+  renderModuleRows('ontology-change-set-table-body', loadedOntologyChangeSets, item => [
+    item.target_version, item.title, ontologyStateLabel(item.state),
+    `${item.assets.length} / ${item.relations.length}`, item.created_by,
+  ], ontologyChangeSetActions);
+  const assets = snapshot?.assets || [];
+  if (!assets.some(asset => asset.id === selectedOntologyAssetId)) selectedOntologyAssetId = undefined;
+  const kinds = ['all', 'entity', 'metric', 'dimension', 'rule', 'data_model', 'semantic'];
+  const tabs = document.querySelector('#ontology-kind-tabs'); tabs.replaceChildren(...kinds.map(kind => {
+    const button = document.createElement('button'); button.type = 'button';
+    const count = kind === 'all' ? assets.length : assets.filter(asset => asset.kind === kind).length;
+    button.textContent = `${kind === 'all' ? '全部' : ontologyKindLabel(kind)} ${count}`;
+    button.className = kind === selectedOntologyKind ? 'active' : '';
+    button.addEventListener('click', () => {
+      selectedOntologyKind = kind;
+      const candidates = kind === 'all' ? assets : assets.filter(asset => asset.kind === kind);
+      selectedOntologyAssetId = candidates[0]?.id;
+      renderOntologyManagement();
+    }); return button;
+  }));
+  const filtered = selectedOntologyKind === 'all' ? assets : assets.filter(asset => asset.kind === selectedOntologyKind);
+  const body = document.querySelector('#ontology-asset-table-body'); body.replaceChildren(...filtered.map(asset => {
+    const row = document.createElement('tr'); row.className = asset.id === selectedOntologyAssetId ? 'selected' : '';
+    [asset.name, ontologyKindLabel(asset.kind), (asset.aliases || []).join('、') || '—'].forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); });
+    row.addEventListener('click', () => { selectedOntologyAssetId = asset.id; renderOntologyManagement(); }); return row;
+  }));
+  const selected = assets.find(asset => asset.id === selectedOntologyAssetId);
+  const related = (snapshot?.relations || []).filter(relation => relation.source_id === selected?.id || relation.target_id === selected?.id);
+  const catalog = document.querySelector('.ontology-catalog-grid');
+  const detail = document.querySelector('#ontology-asset-detail');
+  catalog.classList.toggle('detail-open', Boolean(selected)); detail.hidden = !selected;
+  if (selected) detail.innerHTML = `<button type="button" class="ontology-detail-close" aria-label="关闭详情">×</button><span>${ontologyKindLabel(selected.kind)}</span><h3>${escapeHtml(selected.name)}</h3><code>${escapeHtml(selected.id)}</code><p>${escapeHtml(selected.description || '未填写业务说明')}</p><small>别名：${escapeHtml((selected.aliases || []).join('、') || '—')}</small><h4>关联关系</h4><ul>${related.length ? related.map(item => `<li>${escapeHtml(item.source_id)} <b>${escapeHtml(item.relation)}</b> ${escapeHtml(item.target_id)}</li>`).join('') : '<li>暂无关联关系</li>'}</ul>`;
+  detail.querySelector('.ontology-detail-close')?.addEventListener('click', () => { selectedOntologyAssetId = undefined; renderOntologyManagement(); });
+}
+
+function escapeHtml(value) {
+  const node = document.createElement('span'); node.textContent = String(value); return node.innerHTML;
+}
+
+function ontologyStateLabel(state) {
+  return ({draft: '● 草稿', in_review: '◷ 待审核', approved: '● 已批准',
+    rejected: '● 已驳回', published: '● 已发布'})[state] || state;
+}
+
+function ontologyKindLabel(kind) {
+  return ({entity: '实体', metric: '指标', dimension: '维度', data_model: '数据模型',
+    semantic: '语义对象', rule: '业务规则'})[kind] || kind;
+}
+
+function ontologyChangeSetActions(changeSet) {
+  const group = document.createElement('div'); group.className = 'registry-actions';
+  if (changeSet.state === 'draft') {
+    group.append(actionButton('提交审核', 'primary-small', () => ontologyTransition(changeSet, 'submit')));
+  } else if (changeSet.state === 'in_review') {
+    group.append(
+      actionButton('批准', 'primary-small', () => ontologyTransition(changeSet, 'review', true)),
+      actionButton('驳回', 'danger-action', () => ontologyTransition(changeSet, 'review', false)),
+    );
+  } else if (changeSet.state === 'approved') {
+    group.append(actionButton('发布版本', 'primary-small', () => ontologyTransition(changeSet, 'publish')));
+  } else group.textContent = changeSet.state === 'published' ? '不可变快照' : '请创建新草稿';
+  return group;
+}
+
+async function ontologyTransition(changeSet, action, approved) {
+  try {
+    const options = { method: 'POST', headers: {'X-AgentBI-CSRF': currentUser.csrf_token} };
+    if (action === 'review') {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify({ approved, comment: approved ? '通过管理台批准' : '通过管理台驳回' });
+    }
+    await request(`/api/v1/admin/ontology/change-sets/${encodeURIComponent(changeSet.id)}/${action}`, options);
+    await loadModuleView('ontology-management');
+    showManagementFeedback(`${changeSet.target_version} 已${action === 'submit' ? '提交审核' : action === 'publish' ? '发布' : approved ? '批准' : '驳回'}`);
+  } catch (error) { showManagementFeedback(error.message, true); }
+}
+
+function openOntologyEditor() {
+  ontologyDraftAssets = []; ontologyDraftRelations = [];
+  document.querySelector('#ontology-editor-form').reset();
+  document.querySelector('#ontology-editor-error').hidden = true;
+  renderOntologyDraftRows();
+  document.querySelector('#ontology-editor').hidden = false;
+}
+
+function closeOntologyEditor() { document.querySelector('#ontology-editor').hidden = true; }
+
+async function generateOntologyAiDraft() {
+  const datasetId = Number(document.querySelector('#ontology-ai-dataset-id').value);
+  const error = document.querySelector('#ontology-editor-error');
+  if (!Number.isInteger(datasetId) || datasetId < 1) { error.textContent = '请输入有效的 Superset Dataset ID'; error.hidden = false; return; }
+  const button = document.querySelector('#generate-ontology-ai-draft');
+  button.disabled = true; button.textContent = '正在分析元数据…';
+  try {
+    const result = await request('/api/v1/admin/ontology/ai-mapping-suggestions', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({dataset_id: datasetId}),
+    });
+    if (ontologyDraftAssets.length && !window.confirm('生成建议会替换当前未保存草稿，是否继续？')) return;
+    ontologyDraftAssets = result.assets || []; ontologyDraftRelations = result.relations || [];
+    const evidence = document.querySelector('#ontology-ai-evidence');
+    evidence.textContent = `${result.notice} 证据：${(result.evidence || []).map(item => `${item.asset_id} ← ${item.field}（置信度 ${Math.round(item.confidence * 100)}%）`).join('；')}`;
+    evidence.hidden = false; error.hidden = true; renderOntologyDraftRows();
+  } catch (cause) { error.textContent = cause.message; error.hidden = false; }
+  finally { button.disabled = false; button.textContent = '生成建议'; }
+}
+
+function renderOntologyDraftRows() {
+  renderModuleRows('ontology-draft-assets', ontologyDraftAssets, asset => [
+    asset.id, ontologyKindLabel(asset.kind), asset.name,
+  ], asset => actionButton('移除', 'danger-action', () => {
+    ontologyDraftAssets = ontologyDraftAssets.filter(item => item.id !== asset.id);
+    ontologyDraftRelations = ontologyDraftRelations.filter(item => item.source_id !== asset.id && item.target_id !== asset.id);
+    renderOntologyDraftRows();
+  }));
+  renderModuleRows('ontology-draft-relations', ontologyDraftRelations, relation => [
+    relation.source_id, relation.relation, relation.target_id,
+  ], relation => actionButton('移除', 'danger-action', () => {
+    ontologyDraftRelations = ontologyDraftRelations.filter(item => item !== relation); renderOntologyDraftRows();
+  }));
+}
+
+function addOntologyDraftAsset() {
+  const id = document.querySelector('#ontology-asset-id').value.trim();
+  const name = document.querySelector('#ontology-asset-name').value.trim();
+  const error = document.querySelector('#ontology-editor-error');
+  if (!id || !name) { error.textContent = '请填写资产 ID 和业务名称'; error.hidden = false; return; }
+  if (ontologyDraftAssets.some(asset => asset.id === id)) { error.textContent = '同一草稿内资产 ID 必须唯一'; error.hidden = false; return; }
+  ontologyDraftAssets.push({
+    id, kind: document.querySelector('#ontology-asset-kind').value, name,
+    aliases: document.querySelector('#ontology-asset-aliases').value.split(',').map(value => value.trim()).filter(Boolean),
+    description: document.querySelector('#ontology-asset-description').value.trim(),
+  });
+  ['#ontology-asset-id', '#ontology-asset-name', '#ontology-asset-aliases', '#ontology-asset-description'].forEach(id => { document.querySelector(id).value = ''; });
+  error.hidden = true; renderOntologyDraftRows();
+}
+
+function addOntologyDraftRelation() {
+  const source_id = document.querySelector('#ontology-relation-source').value.trim();
+  const relation = document.querySelector('#ontology-relation-type').value.trim().toUpperCase();
+  const target_id = document.querySelector('#ontology-relation-target').value.trim();
+  const error = document.querySelector('#ontology-editor-error');
+  if (!source_id || !relation || !target_id) { error.textContent = '请填写源资产、关系类型和目标资产'; error.hidden = false; return; }
+  if (!ontologyDraftAssets.some(asset => asset.id === source_id) || !ontologyDraftAssets.some(asset => asset.id === target_id)) {
+    error.textContent = '关系两端必须是已加入草稿的资产'; error.hidden = false; return;
+  }
+  ontologyDraftRelations.push({source_id, relation, target_id});
+  ['#ontology-relation-source', '#ontology-relation-type', '#ontology-relation-target'].forEach(id => { document.querySelector(id).value = ''; });
+  error.hidden = true; renderOntologyDraftRows();
+}
+
+async function saveOntologyDraft(event) {
+  event.preventDefault();
+  const version = document.querySelector('#ontology-version-input').value.trim();
+  const title = document.querySelector('#ontology-title-input').value.trim();
+  const error = document.querySelector('#ontology-editor-error');
+  if (!ontologyDraftAssets.length) { error.textContent = '至少添加一个业务资产'; error.hidden = false; return; }
+  const assets = ontologyDraftAssets.map(asset => ({...asset, version, state: 'draft'}));
+  const relations = ontologyDraftRelations.map(relation => ({...relation, version}));
+  try {
+    await request('/api/v1/admin/ontology/change-sets', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AgentBI-CSRF': currentUser.csrf_token},
+      body: JSON.stringify({target_version: version, title, assets, relations}),
+    });
+    closeOntologyEditor(); await loadModuleView('ontology-management');
+    showManagementFeedback(`${version} 本体草稿已保存，可提交独立审核`);
+  } catch (cause) { error.textContent = cause.message; error.hidden = false; }
 }
 
 function renderManagedDashboardCharts() {
@@ -1977,7 +2171,7 @@ function renderAnalysisProcess(steps, running = false, elapsedMs = 0, failedMess
   const panel = document.querySelector('#agent-analysis-process');
   const list = document.querySelector('#agent-analysis-steps');
   const expandedSteps = new Set([...list.querySelectorAll('details[open]')].map(node => node.dataset.step));
-  const source = Array.isArray(steps) && steps.length ? steps : [
+  const source = Array.isArray(steps) && steps.length ? steps.map(step => step.title ? ({name:step.id,status:String(step.status || 'PLANNED').toLowerCase(),duration_ms:0,detail:`${step.description}${step.user_explanation ? `\n${step.user_explanation}` : ''}`}) : step) : [
     {name: 'authorize', status: 'completed', duration_ms: 0, detail: '已提交当前用户与图表上下文'},
     {name: 'semantic_query', status: running ? 'running' : 'failed', duration_ms: elapsedMs, detail: failedMessage || '正在等待 SuperSonic 返回'},
     {name: 'validate_evidence', status: 'pending', duration_ms: 0, detail: '等待查询结果'},
@@ -2337,7 +2531,8 @@ async function analyzeFromWorkbench() {
     });
     workbenchAnalysis = body;
     window.clearInterval(processTimer);
-    renderAnalysisProcess(body.steps || []);
+    renderAnalysisProcess(body.analysis_progress?.steps || body.steps || []);
+    renderAnalysisUiContract(body);
     workbenchChatId = body.chat_id || workbenchChatId;
     if (workbenchPendingDrill) {
       workbenchDrillDepth += 1;
@@ -2787,6 +2982,13 @@ document.querySelector('#sync-superset-dashboards').addEventListener('click', as
 document.querySelectorAll('.module-refresh').forEach(button => {
   button.addEventListener('click', () => loadModuleView(button.dataset.module));
 });
+document.querySelector('#open-ontology-editor').addEventListener('click', openOntologyEditor);
+document.querySelector('#close-ontology-editor').addEventListener('click', closeOntologyEditor);
+document.querySelector('#cancel-ontology-editor').addEventListener('click', closeOntologyEditor);
+document.querySelector('#add-ontology-asset').addEventListener('click', addOntologyDraftAsset);
+document.querySelector('#add-ontology-relation').addEventListener('click', addOntologyDraftRelation);
+document.querySelector('#generate-ontology-ai-draft').addEventListener('click', generateOntologyAiDraft);
+document.querySelector('#ontology-editor-form').addEventListener('submit', saveOntologyDraft);
 
 function closeDatabaseEditor() {
   document.querySelector('#database-editor').hidden = true;
@@ -4064,3 +4266,15 @@ document.querySelector('#semantic-draft-form').addEventListener('submit', async 
 
 window.AgentBI.session.restore().then(showWorkbench).catch(showLogin);
 renderDrilldown(selectedDrillChart);
+
+function renderAnalysisUiContract(body) {
+  const card = document.querySelector('#agent-clarification');
+  if (body.clarification) {
+    document.querySelector('#agent-clarification-question').textContent = body.clarification.question;
+    const options = document.querySelector('#agent-clarification-options');
+    options.replaceChildren(...(body.clarification.options || []).map(option => { const label=document.createElement('label'); const input=document.createElement('input'); input.type='radio'; input.name='clarification'; input.value=option.value; input.addEventListener('change',()=>document.querySelector('#agent-clarification-confirm').disabled=false); label.append(input,document.createTextNode(`${option.label}${option.description ? `：${option.description}` : ''}`)); return label; }));
+    card.hidden=false;
+  } else card.hidden=true;
+  const trace = document.querySelector('#agent-developer-trace');
+  if (body.developer_trace) { document.querySelector('#agent-developer-trace-content').textContent=JSON.stringify(body.developer_trace,null,2); trace.hidden=false; } else trace.hidden=true;
+}

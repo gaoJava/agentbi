@@ -301,6 +301,105 @@ class DashboardSemanticBinding(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class OntologyPublicationRecord(Base):
+    """Immutable, published enterprise-ontology snapshot header."""
+
+    __tablename__ = "ontology_publications"
+
+    version: Mapped[str] = mapped_column(String(64), primary_key=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    checksum: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    published_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    runtime_bindings_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OntologyAssetRecord(Base):
+    """One immutable business asset in a published ontology snapshot."""
+
+    __tablename__ = "ontology_assets"
+
+    version: Mapped[str] = mapped_column(
+        String(64), ForeignKey("ontology_publications.version"), primary_key=True
+    )
+    asset_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(256), index=True)
+    state: Mapped[str] = mapped_column(String(32))
+    aliases_json: Mapped[str] = mapped_column(Text, default="[]")
+    description: Mapped[str] = mapped_column(Text, default="")
+    strategy_definition_json: Mapped[str] = mapped_column(Text, default="null")
+
+
+class OntologyRelationRecord(Base):
+    """A version-pinned directed relationship between published assets."""
+
+    __tablename__ = "ontology_relations"
+
+    version: Mapped[str] = mapped_column(
+        String(64), ForeignKey("ontology_publications.version"), primary_key=True
+    )
+    source_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    relation: Mapped[str] = mapped_column(String(128), primary_key=True)
+    target_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class OntologyChangeSetRecord(Base):
+    """Editable proposal that may become one immutable ontology publication."""
+
+    __tablename__ = "ontology_change_sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    target_version: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(256))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    runtime_bindings_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
+class OntologyChangeSetAssetRecord(Base):
+    __tablename__ = "ontology_change_set_assets"
+
+    change_set_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ontology_change_sets.id"), primary_key=True
+    )
+    asset_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(256))
+    state: Mapped[str] = mapped_column(String(32))
+    aliases_json: Mapped[str] = mapped_column(Text, default="[]")
+    description: Mapped[str] = mapped_column(Text, default="")
+    strategy_definition_json: Mapped[str] = mapped_column(Text, default="null")
+
+
+class OntologyChangeSetRelationRecord(Base):
+    __tablename__ = "ontology_change_set_relations"
+
+    change_set_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ontology_change_sets.id"), primary_key=True
+    )
+    source_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    relation: Mapped[str] = mapped_column(String(128), primary_key=True)
+    target_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class OntologyChangeSetReviewRecord(Base):
+    __tablename__ = "ontology_change_set_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    change_set_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ontology_change_sets.id"), index=True
+    )
+    reviewer: Mapped[str] = mapped_column(String(128))
+    decision: Mapped[str] = mapped_column(String(32))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 @dataclass(frozen=True, slots=True)
 class AccountRecord:
     id: str
@@ -413,6 +512,18 @@ class IdentityRepository:
                     if column not in llm_binding_columns:
                         connection.exec_driver_sql(
                             f"ALTER TABLE supersonic_llm_bindings ADD COLUMN {column} INTEGER"
+                        )
+                for table_name in ("ontology_assets", "ontology_change_set_assets"):
+                    ontology_columns = {
+                        row[1]
+                        for row in connection.exec_driver_sql(
+                            f"PRAGMA table_info({table_name})"
+                        ).fetchall()
+                    }
+                    if "strategy_definition_json" not in ontology_columns:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE {table_name} "
+                            "ADD COLUMN strategy_definition_json TEXT DEFAULT 'null' NOT NULL"
                         )
         with Session(self.engine) as db, db.begin():
             for code, name in PERMISSIONS.items():

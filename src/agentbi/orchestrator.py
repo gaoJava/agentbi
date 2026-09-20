@@ -8,7 +8,20 @@ import uuid
 from typing import Any
 from urllib.parse import quote
 
+from agentbi.analysis_planner import AnalysisStepQueryPlanner, DeterministicAnalysisPlanner
 from agentbi.config import Settings
+from agentbi.execution import (
+    AnalysisState,
+    DeterministicAgentLoop,
+    DeterministicNextActionPolicy,
+    EvidenceGroundedSynthesizer,
+    EvidencePackageBuilder,
+    ExecutionRuntime,
+    GroundingValidator,
+    ObservationBuilder,
+    ObservationStatus,
+    RuntimeCapabilityCoverage,
+)
 from agentbi.models import (
     AnalysisReport,
     AnalysisStep,
@@ -17,18 +30,48 @@ from agentbi.models import (
     Evidence,
     StepStatus,
 )
+from agentbi.ontology_service import OntologyService, PlanningContextBuilder
 from agentbi.security import SlidingWindowRateLimiter, enforce_request_policy, sql_fingerprint
+from agentbi.semantic_parser import ParseRequest, RuleBasedSemanticParser
 from agentbi.supersonic import SuperSonicClient
 
 
+class GovernedAnalysisError(RuntimeError):
+    """A user-visible governed refusal; it is never eligible for legacy retry."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 class Orchestrator:
-    def __init__(self, settings: Settings, supersonic: SuperSonicClient):
+    def __init__(
+        self,
+        settings: Settings,
+        supersonic: SuperSonicClient,
+        *,
+        ontology: OntologyService | None = None,
+        parser: RuleBasedSemanticParser | None = None,
+        context_builder: PlanningContextBuilder | None = None,
+        planner: DeterministicAnalysisPlanner | None = None,
+        bridge: AnalysisStepQueryPlanner | None = None,
+        runtime: ExecutionRuntime | None = None,
+    ):
         self._settings = settings
         self._supersonic = supersonic
         self._rate_limiter = SlidingWindowRateLimiter(settings.requests_per_minute)
         self._idempotency_lock = asyncio.Lock()
         self._inflight: dict[str, asyncio.Task[AnalyzeResponse]] = {}
         self._completed: dict[str, tuple[float, AnalyzeResponse]] = {}
+        # All dependencies are supplied by the application factory.  Keeping
+        # this explicit makes an incomplete migration fail closed rather than
+        # falling through to the old free-form SuperSonic query endpoint.
+        self._ontology = ontology
+        self._parser = parser
+        self._context_builder = context_builder
+        self._planner = planner
+        self._bridge = bridge
+        self._runtime = runtime
 
     async def analyze(self, request: AnalyzeRequest) -> AnalyzeResponse:
         if not request.client_request_id:
@@ -74,48 +117,126 @@ class Orchestrator:
         self._rate_limiter.enforce(request.actor.subject)
         steps.append(self._step("authorize", started, "request policy accepted"))
 
-        started = time.perf_counter()
-        result = await self._supersonic.query(request)
-        semantic_detail = self._semantic_detail(request.question, result)
-        steps.append(self._step("semantic_query", started, semantic_detail))
-        calculation_detail = result.get("calculationDetail")
-        if isinstance(calculation_detail, str) and calculation_detail.strip():
-            steps.append(self._step("calculate", time.perf_counter(), calculation_detail.strip()))
+        return await self._execute_governed(request, request_id, steps)
 
+    async def _execute_governed(
+        self, request: AnalyzeRequest, request_id: str, steps: list[AnalysisStep]
+    ) -> AnalyzeResponse:
+        if not all((self._ontology, self._parser, self._context_builder, self._planner, self._bridge, self._runtime)):
+            raise GovernedAnalysisError("EXECUTION_FAILED", "governed analysis composition is not configured")
+        snapshot = await self._ontology.published_snapshot()
+        if snapshot is None:
+            raise GovernedAnalysisError("EXECUTION_FAILED", "no published ontology snapshot is available")
         started = time.perf_counter()
-        rows = self._extract_rows(result)
-        warnings: list[str] = []
-        if len(rows) > self._settings.max_result_rows:
-            rows = rows[: self._settings.max_result_rows]
-            warnings.append("result was truncated by the server-side row limit")
-        evidence = Evidence(
-            query_id=str(result.get("queryId") or request_id),
-            semantic_model_id=request.context.semantic_model_id,
-            question=request.question,
-            time_range=str(result.get("effectiveTimeRange") or request.context.time_range),
-            filters=request.context.filters,
-            row_count=len(rows),
-            query_time_ms=self._non_negative_int(result.get("queryTimeCost")),
-            sql_fingerprint=sql_fingerprint(result.get("querySql")),
-            generated_sql=self._safe_generated_sql(result.get("querySql")),
-        )
-        steps.append(self._step(
-            "validate_evidence",
-            started,
-            f"查询编号：{evidence.query_id}\n返回并校验：{len(rows)} 行\nSQL 指纹：{evidence.sql_fingerprint or '—'}",
+        parsed = await self._parser.parse(ParseRequest(
+            question=request.question, ontology_version=snapshot.version,
+            dashboard_id=request.context.dashboard_id, actor_id=request.actor.subject,
         ))
-        answer = self._extract_answer(result, len(rows))
+        steps.append(self._step("semantic_parser", started, f"snapshot={snapshot.version}"))
+        if parsed.clarification is not None:
+            raise GovernedAnalysisError("CLARIFICATION_REQUIRED", parsed.clarification.reason)
+        assert parsed.query is not None
 
-        return AnalyzeResponse(
-            request_id=request_id,
-            chat_id=self._positive_int(result.get("chatId")),
-            answer=answer,
-            data=rows,
-            evidence=evidence,
-            report=self._build_report(answer, rows, evidence, request.context.dashboard_id),
-            steps=steps,
-            warnings=warnings,
-        )
+        started = time.perf_counter()
+        context = await self._context_builder.build(parsed.query)
+        planning = await self._planner.plan(parsed.query, context)
+        steps.append(self._step("analysis_planner", started, f"intent={parsed.query.intent.value}"))
+        if planning.plan is None:
+            issue = planning.issues[0] if planning.issues else None
+            code = "UNSUPPORTED_RUNTIME_CAPABILITY" if issue and issue.code.value == "MISSING_CAPABILITY" else "CLARIFICATION_REQUIRED"
+            raise GovernedAnalysisError(code, issue.message if issue else "no governed analysis plan")
+
+        step_plans = tuple(self._bridge.plan(planning.plan, step, parsed.query, context) for step in planning.plan.steps)
+        bridge_issues = tuple(issue for item in step_plans for issue in item.issues)
+        if bridge_issues:
+            raise GovernedAnalysisError("EXECUTION_FAILED", bridge_issues[0].message)
+
+        # Root-cause plans deliberately execute only their current/baseline
+        # seed.  The deterministic loop owns all subsequent governed actions.
+        initial_steps = step_plans[:1] if parsed.query.intent.value == "ROOT_CAUSE" else step_plans
+        executions = tuple(plan for item in initial_steps for plan in item.executions)
+        if not executions:
+            raise GovernedAnalysisError("EXECUTION_FAILED", "query planner emitted no execution plan")
+        started = time.perf_counter()
+        results = tuple([await self._runtime.execute(plan) for plan in executions])
+        observations = tuple(ObservationBuilder.build(plan, result) for plan, result in zip(executions, results, strict=True))
+        steps.append(self._step("governed_execution", started, f"executions={len(results)}"))
+        self._raise_for_observations(observations)
+
+        state = AnalysisState()
+        for observation in observations:
+            state.add(observation)
+        if len(observations) == 2 and observations[0].metric_asset_id == observations[1].metric_asset_id and observations[0].dimensions == observations[1].dimensions:
+            state.pair(observations[0].observation_id, observations[1].observation_id)
+
+        answer: str
+        if parsed.query.intent.value == "ROOT_CAUSE":
+            if not state.comparisons:
+                raise GovernedAnalysisError("EXECUTION_FAILED", "root-cause seed comparison was not produced")
+            binding = snapshot.runtime_bindings[0] if snapshot.runtime_bindings else None
+            if binding is None:
+                raise GovernedAnalysisError("EXECUTION_FAILED", "published runtime binding is unavailable")
+            started = time.perf_counter()
+            loop = DeterministicAgentLoop(
+                DeterministicNextActionPolicy(RuntimeCapabilityCoverage.from_binding(binding)), self._runtime
+            )
+            state, loop_trace = await loop.run(
+                context=context, state=state,
+                current_template=executions[0], baseline_template=executions[1],
+            )
+            stop_reason = loop_trace[-1].stop_reason if loop_trace else None
+            steps.append(self._step("agent_loop", started, f"stop_reason={stop_reason.value if stop_reason else 'NONE'}"))
+            self._raise_for_observations(tuple(state.unavailable()))
+            package = EvidencePackageBuilder().build(
+                state, target_metric_id=planning.plan.target_asset_id, stop_reason=stop_reason
+            )
+            final, synthesis_errors = await EvidenceGroundedSynthesizer().synthesize(package)
+            valid, grounding_errors = GroundingValidator().validate(final, package)
+            if not valid:
+                raise GovernedAnalysisError("EXECUTION_FAILED", f"grounding validation failed: {', '.join(grounding_errors)}")
+            answer = "\n".join((final.summary, *(item.text for item in final.breakdown_findings), *(item.text for item in final.driver_findings)))
+            steps.append(self._step("synthesis", time.perf_counter(), f"mode={final.synthesis_mode}; grounding_errors=none; synthesis_errors={','.join(synthesis_errors) or 'none'}"))
+        elif parsed.query.intent.value == "COMPARISON":
+            if not state.comparisons:
+                raise GovernedAnalysisError("EXECUTION_FAILED", "explicit comparison did not produce a paired observation")
+            comparison = state.comparisons[0]
+            member = comparison.members[0] if comparison.members else None
+            if member is None or member.current is None or member.baseline is None or member.delta is None:
+                raise GovernedAnalysisError("EXECUTION_FAILED", "explicit comparison evidence is incomplete")
+            pct = member.delta_pct
+            answer = f"当前期 {member.current}，对比期 {member.baseline}，变化 {member.delta}（{pct}）。"
+            steps.append(self._step("synthesis", time.perf_counter(), "mode=DETERMINISTIC_COMPARISON; provenance=USER_SPECIFIED"))
+        else:
+            answer = self._governed_answer(observations)
+
+        rows = [dict(row) for result in results for row in result.rows][:self._settings.max_result_rows]
+        first = results[0]
+        evidence = Evidence(query_id=first.query_id or request_id, semantic_model_id=request.context.semantic_model_id,
+                            question=request.question, time_range=parsed.query.time_scope.raw_text if parsed.query.time_scope else request.context.time_range,
+                            filters=request.context.filters, row_count=len(rows), query_time_ms=sum(result.duration_ms for result in results),
+                            sql_fingerprint=sql_fingerprint(first.generated_sql), generated_sql=self._safe_generated_sql(first.generated_sql))
+        steps.append(self._step("validate_evidence", time.perf_counter(), f"snapshot={snapshot.version}; rows={len(rows)}"))
+        return AnalyzeResponse(request_id=request_id, chat_id=None, answer=answer, data=rows, evidence=evidence,
+                               report=self._build_report(answer, rows, evidence, request.context.dashboard_id), steps=steps,
+                               warnings=["GOVERNED_CORE_IS_PRIMARY=YES", f"SNAPSHOT={snapshot.version}"])
+
+    @staticmethod
+    def _raise_for_observations(observations) -> None:
+        for observation in observations:
+            if observation.status is ObservationStatus.UNSUPPORTED:
+                raise GovernedAnalysisError("UNSUPPORTED_RUNTIME_CAPABILITY", observation.provenance.error_message or "published runtime capability is unsupported")
+            if observation.status is ObservationStatus.NO_DATA:
+                raise GovernedAnalysisError("NO_DATA", "the governed query returned no data")
+            if observation.status is ObservationStatus.EXECUTION_FAILED:
+                raise GovernedAnalysisError("EXECUTION_FAILED", observation.provenance.error_message or "governed execution failed")
+
+    @staticmethod
+    def _governed_answer(observations) -> str:
+        observation = observations[0]
+        if observation.dimensions:
+            return f"已完成受治理拆分，返回 {len(observation.values)} 个数据桶。"
+        value = observation.values[0].value if observation.values else None
+        return f"受治理查询结果：{value}。"
 
     def _prune_completed(self, now: float) -> None:
         expired = [key for key, (expires_at, _) in self._completed.items() if expires_at <= now]
