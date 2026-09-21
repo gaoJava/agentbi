@@ -13,6 +13,7 @@ export interface ScreenContext {
   semantic_model_id: number;
   time_range: string;
   filters: ScreenFilter[];
+  focused_metric?: string;
   selected?: { label: string; value?: string | number; dimension?: string };
 }
 

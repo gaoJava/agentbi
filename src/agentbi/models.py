@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agentbi.dashboard_context import DashboardContext
+
 
 class FilterOperator(StrEnum):
     EQ = "EQ"
@@ -85,6 +87,9 @@ class AnalyzeRequest(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
     actor: Actor
     context: ScreenContext
+    # This is a bounded semantic hint from a host adapter.  It is never an
+    # actor, permission, ontology, or execution-plan input.
+    dashboard_context: DashboardContext | None = None
     chat_id: int | None = Field(default=None, gt=0)
     agent_id: int | None = Field(default=None, gt=0)
     client_request_id: str | None = Field(

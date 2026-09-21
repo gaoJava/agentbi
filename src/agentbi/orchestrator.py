@@ -131,6 +131,7 @@ class Orchestrator:
         parsed = await self._parser.parse(ParseRequest(
             question=request.question, ontology_version=snapshot.version,
             dashboard_id=request.context.dashboard_id, actor_id=request.actor.subject,
+            dashboard_context=request.dashboard_context,
         ))
         steps.append(self._step("semantic_parser", started, f"snapshot={snapshot.version}"))
         if parsed.clarification is not None:
