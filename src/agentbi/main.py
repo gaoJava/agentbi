@@ -19,13 +19,26 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentbi.analysis_planner import AnalysisStepQueryPlanner, DeterministicAnalysisPlanner
 from agentbi.auth import SESSION_COOKIE, AuthenticationError, SessionIdentity, SessionManager
 from agentbi.config import Settings
+from agentbi.execution import ExecutionRuntime, StructuredSemanticRequestBuilder
 from agentbi.models import Actor, AnalyzeRequest, AnalyzeResponse, ScreenContext
-from agentbi.orchestrator import Orchestrator
+from agentbi.ontology_service import (
+    OntologyAsset,
+    OntologyChangeSet,
+    OntologyRelation,
+    OntologyService,
+    PlanningContextBuilder,
+    PostgresOntologyRepository,
+    RuntimeBinding,
+    RuntimeBindingResolver,
+)
+from agentbi.orchestrator import GovernedAnalysisError, Orchestrator
 from agentbi.security import PolicyViolation, RateLimitExceeded, require_api_key
 from agentbi.semantic_draft import build_semantic_draft
 from agentbi.semantic_llm import SemanticDraftLlm, SemanticLlmError
+from agentbi.semantic_parser import RuleBasedSemanticParser
 from agentbi.superset import SupersetApiError, SupersetClient
 from agentbi.supersonic import (
     ConversationUnavailableError,
@@ -325,6 +338,14 @@ class DashboardSemanticBindingPayload(BaseModel):
     semantic_model_id: int = Field(gt=0)
 
 
+class OntologyMappingSuggestionPayload(BaseModel):
+    """A Dataset selected by a user for evidence-backed ontology suggestions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: int = Field(gt=0)
+
+
 class SemanticDraftPublishPayload(BaseModel):
     """Administrator-reviewed values; no SQL or credentials are accepted."""
 
@@ -340,6 +361,25 @@ class SemanticDraftPublishPayload(BaseModel):
     measures: list[dict[str, object]] = Field(min_length=1, max_length=50)
     fields: list[dict[str, str]] = Field(min_length=1, max_length=200)
     drilldown_path: list[str] = Field(default_factory=list, max_length=5)
+
+
+class OntologyChangeSetCreatePayload(BaseModel):
+    """A complete candidate release; raw SQL and connection credentials are excluded."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_version: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=2, max_length=256)
+    assets: list[OntologyAsset] = Field(min_length=1, max_length=500)
+    relations: list[OntologyRelation] = Field(default_factory=list, max_length=2_000)
+    runtime_bindings: list[RuntimeBinding] = Field(default_factory=list, max_length=100)
+
+
+class OntologyReviewPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    comment: str = Field(default="", max_length=4_000)
 
 
 class RoleCreatePayload(BaseModel):
@@ -372,6 +412,12 @@ def validated_dimensions(items: list[str]) -> list[str]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     sessions = SessionManager(settings)
+    # PostgreSQL is the authoritative ontology registry.  It is intentionally
+    # not yet part of the legacy SuperSonic query path; this only establishes
+    # the versioned source of truth for the 2.0 migration.
+    ontology_repository = PostgresOntologyRepository(sessions.repository.engine)
+    ontology_repository.initialize()
+    ontology_service = OntologyService(ontology_repository)
     supersonic = SuperSonicClient(settings, repository=sessions.repository)
     semantic_llm = SemanticDraftLlm(settings)
 
@@ -481,7 +527,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise UpstreamError("LLM semantic intent service is unavailable")
 
     supersonic.configure_llm_resolver(resolve_semantic_question_with_llm)
-    orchestrator = Orchestrator(settings, supersonic)
+    # Formal product composition: this is the sole analysis path.  The
+    # SuperSonic client is an execution adapter only; its legacy `query` API is
+    # intentionally not passed any user question by the orchestrator.
+    orchestrator = Orchestrator(
+        settings, supersonic,
+        ontology=ontology_service,
+        parser=RuleBasedSemanticParser(ontology_service),
+        context_builder=PlanningContextBuilder(ontology_service),
+        planner=DeterministicAnalysisPlanner(),
+        bridge=AnalysisStepQueryPlanner(),
+        runtime=ExecutionRuntime(
+            supersonic,
+            structured_request_builder=StructuredSemanticRequestBuilder(
+                RuntimeBindingResolver(ontology_service)
+            ),
+        ),
+    )
     superset_client = SupersetClient(
         settings.superset_base_url,
         settings.superset_username,
@@ -504,6 +566,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.superset_client = superset_client
     app.state.orchestrator = orchestrator
+    app.state.ontology_repository = ontology_repository
+    app.state.ontology_service = ontology_service
     app.state.supersonic_client = supersonic
     app.state.semantic_llm = semantic_llm
     app.add_middleware(
@@ -1153,6 +1217,160 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/admin/semantic-models")
     async def list_semantic_models(_: SessionIdentity = semantic_session) -> dict[str, object]:
         return {"models": sessions.list_semantic_models()}
+
+    @app.post("/api/v1/admin/ontology/change-sets", status_code=status.HTTP_201_CREATED)
+    async def create_ontology_change_set(
+        payload: OntologyChangeSetCreatePayload,
+        request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> OntologyChangeSet:
+        """Store a reviewable ontology proposal; it is not a published query source."""
+
+        enforce_csrf(request, identity)
+        try:
+            change_set = await app.state.ontology_repository.create_change_set(
+                target_version=payload.target_version,
+                title=payload.title,
+                created_by=identity.subject,
+                assets=tuple(payload.assets),
+                relations=tuple(payload.relations),
+                runtime_bindings=tuple(payload.runtime_bindings),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        sessions.audit(
+            "ontology_change_set_created", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"{change_set.id}:{change_set.target_version}",
+        )
+        return change_set
+
+    @app.get("/api/v1/admin/ontology/change-sets/{change_set_id}")
+    async def get_ontology_change_set(
+        change_set_id: str, _: SessionIdentity = semantic_session,
+    ) -> OntologyChangeSet:
+        change_set = await app.state.ontology_repository.get_change_set(change_set_id)
+        if change_set is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ontology change set not found")
+        return change_set
+
+    @app.get("/api/v1/admin/ontology/change-sets")
+    async def list_ontology_change_sets(
+        _: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        return {"change_sets": await app.state.ontology_repository.list_change_sets()}
+
+    @app.post("/api/v1/admin/ontology/change-sets/{change_set_id}/submit")
+    async def submit_ontology_change_set(
+        change_set_id: str, request: Request, identity: SessionIdentity = semantic_session,
+    ) -> OntologyChangeSet:
+        enforce_csrf(request, identity)
+        try:
+            change_set = await app.state.ontology_repository.submit_for_review(
+                change_set_id, actor=identity.subject
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        sessions.audit(
+            "ontology_change_set_submitted", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=change_set.id,
+        )
+        return change_set
+
+    @app.post("/api/v1/admin/ontology/change-sets/{change_set_id}/review")
+    async def review_ontology_change_set(
+        change_set_id: str, payload: OntologyReviewPayload, request: Request,
+        identity: SessionIdentity = semantic_session,
+    ) -> OntologyChangeSet:
+        enforce_csrf(request, identity)
+        try:
+            change_set = await app.state.ontology_repository.record_review(
+                change_set_id, reviewer=identity.subject,
+                approved=payload.approved, comment=payload.comment,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        sessions.audit(
+            "ontology_change_set_reviewed", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "",
+            detail=f"{change_set.id}:{change_set.state.value}",
+        )
+        return change_set
+
+    @app.post("/api/v1/admin/ontology/change-sets/{change_set_id}/publish")
+    async def publish_ontology_change_set(
+        change_set_id: str, request: Request, identity: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        enforce_csrf(request, identity)
+        try:
+            snapshot = await app.state.ontology_repository.publish_change_set(
+                change_set_id, publisher=identity.subject
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        sessions.audit(
+            "ontology_change_set_published", "success", actor_user_id=identity.subject,
+            source_ip=request.client.host if request.client else "", detail=snapshot.version,
+        )
+        return {"snapshot": snapshot}
+
+    @app.get("/api/v1/admin/ontology/publications")
+    async def get_ontology_publication(
+        version: str | None = None, _: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        snapshot = await app.state.ontology_service.published_snapshot(version)
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ontology publication not found")
+        return {"snapshot": snapshot}
+
+    @app.post("/api/v1/admin/ontology/ai-mapping-suggestions")
+    async def suggest_ontology_mapping(
+        payload: OntologyMappingSuggestionPayload,
+        _: SessionIdentity = semantic_session,
+    ) -> dict[str, object]:
+        """Suggest a draft from live Dataset metadata; never publishes or writes ontology data."""
+        try:
+            dataset = await app.state.superset_client.get_dataset(payload.dataset_id)
+        except SupersetApiError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        columns = {str(item.get("name")) for item in dataset.get("columns", []) if isinstance(item, dict)}
+        dataset_name = str(dataset.get("table_name") or dataset.get("name") or f"dataset_{payload.dataset_id}")
+        assets: list[dict[str, object]] = [{
+            "id": f"datamodel.dataset.{payload.dataset_id}", "kind": "data_model",
+            "name": f"{dataset_name} 执行模型", "aliases": [dataset_name],
+            "description": f"证据：Superset Dataset {payload.dataset_id}，字段数 {len(columns)}。",
+        }]
+        relations: list[dict[str, str]] = []
+        evidence: list[dict[str, object]] = []
+        for field, asset_id, kind, name, aliases in (
+            ("order_id", "entity.order", "entity", "订单", ["销售订单"]),
+            ("customer_id", "entity.customer", "entity", "客户", ["顾客"]),
+            ("product_id", "entity.product", "entity", "产品", ["商品"]),
+            ("order_date", "dimension.order.date", "dimension", "订单日期", ["下单日期"]),
+            ("customer_region", "dimension.customer.region", "dimension", "客户区域", ["区域"]),
+        ):
+            if field in columns:
+                assets.append({"id": asset_id, "kind": kind, "name": name, "aliases": aliases,
+                               "description": f"候选映射：{dataset_name}.{field}"})
+                evidence.append({"asset_id": asset_id, "field": field, "confidence": 0.92,
+                                 "reason": "字段名称和数据模型命名规则一致"})
+        if "net_amount" in columns:
+            confirmed = "confirmed" in dataset_name.lower()
+            assets.append({"id": "metric.order.confirmed_revenue", "kind": "metric", "name": "已确认订单收入",
+                           "aliases": ["销售额", "营收"],
+                           "description": "SUM(net_amount)" + ("；数据集已限定 confirmed 订单。" if confirmed else "；必须确认订单状态过滤。")})
+            evidence.append({"asset_id": "metric.order.confirmed_revenue", "field": "net_amount", "confidence": 0.86 if confirmed else 0.68,
+                             "reason": "金额字段可聚合；状态限定需要业务负责人确认"})
+        if "quantity" in columns:
+            assets.append({"id": "metric.order.quantity", "kind": "metric", "name": "销售数量", "aliases": ["销量", "件数"], "description": "SUM(quantity)"})
+            evidence.append({"asset_id": "metric.order.quantity", "field": "quantity", "confidence": 0.89, "reason": "数量字段可聚合"})
+        ids = {str(item["id"]) for item in assets}
+        for source, relation, target in (("entity.order", "PLACED_BY", "entity.customer"), ("entity.order", "CONTAINS", "entity.product"), ("metric.order.confirmed_revenue", "MEASURE_OF", "entity.order"), ("metric.order.quantity", "MEASURE_OF", "entity.order")):
+            if source in ids and target in ids:
+                relations.append({"source_id": source, "relation": relation, "target_id": target})
+        return {"dataset_id": payload.dataset_id, "dataset_name": dataset_name, "assets": assets,
+                "relations": relations, "evidence": evidence,
+                "notice": "这是元数据建议，不是已发布事实；请核对口径、关系和强制过滤条件。"}
 
     @app.get("/api/v1/supersonic/models")
     async def list_live_supersonic_models(
@@ -2464,6 +2682,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         try:
             result = await app.state.orchestrator.analyze(governed_request)
+        except GovernedAnalysisError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
         except RateLimitExceeded as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -2519,6 +2742,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         try:
             return await orchestrator.analyze(request)
+        except GovernedAnalysisError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
         except RateLimitExceeded as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

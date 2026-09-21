@@ -3,6 +3,8 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.DS_Store
+**/.DS_Store
 .venv/
 .env
 .idea/
@@ -12,6 +14,16 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/.agentbi-session-secret
+*.mv.db
+phase63a6-*.jar
+*.runtime.log
+*.trace.log
+docker-volumes/
+postgres-data*/
+*-postgres-data/
+*-supersonic-data/
+*-recovery-copy/
+*.recovery.*
 config/supersonic-databases.json
 delivery/offline/.env.runtime
 delivery/*.tar

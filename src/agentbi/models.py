@@ -162,6 +162,63 @@ class AnalysisReport(BaseModel):
     markdown: str
 
 
+class AnalysisProgressStatus(StrEnum):
+    PLANNED = "PLANNED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
+class AnalysisProgressStep(BaseModel):
+    id: str
+    title: str
+    description: str
+    status: AnalysisProgressStatus = AnalysisProgressStatus.PLANNED
+    progress: int = Field(default=0, ge=0, le=100)
+    user_explanation: str = ""
+    evidence_available: bool = False
+
+
+class AnalysisIssueDTO(BaseModel):
+    code: str
+    severity: Literal["info", "warning", "error"]
+    title: str
+    message: str
+    recoverable: bool = True
+    technical_code: str | None = None
+
+
+class ClarificationOptionDTO(BaseModel):
+    id: str
+    label: str
+    description: str = ""
+    value: str
+
+
+class ClarificationDTO(BaseModel):
+    clarification_id: str
+    question: str
+    options: list[ClarificationOptionDTO] = Field(default_factory=list)
+    allow_free_text: bool = True
+
+
+class AnalysisProgressDTO(BaseModel):
+    analysis_id: str
+    status: AnalysisProgressStatus
+    goal: str
+    steps: list[AnalysisProgressStep] = Field(default_factory=list)
+    partial_issues: list[AnalysisIssueDTO] = Field(default_factory=list)
+
+
+class DeveloperTraceDTO(BaseModel):
+    ontology_version: str | None = None
+    semantic_query_ir: dict[str, Any] | None = None
+    planning_context: dict[str, Any] | None = None
+    analysis_plan: dict[str, Any] | None = None
+    execution_plans: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AnalyzeResponse(BaseModel):
     request_id: str
     chat_id: int | None = Field(default=None, gt=0)
@@ -171,3 +228,6 @@ class AnalyzeResponse(BaseModel):
     report: AnalysisReport
     steps: list[AnalysisStep]
     warnings: list[str] = Field(default_factory=list)
+    analysis_progress: AnalysisProgressDTO | None = None
+    clarification: ClarificationDTO | None = None
+    developer_trace: DeveloperTraceDTO | None = None

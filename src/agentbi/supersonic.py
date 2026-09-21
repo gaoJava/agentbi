@@ -16,7 +16,9 @@ import httpx
 from agentbi.config import Settings
 from agentbi.conversation import ConversationContextManager
 from agentbi.database import IdentityRepository
+from agentbi.execution.structured import StructuredSemanticRequest, to_supersonic_semantic_sql
 from agentbi.models import AnalysisPlan, AnalyzeRequest, ScreenContext
+from agentbi.query_planner.contracts import ExecutionPlan
 
 
 class UpstreamError(RuntimeError):
@@ -37,6 +39,10 @@ class SemanticResolutionError(UpstreamError):
 
 class ResultMismatchError(UpstreamError):
     """The upstream query completed but returned fields unrelated to the question."""
+
+
+class ExecutionBindingError(UpstreamError):
+    """A governed ExecutionPlan has no configured SuperSonic runtime binding."""
 
 
 class SuperSonicClient:
@@ -72,6 +78,69 @@ class SuperSonicClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    async def execute_execution_plan(
+        self, plan: ExecutionPlan, *, time_expression: str | None
+    ) -> dict[str, Any]:
+        """Execute an already-planned request through an explicit view binding.
+
+        The legacy ``query(AnalyzeRequest)`` entry point is intentionally not
+        reused here: it reparses free-form natural language and could change a
+        Phase 5 plan.  A published runtime binding must supply a SuperSonic
+        ``viewId`` and a precompiled governed query text.  The current sales
+        demo deliberately has no such physical field binding, so it fails
+        explicitly rather than guessing from ontology asset IDs.
+        """
+
+        view_id = plan.executor_hints.get("supersonic_view_id")
+        query_text = plan.executor_hints.get("supersonic_query_text")
+        if not isinstance(view_id, int) or view_id <= 0 or not isinstance(query_text, str) or not query_text:
+            raise ExecutionBindingError(
+                "published execution mapping lacks SuperSonic viewId/query binding"
+            )
+        parse_payload = {
+            "queryText": query_text,
+            "chatId": 0,
+            "viewId": view_id,
+            "saveAnswer": True,
+            # Kept as trace metadata for a compatible runtime adapter; it does
+            # not alter the Phase 5 query semantics.
+            "executionContext": {
+                "timeExpression": time_expression,
+                "comparison": plan.query.comparison.model_dump(mode="json") if plan.query.comparison else None,
+                "predicates": [item.model_dump(mode="json") for item in plan.query.predicates],
+            },
+        }
+        parsed = await self._post("/api/chat/query/parse", parse_payload)
+        candidates = (parsed.get("selectedParses") or []) + (parsed.get("candidateParses") or [])
+        if parsed.get("state") == "FAILED" or not candidates:
+            raise UpstreamError("SuperSonic could not parse the governed execution request")
+        parse_info = candidates[0]
+        result = await self._post("/api/chat/query/execute", {
+            "queryText": query_text, "chatId": 0, "queryId": parsed.get("queryId"),
+            "parseId": parse_info.get("id"), "saveAnswer": True,
+        })
+        if result.get("queryId") is None and parsed.get("queryId") is not None:
+            result["queryId"] = parsed["queryId"]
+        return result
+
+    async def execute_structured_request(self, request: StructuredSemanticRequest) -> dict[str, Any]:
+        """Execute one published, deterministic semantic request without chat parsing."""
+
+        data = await self._post("/api/semantic/query/sql", {
+            "viewId": request.semantic_view_id,
+            "modelIds": [request.semantic_model_id],
+            "sql": to_supersonic_semantic_sql(request),
+        })
+        rows = data.get("resultList") if isinstance(data, dict) else None
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise UpstreamError("SuperSonic returned an invalid structured query result")
+        return {
+            "queryId": data.get("queryId"),
+            "queryResults": rows,
+            "querySql": data.get("sql"),
+            "structuredSemanticRequest": request.model_dump(mode="json"),
+        }
 
     def configure_llm_resolver(
         self, resolver: Callable[[str, ScreenContext], Awaitable[AnalysisPlan | str | None]] | None
@@ -587,16 +656,18 @@ class SuperSonicClient:
     def _ranking_query(cls, question: str) -> tuple[str, str, int] | None:
         """Compile an explicit governed Top-N request without invoking an LLM parser."""
 
-        match = re.search(r"按\s*(发行商|平台|游戏类型|类型)\s*统计\s*"
+        match = re.search(r"按\s*(发行商|游戏平台|平台|游戏类型|类型)\s*统计\s*"
                           r"(全球销量|北美销量|欧洲销量|日本销量|其他地区销量)\s*"
-                          r"前\s*(\d{1,3})\s*(?:名|个)?", question)
-        dimensions = {"发行商": "publisher", "平台": "platform",
+                          r"前\s*([一二两三四五六七八九十\d]{1,3})\s*(?:名|个)?", question)
+        dimensions = {"发行商": "publisher", "游戏平台": "platform", "平台": "platform",
                       "游戏类型": "genre", "类型": "genre"}
         metrics = {"全球销量": "global_sales", "北美销量": "na_sales",
                    "欧洲销量": "eu_sales", "日本销量": "jp_sales",
                    "其他地区销量": "other_sales"}
         if match:
-            return dimensions[match.group(1)], metrics[match.group(2)], min(int(match.group(3)), 100)
+            limit = cls._chinese_number(match.group(3))
+            if limit:
+                return dimensions[match.group(1)], metrics[match.group(2)], min(limit, 100)
 
         # Common business-language superlatives should not require an LLM round trip.
         # Resolve the dimension and regional metric independently so both
@@ -714,9 +785,11 @@ class SuperSonicClient:
             raise ResultMismatchError(
                 f"查询结果与本次问题不匹配，缺少字段：{'、'.join(missing)}。请检查所选语义模型后重试"
             )
-        ranking = re.search(r"前\s*(\d{1,3})\s*(?:名|个)?", question)
-        if ranking and len(rows) > int(ranking.group(1)):
-            result["queryResults"] = rows[: int(ranking.group(1))]
+        ranking = re.search(r"前\s*([一二两三四五六七八九十\d]{1,3})\s*(?:名|个)?", question)
+        if ranking:
+            limit = SuperSonicClient._chinese_number(ranking.group(1))
+            if limit and len(rows) > limit:
+                result["queryResults"] = rows[:limit]
 
     async def list_semantic_models(self) -> list[dict[str, Any]]:
         """Return a sanitized inventory of live SuperSonic semantic models."""
@@ -918,7 +991,18 @@ class SuperSonicClient:
         view = next((item for item in (views or []) if isinstance(item, dict)
                      and item.get("bizName") == view_payload["bizName"]), None)
         if not isinstance(view, dict) or not isinstance(view.get("id"), int):
-            view = await self._request_data("POST", "/api/semantic/view", payload=view_payload)
+            # SuperSonic 0.8.6 may acknowledge creation with a scalar rather
+            # than returning the View object. Re-read the governed inventory
+            # before declaring failure; otherwise a successful create is
+            # incorrectly reported as a missing query view.
+            created = await self._request_data("POST", "/api/semantic/view", payload=view_payload)
+            view = created if isinstance(created, dict) else None
+            if not isinstance(view, dict) or not isinstance(view.get("id"), int):
+                views = await self._request_data(
+                    "GET", f"/api/semantic/view/getViewList?domainId={int(payload['domainId'])}"
+                )
+                view = next((item for item in (views or []) if isinstance(item, dict)
+                             and item.get("bizName") == view_payload["bizName"]), None)
             if not isinstance(view, dict) or not isinstance(view.get("id"), int):
                 raise UpstreamError("SuperSonic did not create a query view for the semantic model")
         await self._request_data("POST", "/api/chat/conf", payload={"modelId": view["id"]})

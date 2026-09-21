@@ -1,0 +1,33 @@
+{
+  "dataset_id": 2,
+  "domain_id": 5,
+  "database_id": 3,
+  "name": "企业销售订单行分析",
+  "biz_name": "enterprise_sales_order_line_model",
+  "description": "Synthetic-only execution projection of ontology 2026.1-enterprise-sales-demo; order-line grain.",
+  "identifiers": [
+    {"name":"订单","field":"order_id","type":"primary","synonyms":["销售订单","订单号"]}
+  ],
+  "dimensions": [
+    {"name":"订单日期","field":"order_date","type":"time","synonyms":["下单日期","交易日期"]},
+    {"name":"订单状态","field":"order_status","type":"categorical","synonyms":["状态"]},
+    {"name":"客户","field":"customer_name","type":"categorical","synonyms":["客户名称"]},
+    {"name":"客户区域","field":"customer_region","type":"categorical","synonyms":["区域"]},
+    {"name":"客户分层","field":"customer_tier","type":"categorical","synonyms":["客户等级"]},
+    {"name":"产品","field":"product_name","type":"categorical","synonyms":["产品名称","商品"]},
+    {"name":"一级品类","field":"category_l1","type":"categorical","synonyms":["产品大类","品类"]},
+    {"name":"二级品类","field":"category_l2","type":"categorical","synonyms":["产品子类"]},
+    {"name":"销售组织","field":"organization_name","type":"categorical","synonyms":["销售部门","组织"]},
+    {"name":"销售组织区域","field":"organization_region","type":"categorical","synonyms":["组织区域"]},
+    {"name":"币种","field":"currency_code","type":"categorical","synonyms":["货币"]}
+  ],
+  "measures": [
+    {"name":"订单行金额","field":"net_amount","aggregation":"SUM","synonyms":["金额","销售额"]},
+    {"name":"销售数量","field":"quantity","aggregation":"SUM","synonyms":["销量","件数"]},
+    {"name":"折扣金额","field":"discount_amount","aggregation":"SUM","synonyms":["折扣"]}
+  ],
+  "fields": [
+    {"name":"order_id","type":"INTEGER"},{"name":"order_number","type":"TEXT"},{"name":"order_date","type":"DATE"},{"name":"order_status","type":"TEXT"},{"name":"customer_id","type":"INTEGER"},{"name":"customer_code","type":"TEXT"},{"name":"customer_name","type":"TEXT"},{"name":"customer_region","type":"TEXT"},{"name":"customer_tier","type":"TEXT"},{"name":"product_id","type":"INTEGER"},{"name":"sku","type":"TEXT"},{"name":"product_name","type":"TEXT"},{"name":"category_l1","type":"TEXT"},{"name":"category_l2","type":"TEXT"},{"name":"organization_id","type":"INTEGER"},{"name":"organization_name","type":"TEXT"},{"name":"organization_region","type":"TEXT"},{"name":"line_number","type":"INTEGER"},{"name":"quantity","type":"INTEGER"},{"name":"unit_price","type":"NUMERIC(12, 2)"},{"name":"discount_amount","type":"NUMERIC(12, 2)"},{"name":"net_amount","type":"NUMERIC(12, 2)"},{"name":"currency_code","type":"TEXT"}
+  ],
+  "drilldown_path": ["organization_name", "customer_region", "category_l1", "product_name"]
+}

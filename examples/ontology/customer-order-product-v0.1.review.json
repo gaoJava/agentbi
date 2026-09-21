@@ -1,0 +1,85 @@
+{
+  "template_version": "2.0-review-1",
+  "status": "review",
+  "purpose": "企业销售分析领域的首个可审核 ontology 蓝图；不可直接发布。",
+  "required_before_publish": [
+    "每个实体指定一个权威来源系统和稳定业务主键",
+    "每条关系明确基数、有效期和可执行 Join 条件",
+    "每个指标完成业务口径、聚合方式、币种和时间口径审批",
+    "每个逻辑字段映射至经过验证的物理表或受治理 Dataset"
+  ],
+  "assets": [
+    {
+      "id": "entity.customer",
+      "kind": "entity",
+      "name": "客户",
+      "aliases": ["客户", "顾客", "客户主体"],
+      "description": "购买方或签约主体；主键、主数据系统和去重规则待确认。"
+    },
+    {
+      "id": "entity.order",
+      "kind": "entity",
+      "name": "订单",
+      "aliases": ["销售订单", "交易订单"],
+      "description": "客户购买承诺；需明确订单、订单行和履约单之间的粒度。"
+    },
+    {
+      "id": "entity.product",
+      "kind": "entity",
+      "name": "产品",
+      "aliases": ["商品", "SKU", "货品"],
+      "description": "可销售产品或 SKU；产品层级和生命周期待确认。"
+    },
+    {
+      "id": "entity.organization",
+      "kind": "entity",
+      "name": "组织",
+      "aliases": ["部门", "销售组织", "事业部"],
+      "description": "承担销售、经营归属或权限边界的组织单元。"
+    },
+    {
+      "id": "metric.order.revenue",
+      "kind": "metric",
+      "name": "订单收入",
+      "aliases": ["销售额", "营业收入", "GMV"],
+      "description": "待审批：是否含税、是否扣除折扣/退款、确认时点、币种换算。"
+    },
+    {
+      "id": "dimension.order.date",
+      "kind": "dimension",
+      "name": "订单日期",
+      "aliases": ["下单日期", "交易日期"],
+      "description": "待审批：采用创建、支付、发货或确认收入日期。"
+    },
+    {
+      "id": "dimension.customer.region",
+      "kind": "dimension",
+      "name": "客户区域",
+      "aliases": ["区域", "客户所在地"],
+      "description": "待审批：区域划分层级、历史归属和空值处理。"
+    },
+    {
+      "id": "rule.revenue.recognition",
+      "kind": "rule",
+      "name": "收入确认规则",
+      "aliases": ["收入确认", "营收口径"],
+      "description": "指标适用的确认时点、状态过滤和冲销处理规则。"
+    },
+    {
+      "id": "datamodel.sales.order_line",
+      "kind": "data_model",
+      "name": "销售订单行数据模型",
+      "aliases": ["订单行事实表", "销售事实表"],
+      "description": "物理表、主键、字段映射和数据质量 SLA 待接入真实数据源后填写。"
+    }
+  ],
+  "relations": [
+    {"source_id": "entity.order", "relation": "PLACED_BY", "target_id": "entity.customer"},
+    {"source_id": "entity.order", "relation": "CONTAINS", "target_id": "entity.product"},
+    {"source_id": "entity.order", "relation": "OWNED_BY", "target_id": "entity.organization"},
+    {"source_id": "metric.order.revenue", "relation": "MEASURE_OF", "target_id": "entity.order"},
+    {"source_id": "metric.order.revenue", "relation": "GOVERNED_BY", "target_id": "rule.revenue.recognition"},
+    {"source_id": "datamodel.sales.order_line", "relation": "IMPLEMENTS", "target_id": "entity.order"},
+    {"source_id": "datamodel.sales.order_line", "relation": "IMPLEMENTS", "target_id": "metric.order.revenue"}
+  ]
+}

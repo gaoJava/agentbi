@@ -8,14 +8,20 @@ LABEL org.opencontainers.image.title="InsightPilot AgentBI" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=8 \
     PYTHONPATH=/app/src \
     AGENTBI_DATABASE_URL=sqlite:////app/data/agentbi.db
 
 WORKDIR /app
 
+# Keep downloaded wheels in BuildKit's cache.  The source tree changes frequently
+# during UI work, so disabling pip's cache here makes every small change re-fetch
+# the complete runtime dependency set.
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN python -m pip install --no-cache-dir .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install .
 
 RUN addgroup --system --gid 10001 agentbi \
     && adduser --system --uid 10001 --ingroup agentbi --home /app agentbi \
