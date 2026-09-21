@@ -10,6 +10,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentbi.dashboard_context import DashboardContext
 from agentbi.semantic_query_ir import SemanticQueryIR
 
 
@@ -21,6 +22,7 @@ class ParseRequest(BaseModel):
     dashboard_id: str | None = Field(default=None, max_length=128)
     actor_id: str | None = Field(default=None, max_length=128)
     context: SemanticParseContext | None = None
+    dashboard_context: DashboardContext | None = None
 
 
 class SemanticParseContext(BaseModel):

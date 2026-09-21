@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 _CONTEXT_FIELDS = {
@@ -12,10 +13,14 @@ _CONTEXT_FIELDS = {
     "time_range",
     "filters",
     "selected",
+    "focused_metric",
 }
 _FILTER_FIELDS = {"field", "operator", "value"}
 _SELECTED_FIELDS = {"label", "value", "dimension"}
 _OPERATORS = {"EQ", "IN", "GTE", "LTE"}
+_KNOWN_FILTER_FIELDS = {"region": "region", "区域": "region", "地区": "region", "客户区域": "region"}
+_KNOWN_METRICS = {"revenue": "销售额", "销售额": "销售额", "营收": "销售额", "收入": "销售额"}
+_TIME_RANGE = re.compile(r"^(?:最近\s*\d+\s*(?:天|周|个月?)|\d{4}年(?:\d{1,2}月)?|今年|昨天|本周)$")
 
 
 def _bounded_text(value: Any, name: str, maximum: int, *, required: bool = True) -> str | None:
@@ -100,4 +105,55 @@ def sanitize_context(raw: Any) -> dict[str, Any]:
         "time_range": time_range,
         "filters": clean_filters,
         "selected": clean_selected,
+        "focused_metric": _bounded_text(raw.get("focused_metric"), "focused_metric", 256, required=False),
     }
+
+
+class SupersetContextAdapter:
+    """Convert a browser snapshot into a small, verified host-context hint.
+
+    It deliberately has no role, permission, SQL, metric-calculation, or
+    dataset-schema behavior.  Unknown fields and unmapped filters fail closed.
+    """
+
+    def adapt(self, raw: Any) -> dict[str, Any]:
+        context = sanitize_context(raw)
+        if context["time_range"] and not _TIME_RANGE.fullmatch(context["time_range"]):
+            raise ValueError("time_range is not supported by the dashboard context adapter")
+        filters: list[dict[str, Any]] = []
+        for item in context["filters"]:
+            field = _KNOWN_FILTER_FIELDS.get(item["field"].casefold())
+            if field is None or item["operator"] not in {"EQ", "IN"}:
+                raise ValueError("filter is not supported by the dashboard context adapter")
+            filters.append({"field": field, "value": item["value"]})
+
+        focused_metric = context["focused_metric"]
+        if focused_metric is not None:
+            focused_metric = _KNOWN_METRICS.get(focused_metric.casefold())
+            if focused_metric is None:
+                raise ValueError("focused_metric is not supported by the dashboard context adapter")
+
+        verified_fields = ["dashboard_id"]
+        if context["time_range"]:
+            verified_fields.append("time_range")
+        if filters:
+            verified_fields.append("filters")
+        if focused_metric:
+            verified_fields.append("focused_metric")
+        if context["chart_id"]:
+            verified_fields.append("selected_chart_id")
+        if context["dataset_id"]:
+            verified_fields.append("selected_dataset_id")
+        return {
+            "dashboard_id": context["dashboard_id"],
+            "time_range": context["time_range"] or None,
+            "filters": filters,
+            "focused_metric": focused_metric,
+            "selected_chart_id": context["chart_id"],
+            "selected_dataset_id": context["dataset_id"],
+            "provenance": {
+                "source": "HOST_ADAPTER",
+                "provider": "superset_extension",
+                "verified_fields": verified_fields,
+            },
+        }

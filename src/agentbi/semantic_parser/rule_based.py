@@ -28,7 +28,7 @@ from agentbi.semantic_query_ir import (
     ValueSource,
 )
 
-from .contracts import Clarification, ParseRequest, ParseResult
+from .contracts import Clarification, ParseRequest, ParseResult, SemanticParseContext
 
 _DEFAULT_METRICS = ("销售额", "营收", "收入", "利润")
 _DEFAULT_DIMENSIONS = ("渠道", "区域", "地区", "产品", "客户")
@@ -47,20 +47,24 @@ class RuleBasedSemanticParser:
         self._ontology_service = ontology_service
 
     async def parse(self, request: ParseRequest) -> ParseResult:
+        # Only this small projection crosses from the host contract into the
+        # parser. Unknown host fields never become semantic candidates.
+        context = request.context or _dashboard_parse_context(request.dashboard_context)
+        context_time_scope = _time_scope(context.time_range) if context and context.time_range else None
         assets = await self._published_assets(request.ontology_version)
         target, consumed_metric_spans = self._metric_target(request.question, assets)
-        if target is None and request.context and request.context.metric:
-            context_target, _ = self._metric_target(request.context.metric, assets)
-            target = (context_target or AnalysisTarget(raw_text=request.context.metric, kind=AnalysisTargetKind.METRIC)).model_copy(update={"source":ValueSource.WORKBENCH_CONTEXT})
+        if target is None and context and context.metric:
+            context_target, _ = self._metric_target(context.metric, assets)
+            target = (context_target or AnalysisTarget(raw_text=context.metric, kind=AnalysisTargetKind.METRIC)).model_copy(update={"source":ValueSource.DASHBOARD_CONTEXT})
         if target is None:
             return ParseResult(
                 clarification=Clarification(reason="未识别到要分析的指标"),
                 confidence=0.0,
             )
-        if _requires_time_clarification(request.question) and _time_scope(request.question) is None:
+        if _requires_time_clarification(request.question) and _time_scope(request.question) is None and context_time_scope is None:
             return ParseResult(clarification=Clarification(reason="请补充分析时间范围"), confidence=0.0)
 
-        scope = self._region_scope(request.question, assets) or self._context_region(request.context, assets)
+        scope = self._region_scope(request.question, assets) or self._context_region(context, assets)
         breakdown_hints = self._breakdown_hints(request.question, assets, scope, consumed_metric_spans)
         ranking = _ranking(request.question)
         query = SemanticQueryIR(
@@ -69,7 +73,7 @@ class RuleBasedSemanticParser:
             intent=AnalysisIntent.BREAKDOWN if ranking is not None and breakdown_hints else _intent(request.question),
             targets=[target],
             scopes=[scope] if scope is not None else [],
-            time_scope=_time_scope(request.question) or ((_time_scope(request.context.time_range).model_copy(update={"source":ValueSource.WORKBENCH_CONTEXT})) if request.context and request.context.time_range and _time_scope(request.context.time_range) else None),
+            time_scope=_time_scope(request.question) or (context_time_scope.model_copy(update={"source":ValueSource.DASHBOARD_CONTEXT}) if context_time_scope else None),
             signal=_signal(request.question),
             comparison=_comparison(request.question),
             breakdown_hints=breakdown_hints,
@@ -84,9 +88,8 @@ class RuleBasedSemanticParser:
         if context is None: return None
         for field, value in context.filters:
             if field.casefold() in {"region", "区域", "地区", "客户区域"}:
-                return SemanticScope(dimension=_target_from_candidates("区域",AnalysisTargetKind.DIMENSION,_region_dimension_candidates(assets)),value=value,source=ValueSource.WORKBENCH_CONTEXT)
+                return SemanticScope(dimension=_target_from_candidates("区域",AnalysisTargetKind.DIMENSION,_region_dimension_candidates(assets)),value=value,source=ValueSource.DASHBOARD_CONTEXT)
         return None
-
     async def _published_assets(self, version: str) -> tuple[OntologyAsset, ...]:
         if self._ontology_service is None:
             return ()
@@ -135,6 +138,23 @@ class RuleBasedSemanticParser:
                         and any(not any(start < occupied_end and occupied_start < end for occupied_start, occupied_end in consumed_spans) for start, end in spans)):
                     hints.append(AnalysisTarget(raw_text=raw_text, kind=AnalysisTargetKind.DIMENSION))
         return hints
+
+
+def _dashboard_parse_context(context) -> SemanticParseContext | None:
+    if context is None:
+        return None
+    # Filter names are intentionally not generalized into a predicate DSL. The
+    # parser recognizes only its established region aliases and ignores the
+    # rest until an ontology-backed mapping contract exists.
+    return SemanticParseContext(
+        metric=context.focused_metric,
+        filters=tuple(
+            (item.field, str(item.value))
+            for item in context.filters
+            if isinstance(item.value, (str, int, float))
+        ),
+        time_range=context.time_range,
+    )
 
 
 def _matching_assets(

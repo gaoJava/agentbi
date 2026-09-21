@@ -65,7 +65,13 @@ class ResolutionStatus(StrEnum):
     RESOLVED = "RESOLVED"
     UNRESOLVED = "UNRESOLVED"
     AMBIGUOUS = "AMBIGUOUS"
-class ValueSource(StrEnum): USER_EXPLICIT="USER_EXPLICIT"; WORKBENCH_CONTEXT="WORKBENCH_CONTEXT"; PLANNER_DEFAULT="PLANNER_DEFAULT"
+class ValueSource(StrEnum):
+    USER_EXPLICIT = "USER_EXPLICIT"
+    DASHBOARD_CONTEXT = "DASHBOARD_CONTEXT"
+    # Retained for serialized historical workbench IR. New dashboard hints use
+    # DASHBOARD_CONTEXT so their precedence is explicit.
+    WORKBENCH_CONTEXT = "WORKBENCH_CONTEXT"
+    PLANNER_DEFAULT = "PLANNER_DEFAULT"
 
 
 class TimeScopeKind(StrEnum):

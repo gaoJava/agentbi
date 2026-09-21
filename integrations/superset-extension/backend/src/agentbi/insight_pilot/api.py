@@ -18,7 +18,7 @@ from flask_login import current_user
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
-from .validation import sanitize_context
+from .validation import SupersetContextAdapter, sanitize_context
 
 _MAX_UPSTREAM_RESPONSE_BYTES = 2_000_000
 _CLIENT_REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
@@ -60,13 +60,17 @@ class InsightPilotAPI(RestApi):
 
         try:
             context = sanitize_context(body.get("context"))
+            dashboard_context = SupersetContextAdapter().adapt(body.get("context"))
         except (TypeError, ValueError) as exc:
             return self.response_400(message=str(exc))
 
         roles = [str(role.name)[:128] for role in list(getattr(current_user, "roles", []))[:50]]
         payload = {
             "question": question,
-            "context": context,
+            # ScreenContext remains the legacy evidence/display envelope.
+            # Dashboard-only hints are sent separately after host adaptation.
+            "context": {key: value for key, value in context.items() if key != "focused_metric"},
+            "dashboard_context": dashboard_context,
             "actor": {
                 "subject": str(current_user.get_id()),
                 "display_name": str(getattr(current_user, "first_name", ""))[:128] or None,
